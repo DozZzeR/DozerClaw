@@ -46,5 +46,44 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
       attributes_json text not null,
       created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+
+    create table if not exists actors (
+      id text primary key,
+      display_name text not null,
+      role text not null check (role in ('owner', 'family')),
+      status text not null check (status in ('pending', 'active', 'blocked')),
+      created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    create table if not exists actor_identities (
+      id text primary key,
+      actor_id text not null references actors(id),
+      provider text not null,
+      provider_user_id text not null,
+      status text not null check (status in ('pending', 'active', 'blocked')),
+      created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      unique (provider, provider_user_id)
+    );
+
+    create table if not exists messenger_chats (
+      id text primary key,
+      provider text not null,
+      provider_chat_id text not null,
+      kind text not null check (
+        kind in ('owner_private', 'family_private', 'family_group')
+      ),
+      approved integer not null check (approved in (0, 1)),
+      created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      unique (provider, provider_chat_id)
+    );
+
+    create table if not exists admin_sessions (
+      id text primary key,
+      actor_id text not null references actors(id),
+      chat_id text not null references messenger_chats(id),
+      last_activity_at text not null,
+      expires_at text not null,
+      created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
   `);
 }
