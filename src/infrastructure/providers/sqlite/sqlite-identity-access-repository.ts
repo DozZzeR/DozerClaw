@@ -100,6 +100,11 @@ export class SqliteIdentityAccessRepository
             @lastActivityAt,
             @expiresAt
           )
+          on conflict(id) do update set
+            actor_id = excluded.actor_id,
+            chat_id = excluded.chat_id,
+            last_activity_at = excluded.last_activity_at,
+            expires_at = excluded.expires_at
         `
       )
       .run({
@@ -111,6 +116,36 @@ export class SqliteIdentityAccessRepository
       });
 
     return session;
+  }
+
+  async updateActorStatus(
+    actorId: string,
+    status: ActorStatus
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          update actors
+          set status = @status
+          where id = @actorId
+        `
+      )
+      .run({ actorId, status });
+  }
+
+  async updateActorIdentityStatus(
+    identityId: string,
+    status: ActorStatus
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          update actor_identities
+          set status = @status
+          where id = @identityId
+        `
+      )
+      .run({ identityId, status });
   }
 
   async findActorByIdentity(

@@ -1,5 +1,5 @@
 import type { AdminSession } from "../core/domain/identity/admin-session.js";
-import type { Actor } from "../core/domain/identity/actor.js";
+import type { Actor, ActorStatus } from "../core/domain/identity/actor.js";
 import type { ActorIdentity } from "../core/domain/identity/actor-identity.js";
 import type { ChatContext } from "../core/domain/identity/chat-context.js";
 import type { MessengerChat } from "../core/domain/identity/messenger-chat.js";
@@ -9,6 +9,11 @@ export interface IdentityAccessRepositoryPort {
   createActorIdentity(identity: ActorIdentity): Promise<ActorIdentity>;
   createMessengerChat(chat: MessengerChat): Promise<MessengerChat>;
   saveAdminSession(session: AdminSession): Promise<AdminSession>;
+  updateActorStatus(actorId: string, status: ActorStatus): Promise<void>;
+  updateActorIdentityStatus(
+    identityId: string,
+    status: ActorStatus
+  ): Promise<void>;
   findActorByIdentity(
     provider: string,
     providerUserId: string

@@ -56,6 +56,30 @@ describe("SqliteIdentityAccessRepository", () => {
       repository.findAdminSession("admin-session-1")
     ).resolves.toEqual(adminSession);
 
+    await repository.updateActorStatus(actor.id, "blocked");
+    await repository.updateActorIdentityStatus("identity-owner", "blocked");
+
+    await expect(
+      repository.findActorByIdentity("telegram", "tg-user-1")
+    ).resolves.toEqual({
+      ...actor,
+      status: "blocked"
+    });
+
+    await repository.saveAdminSession({
+      ...adminSession,
+      lastActivityAt: new Date("2026-07-02T20:03:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:08:00.000Z")
+    });
+
+    await expect(
+      repository.findAdminSession("admin-session-1")
+    ).resolves.toEqual({
+      ...adminSession,
+      lastActivityAt: new Date("2026-07-02T20:03:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:08:00.000Z")
+    });
+
     database.close();
   });
 });
