@@ -86,13 +86,92 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
       created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 
+  `);
+
+  ensureMonitoredServicesTable(database);
+}
+
+function ensureMonitoredServicesTable(database: SqliteDatabase): void {
+  database.exec(`
     create table if not exists monitored_services (
       id text primary key,
       name text not null unique,
-      health_source_kind text not null check (health_source_kind in ('manual')),
+      health_source_kind text not null check (
+        health_source_kind in ('manual', 'local_path')
+      ),
+      health_source_config_json text,
       enabled integer not null check (enabled in (0, 1)),
       created_at text not null,
       updated_at text not null
     );
   `);
+
+  ensureColumn(
+    database,
+    "monitored_services",
+    "health_source_config_json",
+    "health_source_config_json text"
+  );
+
+  const table = database
+    .prepare(
+      "select sql from sqlite_master where type = 'table' and name = 'monitored_services'"
+    )
+    .get() as { readonly sql: string } | undefined;
+
+  if (table?.sql.includes("'local_path'")) {
+    return;
+  }
+
+  database.exec(`
+    alter table monitored_services rename to monitored_services_old;
+
+    create table monitored_services (
+      id text primary key,
+      name text not null unique,
+      health_source_kind text not null check (
+        health_source_kind in ('manual', 'local_path')
+      ),
+      health_source_config_json text,
+      enabled integer not null check (enabled in (0, 1)),
+      created_at text not null,
+      updated_at text not null
+    );
+
+    insert into monitored_services (
+      id,
+      name,
+      health_source_kind,
+      health_source_config_json,
+      enabled,
+      created_at,
+      updated_at
+    )
+    select
+      id,
+      name,
+      health_source_kind,
+      health_source_config_json,
+      enabled,
+      created_at,
+      updated_at
+    from monitored_services_old;
+
+    drop table monitored_services_old;
+  `);
+}
+
+function ensureColumn(
+  database: SqliteDatabase,
+  tableName: string,
+  columnName: string,
+  definition: string
+): void {
+  const columns = database
+    .prepare(`pragma table_info(${tableName})`)
+    .all() as readonly { readonly name: string }[];
+
+  if (!columns.some((column) => column.name === columnName)) {
+    database.exec(`alter table ${tableName} add column ${definition}`);
+  }
 }

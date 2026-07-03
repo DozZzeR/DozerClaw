@@ -120,4 +120,59 @@ describe("buildApp", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("checks registered local path services in normalized health message", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const servicePath = join(directory, "service-dir");
+
+    try {
+      const database = createSqliteDatabase({ path: databasePath });
+      const serviceRegistry = new SqliteServiceRegistryRepository(database);
+      await serviceRegistry.saveMonitoredService({
+        id: "service-local",
+        name: "local-service",
+        healthSourceKind: "local_path",
+        healthSourceConfig: {
+          path: servicePath
+        },
+        enabled: true,
+        createdAt: new Date("2026-07-03T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-03T10:00:00.000Z")
+      });
+      database.close();
+
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        }
+      });
+      const bootstrap = await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-1",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "health",
+        receivedAt: new Date("2026-07-03T10:00:00.000Z"),
+        now: new Date("2026-07-03T10:00:00.000Z")
+      });
+
+      expect(reply.chatId).toBe(bootstrap.chat.id);
+      expect(reply.text).toContain(
+        `- local-service: failed (path missing: ${servicePath})`
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
