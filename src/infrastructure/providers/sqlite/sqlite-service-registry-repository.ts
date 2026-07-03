@@ -43,6 +43,12 @@ export class SqliteServiceRegistryRepository
             @createdAt,
             @updatedAt
           )
+          on conflict(id) do update set
+            name = excluded.name,
+            health_source_kind = excluded.health_source_kind,
+            health_source_config_json = excluded.health_source_config_json,
+            enabled = excluded.enabled,
+            updated_at = excluded.updated_at
         `
       )
       .run({

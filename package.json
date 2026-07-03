@@ -9,6 +9,7 @@
     "test": "vitest run",
     "dev": "tsx src/main.ts",
     "dev:health": "tsx src/entrypoints/cli/dev-health.ts",
+    "dev:register-services": "tsx src/entrypoints/cli/dev-register-services.ts",
     "start": "node dist/main.js"
   },
   "engines": {

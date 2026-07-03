@@ -162,6 +162,49 @@ describe("SqliteServiceRegistryRepository", () => {
     database.close();
   });
 
+  it("updates an existing monitored service with the same id", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteServiceRegistryRepository(database);
+
+    await repository.saveMonitoredService({
+      id: "service-taskframe",
+      name: "taskframe",
+      healthSourceKind: "http_health",
+      healthSourceConfig: {
+        url: "http://127.0.0.1:3000/health"
+      },
+      enabled: true,
+      createdAt: new Date("2026-07-03T09:00:00.000Z"),
+      updatedAt: new Date("2026-07-03T09:00:00.000Z")
+    });
+    await repository.saveMonitoredService({
+      id: "service-taskframe",
+      name: "taskframe",
+      healthSourceKind: "http_health",
+      healthSourceConfig: {
+        url: "http://127.0.0.1:3001/health",
+        timeoutMs: 2000
+      },
+      enabled: true,
+      createdAt: new Date("2026-07-03T09:00:00.000Z"),
+      updatedAt: new Date("2026-07-03T09:01:00.000Z")
+    });
+
+    await expect(repository.listEnabledMonitoredServices()).resolves.toEqual([
+      expect.objectContaining({
+        id: "service-taskframe",
+        name: "taskframe",
+        healthSourceConfig: {
+          url: "http://127.0.0.1:3001/health",
+          timeoutMs: 2000
+        },
+        updatedAt: new Date("2026-07-03T09:01:00.000Z")
+      })
+    ]);
+
+    database.close();
+  });
+
   it("migrates existing monitored service tables to local path source kind", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");
