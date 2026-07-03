@@ -97,7 +97,7 @@ function ensureMonitoredServicesTable(database: SqliteDatabase): void {
       id text primary key,
       name text not null unique,
       health_source_kind text not null check (
-        health_source_kind in ('manual', 'local_path')
+        health_source_kind in ('manual', 'local_path', 'http_health')
       ),
       health_source_config_json text,
       enabled integer not null check (enabled in (0, 1)),
@@ -119,7 +119,7 @@ function ensureMonitoredServicesTable(database: SqliteDatabase): void {
     )
     .get() as { readonly sql: string } | undefined;
 
-  if (table?.sql.includes("'local_path'")) {
+  if (table?.sql.includes("'http_health'")) {
     return;
   }
 
@@ -130,7 +130,7 @@ function ensureMonitoredServicesTable(database: SqliteDatabase): void {
       id text primary key,
       name text not null unique,
       health_source_kind text not null check (
-        health_source_kind in ('manual', 'local_path')
+        health_source_kind in ('manual', 'local_path', 'http_health')
       ),
       health_source_config_json text,
       enabled integer not null check (enabled in (0, 1)),

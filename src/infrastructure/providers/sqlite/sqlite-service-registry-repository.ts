@@ -1,4 +1,8 @@
-import type { MonitoredService } from "../../../core/domain/service-health/monitored-service.js";
+import type {
+  HttpHealthServiceHealthSourceConfig,
+  LocalPathServiceHealthSourceConfig,
+  MonitoredService
+} from "../../../core/domain/service-health/monitored-service.js";
 import type { ServiceRegistryRepositoryPort } from "../../../ports/service-registry-repository-port.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
@@ -78,17 +82,60 @@ export class SqliteServiceRegistryRepository
 }
 
 function toMonitoredService(row: MonitoredServiceRow): MonitoredService {
-  const healthSourceConfig = row.health_source_config_json
-    ? (JSON.parse(row.health_source_config_json) as MonitoredService["healthSourceConfig"])
-    : undefined;
-
-  return {
+  const base = {
     id: row.id,
     name: row.name,
-    healthSourceKind: row.health_source_kind,
-    ...(healthSourceConfig ? { healthSourceConfig } : {}),
     enabled: row.enabled === 1,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)
   };
+
+  if (row.health_source_kind === "local_path") {
+    return {
+      ...base,
+      healthSourceKind: "local_path",
+      healthSourceConfig: parseLocalPathConfig(row)
+    };
+  }
+
+  if (row.health_source_kind === "http_health") {
+    return {
+      ...base,
+      healthSourceKind: "http_health",
+      healthSourceConfig: parseHttpHealthConfig(row)
+    };
+  }
+
+  return {
+    ...base,
+    healthSourceKind: "manual"
+  };
+}
+
+function parseLocalPathConfig(
+  row: MonitoredServiceRow
+): LocalPathServiceHealthSourceConfig {
+  if (!row.health_source_config_json) {
+    return {
+      path: ""
+    };
+  }
+
+  return JSON.parse(
+    row.health_source_config_json
+  ) as LocalPathServiceHealthSourceConfig;
+}
+
+function parseHttpHealthConfig(
+  row: MonitoredServiceRow
+): HttpHealthServiceHealthSourceConfig {
+  if (!row.health_source_config_json) {
+    return {
+      url: ""
+    };
+  }
+
+  return JSON.parse(
+    row.health_source_config_json
+  ) as HttpHealthServiceHealthSourceConfig;
 }
