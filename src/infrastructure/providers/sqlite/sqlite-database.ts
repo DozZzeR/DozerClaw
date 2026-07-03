@@ -89,6 +89,22 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   `);
 
   ensureMonitoredServicesTable(database);
+  ensureFileInboxRecordsTable(database);
+}
+
+function ensureFileInboxRecordsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists file_inbox_records (
+      id text primary key,
+      original_file_name text not null,
+      mime_type text,
+      size_bytes integer not null,
+      storage_id text not null,
+      storage_path text not null,
+      received_at text not null,
+      created_at text not null
+    );
+  `);
 }
 
 function ensureMonitoredServicesTable(database: SqliteDatabase): void {
