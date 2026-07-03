@@ -86,7 +86,8 @@ const acceptedContext: AcceptedMessageContext = {
     approved: true
   },
   action: "owner_read",
-  text: "health"
+  text: "health",
+  attachments: []
 };
 
 function baseInput(
@@ -100,6 +101,7 @@ function baseInput(
     chatKind: "owner_private",
     displayName: "Owner",
     text: "health",
+    attachments: [],
     receivedAt: new Date("2026-07-02T20:00:00.000Z"),
     now: new Date("2026-07-02T20:00:00.000Z"),
     ...overrides

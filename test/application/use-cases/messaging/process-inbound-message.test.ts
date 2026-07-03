@@ -49,7 +49,54 @@ describe("ProcessInboundMessageUseCase", () => {
         actor: activeFamily,
         chat: approvedFamilyChat,
         action: "family_read",
-        text: "hello"
+        text: "hello",
+        attachments: []
+      }
+    });
+  });
+
+  it("preserves attachments in accepted context", async () => {
+    const useCase = new ProcessInboundMessageUseCase({
+      identityContextResolver: new FakeIdentityContextResolver({
+        actor: activeFamily,
+        chat: approvedFamilyChat,
+        createdActor: false,
+        createdChat: false
+      }),
+      identityRepository: new FakeIdentityRepository()
+    });
+
+    await expect(
+      useCase.execute(
+        baseRequest({
+          action: "family_read",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "report.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 123
+            }
+          ]
+        })
+      )
+    ).resolves.toEqual({
+      status: "accepted",
+      context: {
+        actor: activeFamily,
+        chat: approvedFamilyChat,
+        action: "family_read",
+        text: "/restart service",
+        attachments: [
+          {
+            id: "attachment-1",
+            providerFileId: "telegram-file-1",
+            fileName: "report.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 123
+          }
+        ]
       }
     });
   });
@@ -111,6 +158,7 @@ describe("ProcessInboundMessageUseCase", () => {
         chat: ownerPrivateChat,
         action: "admin_write",
         text: "/restart service",
+        attachments: [],
         adminSession: repository.session
       }
     });
@@ -164,6 +212,7 @@ function baseRequest(
     chatKind: "family_private",
     displayName: "Family",
     text: "/restart service",
+    attachments: [],
     action: "family_read",
     receivedAt: new Date("2026-07-02T20:00:00.000Z"),
     now: new Date("2026-07-02T20:00:00.000Z"),

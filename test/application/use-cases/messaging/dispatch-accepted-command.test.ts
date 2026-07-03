@@ -65,7 +65,8 @@ const acceptedContext: AcceptedMessageContext = {
     approved: true
   },
   action: "owner_read",
-  text: "health"
+  text: "health",
+  attachments: []
 };
 
 function route(kind: CommandRoute["kind"]): CommandRoute {

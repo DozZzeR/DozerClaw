@@ -9,6 +9,7 @@ export interface InboundMessage {
 
 export interface MessageAttachment {
   readonly id: string;
+  readonly providerFileId?: string;
   readonly fileName?: string;
   readonly mimeType?: string;
   readonly sizeBytes?: number;

@@ -3,6 +3,7 @@ import type { AccessAction, AccessDenialReason } from "../../../core/domain/iden
 import { evaluateAccess } from "../../../core/domain/identity/access-policy.js";
 import type { Actor } from "../../../core/domain/identity/actor.js";
 import type { ChatContext, ChatContextKind } from "../../../core/domain/identity/chat-context.js";
+import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type {
   ResolveIdentityContextInput,
   ResolveIdentityContextResult
@@ -17,6 +18,7 @@ export interface ProcessInboundMessageInput {
   readonly chatKind: ChatContextKind;
   readonly displayName: string;
   readonly text: string;
+  readonly attachments: readonly MessageAttachment[];
   readonly action: AccessAction;
   readonly receivedAt: Date;
   readonly now: Date;
@@ -48,6 +50,7 @@ export interface AcceptedMessageContext {
   readonly chat: ChatContext;
   readonly action: AccessAction;
   readonly text: string;
+  readonly attachments: readonly MessageAttachment[];
   readonly adminSession?: AdminSession;
 }
 
@@ -122,6 +125,7 @@ export class ProcessInboundMessageUseCase {
         chat: identityContext.chat,
         action: input.action,
         text: input.text,
+        attachments: input.attachments,
         ...(adminSession ? { adminSession } : {})
       }
     };

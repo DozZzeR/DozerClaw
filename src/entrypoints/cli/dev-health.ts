@@ -40,6 +40,7 @@ export async function runDevHealthHarness(
     chatKind: "owner_private",
     displayName,
     text,
+    attachments: [],
     receivedAt: now,
     now
   });

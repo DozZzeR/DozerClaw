@@ -57,6 +57,7 @@ describe("buildApp", () => {
       chatKind: "owner_private",
       displayName: "Owner",
       text: "health",
+      attachments: [],
       receivedAt: new Date("2026-07-03T05:00:00.000Z"),
       now: new Date("2026-07-03T05:00:00.000Z")
     });
@@ -107,6 +108,7 @@ describe("buildApp", () => {
         chatKind: "owner_private",
         displayName: "Owner",
         text: "health",
+        attachments: [],
         receivedAt: new Date("2026-07-03T10:00:00.000Z"),
         now: new Date("2026-07-03T10:00:00.000Z")
       });
@@ -163,6 +165,7 @@ describe("buildApp", () => {
         chatKind: "owner_private",
         displayName: "Owner",
         text: "health",
+        attachments: [],
         receivedAt: new Date("2026-07-03T10:00:00.000Z"),
         now: new Date("2026-07-03T10:00:00.000Z")
       });
