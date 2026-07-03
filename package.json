@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dev": "tsx src/main.ts",
+    "dev:health": "tsx src/entrypoints/cli/dev-health.ts",
     "start": "node dist/main.js"
   },
   "engines": {
