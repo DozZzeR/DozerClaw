@@ -1,12 +1,18 @@
 import type { HostHealthSnapshot } from "../../../ports/server-monitor-port.js";
+import type { ServiceHealthSnapshot } from "../../../ports/service-monitor-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 
 export interface HostHealthSource {
   execute(): Promise<HostHealthSnapshot>;
 }
 
+export interface ServiceHealthSource {
+  execute(): Promise<readonly ServiceHealthSnapshot[]>;
+}
+
 export interface HandleSystemHealthCommandDependencies {
   readonly getHostHealth: HostHealthSource;
+  readonly getServiceHealth: ServiceHealthSource;
 }
 
 export interface HandleSystemHealthCommandInput {
@@ -19,32 +25,54 @@ export class HandleSystemHealthCommandUseCase {
   ) {}
 
   async execute(input: HandleSystemHealthCommandInput): Promise<OutboundReply> {
-    const snapshot = await this.dependencies.getHostHealth.execute();
+    const [hostSnapshot, serviceSnapshots] = await Promise.all([
+      this.dependencies.getHostHealth.execute(),
+      this.dependencies.getServiceHealth.execute()
+    ]);
 
     return {
       chatId: input.chatId,
-      text: formatHostHealth(snapshot)
+      text: formatSystemHealth(hostSnapshot, serviceSnapshots)
     };
   }
 }
 
-function formatHostHealth(snapshot: HostHealthSnapshot): string {
+function formatSystemHealth(
+  hostSnapshot: HostHealthSnapshot,
+  serviceSnapshots: readonly ServiceHealthSnapshot[]
+): string {
   const freePercent =
-    snapshot.memory.totalBytes > 0
-      ? (snapshot.memory.freeBytes / snapshot.memory.totalBytes) * 100
+    hostSnapshot.memory.totalBytes > 0
+      ? (hostSnapshot.memory.freeBytes / hostSnapshot.memory.totalBytes) * 100
       : 0;
 
   return [
     "System health:",
-    `Uptime: ${formatDuration(snapshot.uptimeSeconds)}`,
-    `Load average: ${snapshot.loadAverage
+    `Uptime: ${formatDuration(hostSnapshot.uptimeSeconds)}`,
+    `Load average: ${hostSnapshot.loadAverage
       .map((value) => value.toFixed(2))
       .join(", ")}`,
-    `Memory: ${formatBytes(snapshot.memory.freeBytes)} free / ${formatBytes(
-      snapshot.memory.totalBytes
+    `Memory: ${formatBytes(hostSnapshot.memory.freeBytes)} free / ${formatBytes(
+      hostSnapshot.memory.totalBytes
     )} total (${freePercent.toFixed(1)}% free)`,
-    `Checked at: ${snapshot.checkedAt.toISOString()}`
+    "Services:",
+    ...formatServiceHealth(serviceSnapshots),
+    `Checked at: ${hostSnapshot.checkedAt.toISOString()}`
   ].join("\n");
+}
+
+function formatServiceHealth(
+  snapshots: readonly ServiceHealthSnapshot[]
+): readonly string[] {
+  if (snapshots.length === 0) {
+    return ["- none configured"];
+  }
+
+  return snapshots.map((snapshot) => {
+    const detail = snapshot.detail ? ` (${snapshot.detail})` : "";
+
+    return `- ${snapshot.name}: ${snapshot.status}${detail} at ${snapshot.checkedAt.toISOString()}`;
+  });
 }
 
 function formatDuration(totalSeconds: number): string {

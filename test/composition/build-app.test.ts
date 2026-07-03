@@ -59,5 +59,7 @@ describe("buildApp", () => {
     expect(reply.text).toContain("System health:");
     expect(reply.text).toContain("Uptime:");
     expect(reply.text).toContain("Memory:");
+    expect(reply.text).toContain("Services:");
+    expect(reply.text).toContain("- none configured");
   });
 });
