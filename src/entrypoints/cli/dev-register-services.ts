@@ -54,7 +54,7 @@ function buildDefaultServices(
       healthSourceConfig: {
         url:
           env.DOZERCLAW_TASKFRAME_HEALTH_URL ??
-          "http://127.0.0.1:3000/health",
+          "http://127.0.0.1:4120/health",
         ...(timeoutMs ? { timeoutMs } : {})
       },
       enabled: true,

@@ -24,7 +24,7 @@ describe("runDevRegisterServices", () => {
 
     expect(exitCode).toBe(0);
     expect(lines).toEqual([
-      "registered service: taskframe -> http://127.0.0.1:3000/health",
+      "registered service: taskframe -> http://127.0.0.1:4120/health",
       "registered service: mempalace-http -> http://127.0.0.1:4118/healthz"
     ]);
   });
