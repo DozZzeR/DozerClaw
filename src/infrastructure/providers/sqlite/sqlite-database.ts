@@ -85,5 +85,14 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
       expires_at text not null,
       created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+
+    create table if not exists monitored_services (
+      id text primary key,
+      name text not null unique,
+      health_source_kind text not null check (health_source_kind in ('manual')),
+      enabled integer not null check (enabled in (0, 1)),
+      created_at text not null,
+      updated_at text not null
+    );
   `);
 }
