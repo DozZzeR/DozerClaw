@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createAdminSession } from "../../../src/core/domain/identity/admin-session.js";
+import { BootstrapOwnerIdentityUseCase } from "../../../src/application/use-cases/identity/bootstrap-owner-identity.js";
 import { createSqliteDatabase } from "../../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteIdentityAccessRepository } from "../../../src/infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
 
@@ -82,4 +83,63 @@ describe("SqliteIdentityAccessRepository", () => {
 
     database.close();
   });
+
+  it("supports idempotent owner bootstrap", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteIdentityAccessRepository(database);
+    const bootstrap = new BootstrapOwnerIdentityUseCase({
+      repository,
+      generateId: nextIds(["actor-owner", "identity-owner", "chat-owner"])
+    });
+
+    await bootstrap.execute({
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      providerChatId: "tg-owner-chat",
+      displayName: "Owner"
+    });
+    await expect(
+      bootstrap.execute({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        displayName: "Owner"
+      })
+    ).resolves.toMatchObject({
+      createdActor: false,
+      createdIdentity: false,
+      createdChat: false
+    });
+
+    await expect(
+      repository.findActorByIdentity("telegram", "tg-owner")
+    ).resolves.toMatchObject({
+      role: "owner",
+      status: "active"
+    });
+    await expect(
+      repository.findChatByProviderChatId("telegram", "tg-owner-chat")
+    ).resolves.toEqual({
+      id: "chat-owner",
+      kind: "owner_private",
+      approved: true
+    });
+
+    database.close();
+  });
 });
+
+function nextIds(ids: readonly string[]): () => string {
+  let index = 0;
+
+  return () => {
+    const id = ids[index];
+    index += 1;
+
+    if (!id) {
+      throw new Error("No test ID available");
+    }
+
+    return id;
+  };
+}
