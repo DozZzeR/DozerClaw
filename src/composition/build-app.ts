@@ -12,10 +12,11 @@ import { DispatchAcceptedCommandUseCase } from "../application/use-cases/messagi
 import { HandleNormalizedInboundMessageUseCase } from "../application/use-cases/messaging/handle-normalized-inbound-message.js";
 import { ProcessInboundMessageUseCase } from "../application/use-cases/messaging/process-inbound-message.js";
 import { LocalServerMonitor } from "../infrastructure/providers/local-monitor/local-server-monitor.js";
-import { LocalServiceMonitor } from "../infrastructure/providers/local-monitor/local-service-monitor.js";
+import { RegistryServiceMonitor } from "../infrastructure/providers/local-monitor/registry-service-monitor.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
+import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 
 export interface BuildAppOptions {
@@ -28,6 +29,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const stateRepository = new SqliteStateRepository(database);
   const eventLog = new SqliteEventLog(database);
   const identityAccessRepository = new SqliteIdentityAccessRepository(database);
+  const serviceRegistryRepository = new SqliteServiceRegistryRepository(database);
   const generateId = () => randomUUID();
   const bootstrapOwnerIdentity = new BootstrapOwnerIdentityUseCase({
     repository: identityAccessRepository,
@@ -45,7 +47,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     serverMonitor: new LocalServerMonitor()
   });
   const getServiceHealth = new GetServiceHealthUseCase({
-    serviceMonitor: new LocalServiceMonitor()
+    serviceMonitor: new RegistryServiceMonitor({
+      repository: serviceRegistryRepository
+    })
   });
   const systemHealthHandler = new HandleSystemHealthCommandUseCase({
     getHostHealth,
