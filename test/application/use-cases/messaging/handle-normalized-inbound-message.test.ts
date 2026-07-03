@@ -86,6 +86,8 @@ const acceptedContext: AcceptedMessageContext = {
     approved: true
   },
   action: "owner_read",
+  provider: "telegram",
+  receivedAt: new Date("2026-07-02T20:00:00.000Z"),
   text: "health",
   attachments: []
 };

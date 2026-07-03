@@ -49,6 +49,8 @@ describe("ProcessInboundMessageUseCase", () => {
         actor: activeFamily,
         chat: approvedFamilyChat,
         action: "family_read",
+        provider: "telegram",
+        receivedAt: new Date("2026-07-02T20:00:00.000Z"),
         text: "hello",
         attachments: []
       }
@@ -87,6 +89,8 @@ describe("ProcessInboundMessageUseCase", () => {
         actor: activeFamily,
         chat: approvedFamilyChat,
         action: "family_read",
+        provider: "telegram",
+        receivedAt: new Date("2026-07-02T20:00:00.000Z"),
         text: "/restart service",
         attachments: [
           {
@@ -157,6 +161,8 @@ describe("ProcessInboundMessageUseCase", () => {
         actor: owner,
         chat: ownerPrivateChat,
         action: "admin_write",
+        provider: "telegram",
+        receivedAt: new Date("2026-07-02T20:00:00.000Z"),
         text: "/restart service",
         attachments: [],
         adminSession: repository.session

@@ -49,6 +49,8 @@ export interface AcceptedMessageContext {
   readonly actor: Actor;
   readonly chat: ChatContext;
   readonly action: AccessAction;
+  readonly provider: string;
+  readonly receivedAt: Date;
   readonly text: string;
   readonly attachments: readonly MessageAttachment[];
   readonly adminSession?: AdminSession;
@@ -124,6 +126,8 @@ export class ProcessInboundMessageUseCase {
         actor: identityContext.actor,
         chat: identityContext.chat,
         action: input.action,
+        provider: input.provider,
+        receivedAt: input.receivedAt,
         text: input.text,
         attachments: input.attachments,
         ...(adminSession ? { adminSession } : {})
