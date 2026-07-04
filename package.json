@@ -11,7 +11,8 @@
     "dev:health": "tsx src/entrypoints/cli/dev-health.ts",
     "dev:register-services": "tsx src/entrypoints/cli/dev-register-services.ts",
     "dev:store-file": "tsx src/entrypoints/cli/dev-store-file.ts",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "dev:telegram": "tsx src/main.ts"
   },
   "engines": {
     "node": ">=22"
