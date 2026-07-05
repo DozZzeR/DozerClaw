@@ -5,6 +5,7 @@ import type { StoreMessageAttachmentsInput } from "../../../../src/application/u
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
+import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
 
 describe("DispatchAcceptedCommandUseCase", () => {
   it("dispatches system health command to handler", async () => {
@@ -101,12 +102,15 @@ describe("DispatchAcceptedCommandUseCase", () => {
   });
 
   it("uses model intent classifier for family clarification", async () => {
+    const pendingClarifications = new FakePendingClarifications();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
         kind: "ask_clarification",
         question: "What is this?"
-      })
+      }),
+      pendingClarifications,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
     });
 
     await expect(
@@ -121,6 +125,87 @@ describe("DispatchAcceptedCommandUseCase", () => {
       chatId: "chat-owner",
       text: "What is this?"
     });
+    expect(pendingClarifications.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      originalText: "photo",
+      originalAttachments: [],
+      question: "What is this?",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+  });
+
+  it("uses a clarification answer to classify and store the original attachment", async () => {
+    const attachmentStore = new FakeAttachmentStore(1);
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "store_file",
+      summary: "passport scan"
+    });
+    const pendingClarifications = new FakePendingClarifications();
+    pendingClarifications.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      originalText: "sent file",
+      originalAttachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "scan.jpg",
+          mimeType: "image/jpeg",
+          sizeBytes: 123
+        }
+      ],
+      question: "What is this file?",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      intentClassifier,
+      pendingClarifications,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "new passport for Alexey"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved 1 attachment(s): passport scan."
+    });
+    expect(intentClassifier.seenInput).toEqual({
+      text: [
+        "Previous message: sent file",
+        "Assistant asked: What is this file?",
+        "User clarification: new passport for Alexey"
+      ].join("\n"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "scan.jpg",
+          mimeType: "image/jpeg",
+          sizeBytes: 123
+        }
+      ]
+    });
+    expect(attachmentStore.seenInput?.attachments).toEqual([
+      {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "scan.jpg",
+        mimeType: "image/jpeg",
+        sizeBytes: 123
+      }
+    ]);
+    expect(pendingClarifications.deletedChatIds).toEqual(["chat-owner"]);
   });
 
   it("uses model store_file intent with existing attachment storage", async () => {
@@ -324,8 +409,55 @@ class FakeIntentClassifier {
       | { readonly kind: "store_file"; readonly summary?: string }
   ) {}
 
-  async execute() {
+  async execute(_input: ClassifyInboundIntentInput) {
     return this.intent;
+  }
+}
+
+class RecordingIntentClassifier extends FakeIntentClassifier {
+  seenInput: ClassifyInboundIntentInput | undefined;
+
+  async execute(input: ClassifyInboundIntentInput) {
+    this.seenInput = input;
+
+    return super.execute(input);
+  }
+}
+
+class FakePendingClarifications {
+  pending:
+    | {
+        chatId: string;
+        actorId: string;
+        originalText: string;
+        originalAttachments: AcceptedMessageContext["attachments"];
+        question: string;
+        createdAt: Date;
+        expiresAt: Date;
+      }
+    | undefined;
+  saved: FakePendingClarifications["pending"];
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: NonNullable<FakePendingClarifications["pending"]>) {
+    this.saved = input;
+    this.pending = input;
+  }
+
+  async clearByChatId(chatId: string) {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
   }
 }
 

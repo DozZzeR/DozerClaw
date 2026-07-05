@@ -90,6 +90,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
 
   ensureMonitoredServicesTable(database);
   ensureFileInboxRecordsTable(database);
+  ensurePendingClarificationsTable(database);
 }
 
 function ensureFileInboxRecordsTable(database: SqliteDatabase): void {
@@ -174,6 +175,20 @@ function ensureMonitoredServicesTable(database: SqliteDatabase): void {
     from monitored_services_old;
 
     drop table monitored_services_old;
+  `);
+}
+
+function ensurePendingClarificationsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists pending_clarifications (
+      chat_id text primary key,
+      actor_id text not null,
+      original_text text not null,
+      original_attachments_json text not null,
+      question text not null,
+      created_at text not null,
+      expires_at text not null
+    );
   `);
 }
 

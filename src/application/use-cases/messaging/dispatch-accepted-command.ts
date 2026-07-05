@@ -1,6 +1,8 @@
 import type { FileInboxRecord } from "../../../core/domain/file-inbox/file-inbox-record.js";
+import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
+import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type {
   InboundIntent,
   InboundIntentClassifier
@@ -32,6 +34,15 @@ export interface PendingAccessRequestReviewer {
   }): Promise<ReviewPendingIdentityResult>;
 }
 
+export interface PendingClarificationStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingClarification | undefined>;
+  save(input: PendingClarification): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -42,6 +53,8 @@ export interface DispatchAcceptedCommandDependencies {
   readonly attachmentStore?: MessageAttachmentStore;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
+  readonly pendingClarifications?: PendingClarificationStore;
+  readonly now?: () => Date;
 }
 
 export class DispatchAcceptedCommandUseCase {
@@ -94,12 +107,40 @@ export class DispatchAcceptedCommandUseCase {
   private async dispatchModelIntent(
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
+    const now = this.dependencies.now?.() ?? new Date();
+    const pending =
+      await this.dependencies.pendingClarifications?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+    const classifierInput = pending
+      ? {
+          text: buildClarificationClassifierText(pending, context.text),
+          attachments: mergeAttachments(
+            pending.originalAttachments,
+            context.attachments
+          )
+        }
+      : {
+          text: context.text,
+          attachments: context.attachments
+        };
     const intent = await this.dependencies.intentClassifier!.execute({
-      text: context.text,
-      attachments: context.attachments
+      text: classifierInput.text,
+      attachments: classifierInput.attachments
     });
 
     if (intent.kind === "ask_clarification") {
+      await this.dependencies.pendingClarifications?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        originalText: pending?.originalText ?? context.text,
+        originalAttachments: pending?.originalAttachments ?? context.attachments,
+        question: intent.question,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
       return {
         chatId: context.chat.id,
         text: intent.question
@@ -107,8 +148,22 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (intent.kind === "store_file") {
-      return this.storeFamilyMessageAttachments(context, intent);
+      await this.dependencies.pendingClarifications?.clearByChatId(
+        context.chat.id
+      );
+
+      return this.storeFamilyMessageAttachments(
+        {
+          ...context,
+          attachments: classifierInput.attachments
+        },
+        intent
+      );
     }
+
+    await this.dependencies.pendingClarifications?.clearByChatId(
+      context.chat.id
+    );
 
     return {
       chatId: context.chat.id,
@@ -238,4 +293,34 @@ function parseActorId(text: string): string | undefined {
   const [, actorId] = text.trim().split(/\s+/, 2);
 
   return actorId;
+}
+
+function buildClarificationClassifierText(
+  pending: PendingClarification,
+  followUpText: string
+): string {
+  return [
+    `Previous message: ${pending.originalText}`,
+    `Assistant asked: ${pending.question}`,
+    `User clarification: ${followUpText}`
+  ].join("\n");
+}
+
+function mergeAttachments(
+  previous: readonly MessageAttachment[],
+  current: readonly MessageAttachment[]
+): readonly MessageAttachment[] {
+  const seen = new Set<string>();
+  const merged: MessageAttachment[] = [];
+
+  for (const attachment of [...previous, ...current]) {
+    if (seen.has(attachment.id)) {
+      continue;
+    }
+
+    seen.add(attachment.id);
+    merged.push(attachment);
+  }
+
+  return merged;
 }

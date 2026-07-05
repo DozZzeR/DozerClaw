@@ -112,6 +112,13 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)
     },
+    pendingClarifications: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingClarificationByChatId(chatId, now),
+      save: (input) => stateRepository.savePendingClarification(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingClarificationByChatId(chatId)
+    },
     ...(intentClassifier ? { intentClassifier } : {})
   });
   const handleNormalizedInboundMessage = new HandleNormalizedInboundMessageUseCase(
