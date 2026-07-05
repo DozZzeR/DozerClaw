@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../../src/composition/build-app.js";
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteServiceRegistryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
+import type { ModelPort } from "../../src/ports/model-port.js";
 
 describe("buildApp", () => {
   it("composes the application and exposes startup diagnostics", async () => {
@@ -265,4 +266,90 @@ describe("buildApp", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("uses configured model provider for approved family fallback messages", async () => {
+    const app = buildApp({
+      env: {
+        DOZERCLAW_DB_PATH: ":memory:",
+        NODE_ENV: "test"
+      },
+      modelProvider: new FakeModelProvider(
+        JSON.stringify({
+          kind: "ask_clarification",
+          question: "Who is this document for?"
+        })
+      )
+    });
+    await app.bootstrapOwnerIdentity({
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      providerChatId: "tg-owner",
+      displayName: "Owner"
+    });
+    const pendingReply = await app.handleNormalizedInboundMessage({
+      messageId: "message-pending-start",
+      provider: "telegram",
+      providerUserId: "tg-family",
+      providerChatId: "tg-family",
+      chatKind: "family_private",
+      displayName: "Family",
+      text: "/start",
+      attachments: [],
+      receivedAt: new Date("2026-07-05T11:00:00.000Z"),
+      now: new Date("2026-07-05T11:00:00.000Z")
+    });
+    const actorId = (
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-owner-pending",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "/pending",
+        attachments: [],
+        receivedAt: new Date("2026-07-05T11:01:00.000Z"),
+        now: new Date("2026-07-05T11:01:00.000Z")
+      })
+    ).text.match(/- ([^:]+):/)?.[1];
+    expect(pendingReply.text).toBe("Access request is pending owner approval.");
+    expect(actorId).toBeTruthy();
+    await app.handleNormalizedInboundMessage({
+      messageId: "message-owner-approve",
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      providerChatId: "tg-owner",
+      chatKind: "owner_private",
+      displayName: "Owner",
+      text: `/approve ${actorId}`,
+      attachments: [],
+      receivedAt: new Date("2026-07-05T11:02:00.000Z"),
+      now: new Date("2026-07-05T11:02:00.000Z")
+    });
+
+    const reply = await app.handleNormalizedInboundMessage({
+      messageId: "message-family",
+      provider: "telegram",
+      providerUserId: "tg-family",
+      providerChatId: "tg-family",
+      chatKind: "family_private",
+      displayName: "Family",
+      text: "I uploaded a document",
+      attachments: [],
+      receivedAt: new Date("2026-07-05T11:03:00.000Z"),
+      now: new Date("2026-07-05T11:03:00.000Z")
+    });
+
+    expect(reply.text).toBe("Who is this document for?");
+  });
 });
+
+class FakeModelProvider implements ModelPort {
+  constructor(private readonly text: string) {}
+
+  async runTextRequest() {
+    return {
+      text: this.text
+    };
+  }
+}

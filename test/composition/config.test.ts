@@ -5,6 +5,7 @@ import { loadConfig } from "../../src/composition/config.js";
 describe("loadConfig", () => {
   it("loads codex model provider config with safe defaults", () => {
     expect(loadConfig({}).codex).toEqual({
+      modelRoutingEnabled: false,
       model: "gpt-5.5",
       timeoutMs: 120000,
       projectRoot: ".",
@@ -16,12 +17,14 @@ describe("loadConfig", () => {
     expect(
       loadConfig({
         DOZERCLAW_CODEX_MODEL: "gpt-test",
+        DOZERCLAW_MODEL_ROUTING_ENABLED: "true",
         DOZERCLAW_CODEX_TIMEOUT_MS: "3000",
         DOZERCLAW_CODEX_PROJECT_ROOT: "/tmp/project",
         DOZERCLAW_CODEX_TMP_DIR: "/tmp/codex",
         CODEX_API_KEY: "codex-key"
       }).codex
     ).toEqual({
+      modelRoutingEnabled: true,
       model: "gpt-test",
       timeoutMs: 3000,
       projectRoot: "/tmp/project",

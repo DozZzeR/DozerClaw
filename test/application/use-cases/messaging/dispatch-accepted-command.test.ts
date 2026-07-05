@@ -100,6 +100,59 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("uses model intent classifier for family clarification", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "ask_clarification",
+        question: "What is this?"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "photo"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "What is this?"
+    });
+  });
+
+  it("uses model store_file intent with existing attachment storage", async () => {
+    const attachmentStore = new FakeAttachmentStore(1);
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "store_file",
+        summary: "passport scan"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved 1 attachment(s): passport scan."
+    });
+  });
+
   it("reports when family message attachments have no downloadable files", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: {
@@ -261,6 +314,18 @@ class FakePendingAccessRequests {
         input.decision === "approve" ? ("active" as const) : ("blocked" as const),
       chatApproved: input.decision === "approve"
     };
+  }
+}
+
+class FakeIntentClassifier {
+  constructor(
+    private readonly intent:
+      | { readonly kind: "ask_clarification"; readonly question: string }
+      | { readonly kind: "store_file"; readonly summary?: string }
+  ) {}
+
+  async execute() {
+    return this.intent;
   }
 }
 

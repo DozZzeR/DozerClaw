@@ -21,7 +21,13 @@ describe("CodexCliModelProvider", () => {
     await expect(
       provider.runTextRequest({
         purpose: "classify inbound message",
-        input: "new passport"
+        input: "new passport",
+        outputSchema: {
+          name: "intent",
+          schema: {
+            type: "object"
+          }
+        }
       })
     ).resolves.toEqual({
       text: "classified"
@@ -29,6 +35,9 @@ describe("CodexCliModelProvider", () => {
     expect(runner.input?.model).toBe("gpt-test");
     expect(runner.input?.prompt).toContain("Purpose: classify inbound message");
     expect(runner.input?.prompt).toContain("new passport");
+    expect(runner.input?.outputSchema).toEqual({
+      type: "object"
+    });
   });
 });
 
@@ -42,6 +51,7 @@ describe("CodexCliRunner", () => {
         return child;
       },
       readFile: async () => "",
+      writeFile: async () => undefined,
       makeDirectory: async () => undefined,
       outputFileName: () => "codex-output.txt"
     });
@@ -53,7 +63,7 @@ describe("CodexCliRunner", () => {
       projectRoot: "/repo",
       tmpDirectory: "/tmp/codex"
     });
-    await Promise.resolve();
+    await nextTick();
     child.stdout.emit(
       "data",
       Buffer.from(
@@ -105,11 +115,68 @@ describe("CodexCliRunner", () => {
     );
   });
 
+  it("passes output schema to codex exec when supplied", async () => {
+    const child = new FakeChildProcess();
+    const spawnCalls: SpawnCall[] = [];
+    const writtenFiles: { path: string; data: string }[] = [];
+    const runner = new CodexCliRunner({
+      spawnProcess(command, args, options) {
+        spawnCalls.push({ command, args, options });
+        return child;
+      },
+      readFile: async () => "",
+      writeFile: async (path, data) => {
+        writtenFiles.push({ path, data });
+      },
+      makeDirectory: async () => undefined,
+      outputFileName: (() => {
+        const names = ["codex-output.txt", "intent"];
+        return () => names.shift() ?? "fallback";
+      })()
+    });
+
+    const resultPromise = runner.run({
+      prompt: "hello",
+      model: "gpt-test",
+      timeoutMs: 5000,
+      projectRoot: "/repo",
+      tmpDirectory: "/tmp/codex",
+      outputSchema: {
+        type: "object"
+      }
+    });
+    await nextTick();
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({
+          type: "item.completed",
+          item: {
+            type: "agent_message",
+            text: "{}"
+          }
+        })}\n`
+      )
+    );
+    child.emit("close", 0);
+
+    await expect(resultPromise).resolves.toMatchObject({ text: "{}" });
+    expect(writtenFiles).toEqual([
+      {
+        path: "/tmp/codex/intent.schema.json",
+        data: JSON.stringify({ type: "object" })
+      }
+    ]);
+    expect(spawnCalls[0]?.args).toContain("--output-schema");
+    expect(spawnCalls[0]?.args).toContain("/tmp/codex/intent.schema.json");
+  });
+
   it("falls back to output file when no final message event is emitted", async () => {
     const child = new FakeChildProcess();
     const runner = new CodexCliRunner({
       spawnProcess: () => child,
       readFile: async () => "file text",
+      writeFile: async () => undefined,
       makeDirectory: async () => undefined,
       outputFileName: () => "codex-output.txt"
     });
@@ -121,7 +188,7 @@ describe("CodexCliRunner", () => {
       projectRoot: "/repo",
       tmpDirectory: "/tmp/codex"
     });
-    await Promise.resolve();
+    await nextTick();
     child.emit("close", 0);
 
     await expect(resultPromise).resolves.toMatchObject({
@@ -134,6 +201,7 @@ describe("CodexCliRunner", () => {
     const runner = new CodexCliRunner({
       spawnProcess: () => child,
       readFile: async () => "",
+      writeFile: async () => undefined,
       makeDirectory: async () => undefined,
       outputFileName: () => "codex-output.txt"
     });
@@ -145,7 +213,7 @@ describe("CodexCliRunner", () => {
       projectRoot: "/repo",
       tmpDirectory: "/tmp/codex"
     });
-    await Promise.resolve();
+    await nextTick();
     child.stderr.emit("data", Buffer.from("bad things\n"));
     child.emit("close", 1);
 
@@ -177,6 +245,10 @@ class FakeRunner {
       aborted: false
     };
   }
+}
+
+function nextTick(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 class FakeChildProcess extends EventEmitter {

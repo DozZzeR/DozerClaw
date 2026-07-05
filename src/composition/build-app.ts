@@ -6,6 +6,7 @@ import type { StartupDiagnostic } from "../core/domain/diagnostics/startup-diagn
 import { BootstrapOwnerIdentityUseCase } from "../application/use-cases/identity/bootstrap-owner-identity.js";
 import { ListPendingAccessRequestsUseCase } from "../application/use-cases/identity/list-pending-access-requests.js";
 import { ReviewPendingIdentityUseCase } from "../application/use-cases/identity/review-pending-identity.js";
+import { ModelInboundIntentClassifier } from "../application/use-cases/messaging/classify-inbound-intent.js";
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
@@ -18,6 +19,7 @@ import { ProcessInboundMessageUseCase } from "../application/use-cases/messaging
 import { LocalFileStorage } from "../infrastructure/providers/local-file-storage/local-file-storage.js";
 import { LocalServerMonitor } from "../infrastructure/providers/local-monitor/local-server-monitor.js";
 import { RegistryServiceMonitor } from "../infrastructure/providers/local-monitor/registry-service-monitor.js";
+import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-cli-model-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sqlite-file-inbox-repository.js";
@@ -25,10 +27,12 @@ import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqli
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import type { AttachmentDownloadPort } from "../ports/attachment-download-port.js";
+import type { ModelPort } from "../ports/model-port.js";
 
 export interface BuildAppOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly attachmentDownloader?: AttachmentDownloadPort;
+  readonly modelProvider?: ModelPort;
 }
 
 export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
@@ -85,13 +89,30 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         fileStore
       })
     : undefined;
+  const modelProvider = options.modelProvider
+    ? options.modelProvider
+    : config.codex.modelRoutingEnabled
+      ? new CodexCliModelProvider({
+          model: config.codex.model,
+          timeoutMs: config.codex.timeoutMs,
+          projectRoot: config.codex.projectRoot,
+          tmpDirectory: config.codex.tmpDirectory,
+          ...(config.codex.apiKey ? { apiKey: config.codex.apiKey } : {})
+        })
+      : undefined;
+  const intentClassifier = modelProvider
+    ? new ModelInboundIntentClassifier({
+        model: modelProvider
+      })
+    : undefined;
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
     ...(attachmentStore ? { attachmentStore } : {}),
     pendingAccessRequests: {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)
-    }
+    },
+    ...(intentClassifier ? { intentClassifier } : {})
   });
   const handleNormalizedInboundMessage = new HandleNormalizedInboundMessageUseCase(
     {

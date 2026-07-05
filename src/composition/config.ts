@@ -23,6 +23,7 @@ export interface TelegramConfig {
 }
 
 export interface CodexConfig {
+  readonly modelRoutingEnabled: boolean;
   readonly model: string;
   readonly timeoutMs: number;
   readonly projectRoot: string;
@@ -52,6 +53,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       )
     },
     codex: {
+      modelRoutingEnabled:
+        env.DOZERCLAW_MODEL_ROUTING_ENABLED === "true" ||
+        env.DOZERCLAW_MODEL_ROUTING_ENABLED === "1",
       model: env.DOZERCLAW_CODEX_MODEL ?? "gpt-5.5",
       timeoutMs: parsePositiveInteger(env.DOZERCLAW_CODEX_TIMEOUT_MS, 120000),
       projectRoot: env.DOZERCLAW_CODEX_PROJECT_ROOT ?? ".",

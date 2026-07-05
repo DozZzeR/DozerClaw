@@ -2,6 +2,10 @@ import type { FileInboxRecord } from "../../../core/domain/file-inbox/file-inbox
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type {
+  InboundIntent,
+  InboundIntentClassifier
+} from "./classify-inbound-intent.js";
+import type {
   PendingIdentityDecision,
   ReviewPendingIdentityResult
 } from "../identity/review-pending-identity.js";
@@ -37,6 +41,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly systemHealthHandler: SystemHealthCommandHandler;
   readonly attachmentStore?: MessageAttachmentStore;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
+  readonly intentClassifier?: InboundIntentClassifier;
 }
 
 export class DispatchAcceptedCommandUseCase {
@@ -71,15 +76,56 @@ export class DispatchAcceptedCommandUseCase {
 
     if (
       input.route.kind === "family_message" &&
-      input.context.attachments.length > 0 &&
-      this.dependencies.attachmentStore
+      this.dependencies.intentClassifier
     ) {
-      return this.storeFamilyMessageAttachments(input.context);
+      return this.dispatchModelIntent(input.context);
+    }
+
+    if (input.route.kind === "family_message") {
+      return this.dispatchFamilyMessageWithoutModel(input.context);
     }
 
     return Promise.resolve({
       chatId: input.context.chat.id,
       text: `Command not implemented yet: ${input.route.kind}.`
+    });
+  }
+
+  private async dispatchModelIntent(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply> {
+    const intent = await this.dependencies.intentClassifier!.execute({
+      text: context.text,
+      attachments: context.attachments
+    });
+
+    if (intent.kind === "ask_clarification") {
+      return {
+        chatId: context.chat.id,
+        text: intent.question
+      };
+    }
+
+    if (intent.kind === "store_file") {
+      return this.storeFamilyMessageAttachments(context, intent);
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+    };
+  }
+
+  private dispatchFamilyMessageWithoutModel(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply> {
+    if (context.attachments.length > 0 && this.dependencies.attachmentStore) {
+      return this.storeFamilyMessageAttachments(context);
+    }
+
+    return Promise.resolve({
+      chatId: context.chat.id,
+      text: "Command not implemented yet: family_message."
     });
   }
 
@@ -156,8 +202,16 @@ export class DispatchAcceptedCommandUseCase {
   }
 
   private async storeFamilyMessageAttachments(
-    context: AcceptedMessageContext
+    context: AcceptedMessageContext,
+    intent?: Extract<InboundIntent, { readonly kind: "store_file" }>
   ): Promise<OutboundReply> {
+    if (context.attachments.length === 0) {
+      return {
+        chatId: context.chat.id,
+        text: "I can store a file after you attach one."
+      };
+    }
+
     const records = await this.dependencies.attachmentStore?.execute({
       provider: context.provider,
       receivedAt: context.receivedAt,
@@ -173,7 +227,9 @@ export class DispatchAcceptedCommandUseCase {
 
     return {
       chatId: context.chat.id,
-      text: `Saved ${records.length} attachment(s).`
+      text: intent?.summary
+        ? `Saved ${records.length} attachment(s): ${intent.summary}.`
+        : `Saved ${records.length} attachment(s).`
     };
   }
 }

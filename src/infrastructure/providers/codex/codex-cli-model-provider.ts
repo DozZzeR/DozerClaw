@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { EventEmitter } from "node:events";
 
@@ -29,6 +30,7 @@ export interface CodexCliRunInput {
   readonly timeoutMs: number;
   readonly projectRoot: string;
   readonly tmpDirectory: string;
+  readonly outputSchema?: Record<string, unknown>;
   readonly apiKey?: string;
   readonly abortSignal?: AbortSignal;
 }
@@ -65,6 +67,9 @@ export class CodexCliModelProvider implements ModelPort {
       timeoutMs: this.options.timeoutMs,
       projectRoot: this.options.projectRoot,
       tmpDirectory: this.options.tmpDirectory,
+      ...(request.outputSchema
+        ? { outputSchema: request.outputSchema.schema }
+        : {}),
       ...(this.options.apiKey ? { apiKey: this.options.apiKey } : {})
     });
 
@@ -77,6 +82,7 @@ export class CodexCliModelProvider implements ModelPort {
 export interface CodexCliRunnerDependencies {
   readonly spawnProcess?: SpawnProcess;
   readonly readFile?: (path: string, encoding: BufferEncoding) => Promise<string>;
+  readonly writeFile?: (path: string, data: string) => Promise<void>;
   readonly makeDirectory?: (
     path: string,
     options: { readonly recursive: true }
@@ -124,6 +130,7 @@ export class CodexCliRunner implements CodexCliRunnerPort {
     path: string,
     options: { readonly recursive: true }
   ) => Promise<unknown>;
+  private readonly writeSchemaFile: (path: string, data: string) => Promise<void>;
   private readonly outputFileName: () => string;
 
   constructor(dependencies: CodexCliRunnerDependencies = {}) {
@@ -132,6 +139,7 @@ export class CodexCliRunner implements CodexCliRunnerPort {
       ((command, args, options) =>
         nodeSpawn(command, [...args], options) as ChildProcessLike);
     this.readOutputFile = dependencies.readFile ?? readFile;
+    this.writeSchemaFile = dependencies.writeFile ?? writeFile;
     this.makeDirectory = dependencies.makeDirectory ?? mkdir;
     this.outputFileName =
       dependencies.outputFileName ??
@@ -142,6 +150,12 @@ export class CodexCliRunner implements CodexCliRunnerPort {
     await this.makeDirectory(input.tmpDirectory, { recursive: true });
 
     const outputFile = join(input.tmpDirectory, this.outputFileName());
+    const schemaFile = input.outputSchema
+      ? join(input.tmpDirectory, `${this.outputFileName()}.schema.json`)
+      : undefined;
+    if (schemaFile && input.outputSchema) {
+      await this.writeSchemaFile(schemaFile, JSON.stringify(input.outputSchema));
+    }
     const args = [
       "exec",
       "--json",
@@ -154,6 +168,7 @@ export class CodexCliRunner implements CodexCliRunnerPort {
       input.model,
       "-o",
       outputFile,
+      ...(schemaFile ? ["--output-schema", schemaFile] : []),
       input.prompt
     ];
 
