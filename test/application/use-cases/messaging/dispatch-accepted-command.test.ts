@@ -303,6 +303,40 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("asks what to do when an attachment filename already exists", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore: new FakeAttachmentStore(0, {
+        fileName: "report.pdf"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "report.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "File already exists: report.pdf.",
+        "What should I do?",
+        "- save a copy as report (2).pdf",
+        "- overwrite the existing file",
+        "- do nothing"
+      ].join("\n")
+    });
+  });
+
   it("lists pending access requests for owner review", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
@@ -501,21 +535,54 @@ class FakePendingClarifications {
 class FakeAttachmentStore {
   seenInput: StoreMessageAttachmentsInput | undefined;
 
-  constructor(private readonly storedCount: number) {}
+  constructor(
+    private readonly storedCount: number,
+    private readonly duplicate?: { readonly fileName: string }
+  ) {}
 
   async execute(
     input: StoreMessageAttachmentsInput
-  ): Promise<readonly FileInboxRecord[]> {
+  ): Promise<
+    readonly (
+      | { readonly status: "stored"; readonly record: FileInboxRecord }
+      | {
+          readonly status: "duplicate";
+          readonly fileName: string;
+          readonly existingRecord: FileInboxRecord;
+        }
+    )[]
+  > {
     this.seenInput = input;
 
+    if (this.duplicate) {
+      return [
+        {
+          status: "duplicate",
+          fileName: this.duplicate.fileName,
+          existingRecord: {
+            id: "file-existing",
+            originalFileName: this.duplicate.fileName,
+            sizeBytes: 10,
+            storageId: "storage-existing",
+            storagePath: `/tmp/${this.duplicate.fileName}`,
+            receivedAt: new Date("2026-07-02T19:00:00.000Z"),
+            createdAt: new Date("2026-07-02T19:00:00.000Z")
+          }
+        }
+      ];
+    }
+
     return Array.from({ length: this.storedCount }, (_, index) => ({
-      id: `file-${index + 1}`,
-      originalFileName: `file-${index + 1}.txt`,
-      sizeBytes: 10,
-      storageId: `storage-${index + 1}`,
-      storagePath: `/tmp/file-${index + 1}.txt`,
-      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
-      createdAt: new Date("2026-07-02T20:00:00.000Z")
+      status: "stored" as const,
+      record: {
+        id: `file-${index + 1}`,
+        originalFileName: `file-${index + 1}.txt`,
+        sizeBytes: 10,
+        storageId: `storage-${index + 1}`,
+        storagePath: `/tmp/file-${index + 1}.txt`,
+        receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+        createdAt: new Date("2026-07-02T20:00:00.000Z")
+      }
     }));
   }
 }

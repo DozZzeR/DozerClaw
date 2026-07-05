@@ -39,7 +39,10 @@ describe("StoreMessageAttachmentsUseCase", () => {
         async execute(input) {
           storedInputs.push(input);
 
-          return record;
+          return {
+            status: "stored",
+            record
+          };
         }
       }
     });
@@ -58,7 +61,12 @@ describe("StoreMessageAttachmentsUseCase", () => {
           }
         ]
       })
-    ).resolves.toEqual([record]);
+    ).resolves.toEqual([
+      {
+        status: "stored",
+        record
+      }
+    ]);
     expect(storedInputs).toEqual([
       {
         fileName: "report.pdf",

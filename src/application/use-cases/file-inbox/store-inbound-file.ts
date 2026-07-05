@@ -16,10 +16,34 @@ export interface StoreInboundFileInput {
   readonly receivedAt: Date;
 }
 
+export type StoreInboundFileResult =
+  | {
+      readonly status: "stored";
+      readonly record: FileInboxRecord;
+    }
+  | {
+      readonly status: "duplicate";
+      readonly fileName: string;
+      readonly existingRecord: FileInboxRecord;
+    };
+
 export class StoreInboundFileUseCase {
   constructor(private readonly dependencies: StoreInboundFileDependencies) {}
 
-  async execute(input: StoreInboundFileInput): Promise<FileInboxRecord> {
+  async execute(input: StoreInboundFileInput): Promise<StoreInboundFileResult> {
+    const existingRecord =
+      await this.dependencies.repository.findLatestFileInboxRecordByOriginalFileName(
+        input.fileName
+      );
+
+    if (existingRecord) {
+      return {
+        status: "duplicate",
+        fileName: input.fileName,
+        existingRecord
+      };
+    }
+
     const storedFile = await this.dependencies.fileStorage.storeFile({
       fileName: input.fileName,
       ...(input.mimeType ? { mimeType: input.mimeType } : {}),
@@ -38,6 +62,9 @@ export class StoreInboundFileUseCase {
 
     await this.dependencies.repository.saveFileInboxRecord(record);
 
-    return record;
+    return {
+      status: "stored",
+      record
+    };
   }
 }

@@ -47,7 +47,7 @@ export async function runDevStoreFile(
 
   try {
     const bytes = await readFile(filePath);
-    const record = await storeInboundFile.execute({
+    const result = await storeInboundFile.execute({
       fileName: basename(filePath),
       ...(options.env.DOZERCLAW_DEV_FILE_MIME_TYPE
         ? { mimeType: options.env.DOZERCLAW_DEV_FILE_MIME_TYPE }
@@ -55,6 +55,15 @@ export async function runDevStoreFile(
       bytes,
       receivedAt: new Date()
     });
+
+    if (result.status === "duplicate") {
+      options.write(`duplicate file: ${result.fileName}`);
+      options.write(`existing file: ${result.existingRecord.id}`);
+
+      return 0;
+    }
+
+    const record = result.record;
 
     options.write(`stored file: ${record.id}`);
     options.write(`storage path: ${record.storagePath}`);

@@ -3,4 +3,7 @@ import type { FileInboxRecord } from "../core/domain/file-inbox/file-inbox-recor
 export interface FileInboxRepositoryPort {
   saveFileInboxRecord(record: FileInboxRecord): Promise<void>;
   findFileInboxRecordById(id: string): Promise<FileInboxRecord | undefined>;
+  findLatestFileInboxRecordByOriginalFileName(
+    originalFileName: string
+  ): Promise<FileInboxRecord | undefined>;
 }

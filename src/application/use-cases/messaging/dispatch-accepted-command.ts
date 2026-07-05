@@ -1,8 +1,8 @@
-import type { FileInboxRecord } from "../../../core/domain/file-inbox/file-inbox-record.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
+import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type {
   InboundIntent,
   InboundIntentClassifier
@@ -23,7 +23,7 @@ export interface SystemHealthCommandHandler {
 export interface MessageAttachmentStore {
   execute(
     input: StoreMessageAttachmentsInput
-  ): Promise<readonly FileInboxRecord[]>;
+  ): Promise<readonly StoreInboundFileResult[]>;
 }
 
 export interface PendingAccessRequestReviewer {
@@ -298,24 +298,40 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    const records = await this.dependencies.attachmentStore?.execute({
+    const results = await this.dependencies.attachmentStore?.execute({
       provider: context.provider,
       receivedAt: context.receivedAt,
       attachments: context.attachments
     });
 
-    if (!records || records.length === 0) {
+    if (!results || results.length === 0) {
       return {
         chatId: context.chat.id,
         text: "No downloadable attachments found."
       };
     }
 
+    const duplicates = results.filter(
+      (result): result is Extract<StoreInboundFileResult, { status: "duplicate" }> =>
+        result.status === "duplicate"
+    );
+
+    if (duplicates.length > 0) {
+      return {
+        chatId: context.chat.id,
+        text: duplicateAttachmentReply(duplicates)
+      };
+    }
+
+    const storedRecords = results.flatMap((result) =>
+      result.status === "stored" ? [result.record] : []
+    );
+
     return {
       chatId: context.chat.id,
       text: intent?.summary
-        ? `Saved ${records.length} attachment(s): ${intent.summary}.`
-        : `Saved ${records.length} attachment(s).`
+        ? `Saved ${storedRecords.length} attachment(s): ${intent.summary}.`
+        : `Saved ${storedRecords.length} attachment(s).`
     };
   }
 }
@@ -354,4 +370,32 @@ function mergeAttachments(
   }
 
   return merged;
+}
+
+function duplicateAttachmentReply(
+  duplicates: readonly Extract<StoreInboundFileResult, { status: "duplicate" }>[]
+): string {
+  const [first] = duplicates;
+
+  if (!first) {
+    return "This file already exists.";
+  }
+
+  return [
+    `File already exists: ${first.fileName}.`,
+    "What should I do?",
+    `- save a copy as ${suggestCopyName(first.fileName)}`,
+    "- overwrite the existing file",
+    "- do nothing"
+  ].join("\n");
+}
+
+function suggestCopyName(fileName: string): string {
+  const extensionIndex = fileName.lastIndexOf(".");
+
+  if (extensionIndex <= 0) {
+    return `${fileName} (2)`;
+  }
+
+  return `${fileName.slice(0, extensionIndex)} (2)${fileName.slice(extensionIndex)}`;
 }

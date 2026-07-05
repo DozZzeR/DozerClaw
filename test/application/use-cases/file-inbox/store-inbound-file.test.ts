@@ -30,6 +30,9 @@ describe("StoreInboundFileUseCase", () => {
         },
         async findFileInboxRecordById() {
           return undefined;
+        },
+        async findLatestFileInboxRecordByOriginalFileName() {
+          return undefined;
         }
       } satisfies FileInboxRepositoryPort,
       generateId: () => "file-inbox-1",
@@ -44,15 +47,75 @@ describe("StoreInboundFileUseCase", () => {
     });
 
     expect(record).toEqual({
-      id: "file-inbox-1",
+      status: "stored",
+      record: {
+        id: "file-inbox-1",
+        originalFileName: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 3,
+        storageId: "stored-file-1",
+        storagePath: "inbox/file-1/report.pdf",
+        receivedAt: new Date("2026-07-03T10:59:00.000Z"),
+        createdAt: new Date("2026-07-03T11:00:00.000Z")
+      }
+    });
+    expect(savedRecords).toEqual([
+      {
+        id: "file-inbox-1",
+        originalFileName: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 3,
+        storageId: "stored-file-1",
+        storagePath: "inbox/file-1/report.pdf",
+        receivedAt: new Date("2026-07-03T10:59:00.000Z"),
+        createdAt: new Date("2026-07-03T11:00:00.000Z")
+      }
+    ]);
+  });
+
+  it("does not store bytes when the original filename already exists", async () => {
+    const existingRecord: FileInboxRecord = {
+      id: "file-inbox-existing",
       originalFileName: "report.pdf",
       mimeType: "application/pdf",
       sizeBytes: 3,
-      storageId: "stored-file-1",
-      storagePath: "inbox/file-1/report.pdf",
-      receivedAt: new Date("2026-07-03T10:59:00.000Z"),
-      createdAt: new Date("2026-07-03T11:00:00.000Z")
+      storageId: "stored-existing",
+      storagePath: "inbox/existing/report.pdf",
+      receivedAt: new Date("2026-07-03T10:00:00.000Z"),
+      createdAt: new Date("2026-07-03T10:00:01.000Z")
+    };
+    const useCase = new StoreInboundFileUseCase({
+      fileStorage: {
+        async storeFile() {
+          throw new Error("should not store duplicate bytes");
+        }
+      } satisfies FileStoragePort,
+      repository: {
+        async saveFileInboxRecord() {
+          throw new Error("should not save duplicate metadata");
+        },
+        async findFileInboxRecordById() {
+          return undefined;
+        },
+        async findLatestFileInboxRecordByOriginalFileName(fileName) {
+          return fileName === "report.pdf" ? existingRecord : undefined;
+        }
+      } satisfies FileInboxRepositoryPort,
+      generateId: () => "file-inbox-1",
+      now: () => new Date("2026-07-03T11:00:00.000Z")
     });
-    expect(savedRecords).toEqual([record]);
+
+    await expect(
+      useCase.execute({
+        fileName: "report.pdf",
+        mimeType: "application/pdf",
+        bytes: new Uint8Array([1, 2, 3]),
+        receivedAt: new Date("2026-07-03T10:59:00.000Z")
+      })
+    ).resolves.toEqual({
+      status: "duplicate",
+      fileName: "report.pdf",
+      existingRecord
+    });
   });
 });

@@ -77,6 +77,32 @@ export class SqliteFileInboxRepository implements FileInboxRepositoryPort {
 
     return row ? toFileInboxRecord(row) : undefined;
   }
+
+  async findLatestFileInboxRecordByOriginalFileName(
+    originalFileName: string
+  ): Promise<FileInboxRecord | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            id,
+            original_file_name,
+            mime_type,
+            size_bytes,
+            storage_id,
+            storage_path,
+            received_at,
+            created_at
+          from file_inbox_records
+          where original_file_name = ?
+          order by created_at desc
+          limit 1
+        `
+      )
+      .get(originalFileName) as FileInboxRecordRow | undefined;
+
+    return row ? toFileInboxRecord(row) : undefined;
+  }
 }
 
 function toFileInboxRecord(row: FileInboxRecordRow): FileInboxRecord {

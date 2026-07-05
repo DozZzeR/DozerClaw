@@ -1,7 +1,9 @@
-import type { FileInboxRecord } from "../../../core/domain/file-inbox/file-inbox-record.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { AttachmentDownloadPort } from "../../../ports/attachment-download-port.js";
-import type { StoreInboundFileInput } from "./store-inbound-file.js";
+import type {
+  StoreInboundFileInput,
+  StoreInboundFileResult
+} from "./store-inbound-file.js";
 
 export interface StoreMessageAttachmentsDependencies {
   readonly attachmentDownloader: AttachmentDownloadPort;
@@ -9,7 +11,7 @@ export interface StoreMessageAttachmentsDependencies {
 }
 
 export interface InboundFileStore {
-  execute(input: StoreInboundFileInput): Promise<FileInboxRecord>;
+  execute(input: StoreInboundFileInput): Promise<StoreInboundFileResult>;
 }
 
 export interface StoreMessageAttachmentsInput {
@@ -25,8 +27,8 @@ export class StoreMessageAttachmentsUseCase {
 
   async execute(
     input: StoreMessageAttachmentsInput
-  ): Promise<readonly FileInboxRecord[]> {
-    const records: FileInboxRecord[] = [];
+  ): Promise<readonly StoreInboundFileResult[]> {
+    const results: StoreInboundFileResult[] = [];
 
     for (const attachment of input.attachments) {
       if (!attachment.providerFileId) {
@@ -42,7 +44,7 @@ export class StoreMessageAttachmentsUseCase {
           ...(attachment.sizeBytes ? { sizeBytes: attachment.sizeBytes } : {})
         });
 
-      records.push(
+      results.push(
         await this.dependencies.fileStore.execute({
           fileName: downloaded.fileName,
           ...(downloaded.mimeType ? { mimeType: downloaded.mimeType } : {}),
@@ -52,6 +54,6 @@ export class StoreMessageAttachmentsUseCase {
       );
     }
 
-    return records;
+    return results;
   }
 }
