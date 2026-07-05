@@ -91,6 +91,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensureMonitoredServicesTable(database);
   ensureFileInboxRecordsTable(database);
   ensurePendingClarificationsTable(database);
+  ensurePendingFileDuplicateDecisionsTable(database);
 }
 
 function ensureFileInboxRecordsTable(database: SqliteDatabase): void {
@@ -186,6 +187,20 @@ function ensurePendingClarificationsTable(database: SqliteDatabase): void {
       original_text text not null,
       original_attachments_json text not null,
       question text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+  `);
+}
+
+function ensurePendingFileDuplicateDecisionsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists pending_file_duplicate_decisions (
+      chat_id text primary key,
+      actor_id text not null,
+      file_name text not null,
+      suggested_copy_name text not null,
+      existing_record_id text not null,
       created_at text not null,
       expires_at text not null
     );

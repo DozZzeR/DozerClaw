@@ -78,4 +78,51 @@ describe("SqliteStateRepository", () => {
 
     database.close();
   });
+
+  it("stores and clears active pending file duplicate decisions by chat", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.savePendingFileDuplicateDecision({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      fileName: "report.pdf",
+      suggestedCopyName: "report (2).pdf",
+      existingRecordId: "file-existing",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingFileDuplicateDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-02T20:05:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      fileName: "report.pdf",
+      suggestedCopyName: "report (2).pdf",
+      existingRecordId: "file-existing",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingFileDuplicateDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-02T20:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.clearPendingFileDuplicateDecisionByChatId("chat-1");
+    await expect(
+      repository.findActivePendingFileDuplicateDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-02T20:05:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
 });

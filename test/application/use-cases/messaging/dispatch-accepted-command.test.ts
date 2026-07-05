@@ -304,11 +304,15 @@ describe("DispatchAcceptedCommandUseCase", () => {
   });
 
   it("asks what to do when an attachment filename already exists", async () => {
+    const pendingFileDuplicateDecisions =
+      new FakePendingFileDuplicateDecisions();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       attachmentStore: new FakeAttachmentStore(0, {
         fileName: "report.pdf"
-      })
+      }),
+      pendingFileDuplicateDecisions,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
     });
 
     await expect(
@@ -328,13 +332,61 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ).resolves.toEqual({
       chatId: "chat-owner",
       text: [
-        "File already exists: report.pdf.",
-        "What should I do?",
-        "- save a copy as report (2).pdf",
-        "- overwrite the existing file",
-        "- do nothing"
+        "Файл уже есть: report.pdf.",
+        "Что сделать?",
+        "- сохранить копию как report (2).pdf",
+        "- перезаписать существующий файл",
+        "- ничего не делать"
       ].join("\n")
     });
+    expect(pendingFileDuplicateDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      fileName: "report.pdf",
+      suggestedCopyName: "report (2).pdf",
+      existingRecordId: "file-existing",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+  });
+
+  it("understands Russian overwrite answer for a pending duplicate file", async () => {
+    const pendingFileDuplicateDecisions =
+      new FakePendingFileDuplicateDecisions();
+    pendingFileDuplicateDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      fileName: "report.pdf",
+      suggestedCopyName: "report (2).pdf",
+      existingRecordId: "file-existing",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      pendingFileDuplicateDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "перезапиши пож"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Понял: нужно перезаписать report.pdf. Сама перезапись пока не подключена, поэтому существующий файл не изменял."
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
   it("lists pending access requests for owner review", async () => {
@@ -522,6 +574,43 @@ class FakePendingClarifications {
   }
 
   async save(input: NonNullable<FakePendingClarifications["pending"]>) {
+    this.saved = input;
+    this.pending = input;
+  }
+
+  async clearByChatId(chatId: string) {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
+class FakePendingFileDuplicateDecisions {
+  pending:
+    | {
+        chatId: string;
+        actorId: string;
+        fileName: string;
+        suggestedCopyName: string;
+        existingRecordId: string;
+        createdAt: Date;
+        expiresAt: Date;
+      }
+    | undefined;
+  saved: FakePendingFileDuplicateDecisions["pending"];
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: NonNullable<FakePendingFileDuplicateDecisions["pending"]>) {
     this.saved = input;
     this.pending = input;
   }

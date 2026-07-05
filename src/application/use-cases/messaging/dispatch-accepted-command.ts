@@ -2,6 +2,7 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
+import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type {
   InboundIntent,
@@ -43,6 +44,15 @@ export interface PendingClarificationStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingFileDuplicateDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFileDuplicateDecision | undefined>;
+  save(input: PendingFileDuplicateDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -54,6 +64,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingClarifications?: PendingClarificationStore;
+  readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
   readonly now?: () => Date;
 }
 
@@ -108,6 +119,16 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
     const now = this.dependencies.now?.() ?? new Date();
+    const pendingDuplicate =
+      await this.dependencies.pendingFileDuplicateDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingDuplicate && context.attachments.length === 0) {
+      return this.dispatchPendingDuplicateDecision(context, pendingDuplicate);
+    }
+
     const pending =
       await this.dependencies.pendingClarifications?.findActiveByChatId(
         context.chat.id,
@@ -317,6 +338,20 @@ export class DispatchAcceptedCommandUseCase {
     );
 
     if (duplicates.length > 0) {
+      const first = duplicates[0];
+      if (first) {
+        const now = this.dependencies.now?.() ?? new Date();
+        await this.dependencies.pendingFileDuplicateDecisions?.save({
+          chatId: context.chat.id,
+          actorId: context.actor.id,
+          fileName: first.fileName,
+          suggestedCopyName: suggestCopyName(first.fileName),
+          existingRecordId: first.existingRecord.id,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+        });
+      }
+
       return {
         chatId: context.chat.id,
         text: duplicateAttachmentReply(duplicates)
@@ -332,6 +367,46 @@ export class DispatchAcceptedCommandUseCase {
       text: intent?.summary
         ? `Saved ${storedRecords.length} attachment(s): ${intent.summary}.`
         : `Saved ${storedRecords.length} attachment(s).`
+    };
+  }
+
+  private async dispatchPendingDuplicateDecision(
+    context: AcceptedMessageContext,
+    pending: PendingFileDuplicateDecision
+  ): Promise<OutboundReply> {
+    const decision = parseDuplicateDecision(context.text);
+
+    if (!decision) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          `Я жду решение по файлу ${pending.fileName}.`,
+          `Можно написать: "сохрани копию", "перезапиши" или "ничего не делай".`
+        ].join("\n")
+      };
+    }
+
+    await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    if (decision === "skip") {
+      return {
+        chatId: context.chat.id,
+        text: `Ок, ничего не делаю с файлом ${pending.fileName}.`
+      };
+    }
+
+    if (decision === "copy") {
+      return {
+        chatId: context.chat.id,
+        text: `Понял: нужно сохранить копию как ${pending.suggestedCopyName}. Само сохранение копии пока не подключено.`
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: `Понял: нужно перезаписать ${pending.fileName}. Сама перезапись пока не подключена, поэтому существующий файл не изменял.`
     };
   }
 }
@@ -378,15 +453,15 @@ function duplicateAttachmentReply(
   const [first] = duplicates;
 
   if (!first) {
-    return "This file already exists.";
+    return "Такой файл уже есть.";
   }
 
   return [
-    `File already exists: ${first.fileName}.`,
-    "What should I do?",
-    `- save a copy as ${suggestCopyName(first.fileName)}`,
-    "- overwrite the existing file",
-    "- do nothing"
+    `Файл уже есть: ${first.fileName}.`,
+    "Что сделать?",
+    `- сохранить копию как ${suggestCopyName(first.fileName)}`,
+    "- перезаписать существующий файл",
+    "- ничего не делать"
   ].join("\n");
 }
 
@@ -398,4 +473,33 @@ function suggestCopyName(fileName: string): string {
   }
 
   return `${fileName.slice(0, extensionIndex)} (2)${fileName.slice(extensionIndex)}`;
+}
+
+type DuplicateDecision = "copy" | "overwrite" | "skip";
+
+function parseDuplicateDecision(text: string): DuplicateDecision | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (
+    /\b(copy|duplicate)\b/.test(normalized) ||
+    /копи|дубликат|сохрани.*коп/.test(normalized)
+  ) {
+    return "copy";
+  }
+
+  if (
+    /\b(overwrite|replace)\b/.test(normalized) ||
+    /перезап|замен|перепиш/.test(normalized)
+  ) {
+    return "overwrite";
+  }
+
+  if (
+    /\b(skip|nothing|cancel)\b/.test(normalized) ||
+    /ничего|отмен|не надо|забей/.test(normalized)
+  ) {
+    return "skip";
+  }
+
+  return undefined;
 }

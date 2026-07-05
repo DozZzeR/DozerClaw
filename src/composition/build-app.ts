@@ -119,6 +119,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       clearByChatId: (chatId) =>
         stateRepository.clearPendingClarificationByChatId(chatId)
     },
+    pendingFileDuplicateDecisions: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingFileDuplicateDecisionByChatId(
+          chatId,
+          now
+        ),
+      save: (input) => stateRepository.savePendingFileDuplicateDecision(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingFileDuplicateDecisionByChatId(chatId)
+    },
     ...(intentClassifier ? { intentClassifier } : {})
   });
   const handleNormalizedInboundMessage = new HandleNormalizedInboundMessageUseCase(
