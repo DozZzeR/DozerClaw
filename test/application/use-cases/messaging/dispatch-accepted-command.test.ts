@@ -6,6 +6,7 @@ import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/fil
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
+import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
 
 describe("DispatchAcceptedCommandUseCase", () => {
   it("dispatches system health command to handler", async () => {
@@ -389,6 +390,74 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("uses model choice classification when duplicate answer parsing is unclear", async () => {
+    const pendingFileDuplicateDecisions =
+      new FakePendingFileDuplicateDecisions();
+    pendingFileDuplicateDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      fileName: "report.pdf",
+      suggestedCopyName: "report (2).pdf",
+      existingRecordId: "file-existing",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const choiceClassifier = new FakePendingChoiceClassifier("overwrite");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      pendingChoiceClassifier: choiceClassifier,
+      pendingFileDuplicateDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "сделай как лучше, старый не нужен"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Понял: нужно перезаписать report.pdf. Сама перезапись пока не подключена, поэтому существующий файл не изменял."
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(choiceClassifier.seenInput).toEqual({
+      prompt: [
+        "Файл уже есть: report.pdf.",
+        "Что сделать?",
+        "- сохранить копию как report (2).pdf",
+        "- перезаписать существующий файл",
+        "- ничего не делать"
+      ].join("\n"),
+      userReply: "сделай как лучше, старый не нужен",
+      options: [
+        {
+          value: "copy",
+          label: "сохранить копию",
+          description: "Save a second file under the suggested copy name."
+        },
+        {
+          value: "overwrite",
+          label: "перезаписать существующий файл",
+          description: "Replace the existing file."
+        },
+        {
+          value: "skip",
+          label: "ничего не делать",
+          description: "Leave the existing file unchanged."
+        }
+      ]
+    });
+    expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
   it("lists pending access requests for owner review", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
@@ -618,6 +687,18 @@ class FakePendingFileDuplicateDecisions {
   async clearByChatId(chatId: string) {
     this.deletedChatIds.push(chatId);
     this.pending = undefined;
+  }
+}
+
+class FakePendingChoiceClassifier {
+  seenInput: ClassifyPendingChoiceInput | undefined;
+
+  constructor(private readonly choice: "copy" | "overwrite" | "skip" | undefined) {}
+
+  async execute(input: ClassifyPendingChoiceInput) {
+    this.seenInput = input;
+
+    return this.choice;
   }
 }
 

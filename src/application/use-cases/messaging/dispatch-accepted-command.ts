@@ -9,6 +9,10 @@ import type {
   InboundIntentClassifier
 } from "./classify-inbound-intent.js";
 import type {
+  PendingChoiceClassifier,
+  PendingChoiceOption
+} from "./classify-pending-choice.js";
+import type {
   PendingIdentityDecision,
   ReviewPendingIdentityResult
 } from "../identity/review-pending-identity.js";
@@ -63,6 +67,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly attachmentStore?: MessageAttachmentStore;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
+  readonly pendingChoiceClassifier?: PendingChoiceClassifier<DuplicateDecision>;
   readonly pendingClarifications?: PendingClarificationStore;
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
   readonly now?: () => Date;
@@ -374,7 +379,9 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision
   ): Promise<OutboundReply> {
-    const decision = parseDuplicateDecision(context.text);
+    const decision =
+      parseDuplicateDecision(context.text) ??
+      (await this.classifyPendingDuplicateDecision(context.text, pending));
 
     if (!decision) {
       return {
@@ -408,6 +415,25 @@ export class DispatchAcceptedCommandUseCase {
       chatId: context.chat.id,
       text: `Понял: нужно перезаписать ${pending.fileName}. Сама перезапись пока не подключена, поэтому существующий файл не изменял.`
     };
+  }
+
+  private async classifyPendingDuplicateDecision(
+    userReply: string,
+    pending: PendingFileDuplicateDecision
+  ): Promise<DuplicateDecision | undefined> {
+    if (!this.dependencies.pendingChoiceClassifier) {
+      return undefined;
+    }
+
+    try {
+      return await this.dependencies.pendingChoiceClassifier.execute({
+        prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
+        userReply,
+        options: duplicateDecisionOptions
+      });
+    } catch {
+      return undefined;
+    }
   }
 }
 
@@ -456,13 +482,7 @@ function duplicateAttachmentReply(
     return "Такой файл уже есть.";
   }
 
-  return [
-    `Файл уже есть: ${first.fileName}.`,
-    "Что сделать?",
-    `- сохранить копию как ${suggestCopyName(first.fileName)}`,
-    "- перезаписать существующий файл",
-    "- ничего не делать"
-  ].join("\n");
+  return duplicateDecisionPrompt(first.fileName, suggestCopyName(first.fileName));
 }
 
 function suggestCopyName(fileName: string): string {
@@ -475,7 +495,38 @@ function suggestCopyName(fileName: string): string {
   return `${fileName.slice(0, extensionIndex)} (2)${fileName.slice(extensionIndex)}`;
 }
 
-type DuplicateDecision = "copy" | "overwrite" | "skip";
+export type DuplicateDecision = "copy" | "overwrite" | "skip";
+
+const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[] = [
+  {
+    value: "copy",
+    label: "сохранить копию",
+    description: "Save a second file under the suggested copy name."
+  },
+  {
+    value: "overwrite",
+    label: "перезаписать существующий файл",
+    description: "Replace the existing file."
+  },
+  {
+    value: "skip",
+    label: "ничего не делать",
+    description: "Leave the existing file unchanged."
+  }
+];
+
+function duplicateDecisionPrompt(
+  fileName: string,
+  suggestedCopyName: string
+): string {
+  return [
+    `Файл уже есть: ${fileName}.`,
+    "Что сделать?",
+    `- сохранить копию как ${suggestedCopyName}`,
+    "- перезаписать существующий файл",
+    "- ничего не делать"
+  ].join("\n");
+}
 
 function parseDuplicateDecision(text: string): DuplicateDecision | undefined {
   const normalized = text.trim().toLowerCase();

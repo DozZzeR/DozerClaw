@@ -7,6 +7,7 @@ import { BootstrapOwnerIdentityUseCase } from "../application/use-cases/identity
 import { ListPendingAccessRequestsUseCase } from "../application/use-cases/identity/list-pending-access-requests.js";
 import { ReviewPendingIdentityUseCase } from "../application/use-cases/identity/review-pending-identity.js";
 import { ModelInboundIntentClassifier } from "../application/use-cases/messaging/classify-inbound-intent.js";
+import { ModelPendingChoiceClassifier } from "../application/use-cases/messaging/classify-pending-choice.js";
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
@@ -14,6 +15,7 @@ import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-h
 import { GetServiceHealthUseCase } from "../application/use-cases/health/get-service-health.js";
 import { HandleSystemHealthCommandUseCase } from "../application/use-cases/health/handle-system-health-command.js";
 import { DispatchAcceptedCommandUseCase } from "../application/use-cases/messaging/dispatch-accepted-command.js";
+import type { DuplicateDecision } from "../application/use-cases/messaging/dispatch-accepted-command.js";
 import { HandleNormalizedInboundMessageUseCase } from "../application/use-cases/messaging/handle-normalized-inbound-message.js";
 import { ProcessInboundMessageUseCase } from "../application/use-cases/messaging/process-inbound-message.js";
 import { LocalFileStorage } from "../infrastructure/providers/local-file-storage/local-file-storage.js";
@@ -105,6 +107,11 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         model: modelProvider
       })
     : undefined;
+  const pendingChoiceClassifier = modelProvider
+    ? new ModelPendingChoiceClassifier<DuplicateDecision>({
+        model: modelProvider
+      })
+    : undefined;
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
     ...(attachmentStore ? { attachmentStore } : {}),
@@ -129,7 +136,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       clearByChatId: (chatId) =>
         stateRepository.clearPendingFileDuplicateDecisionByChatId(chatId)
     },
-    ...(intentClassifier ? { intentClassifier } : {})
+    ...(intentClassifier ? { intentClassifier } : {}),
+    ...(pendingChoiceClassifier ? { pendingChoiceClassifier } : {})
   });
   const handleNormalizedInboundMessage = new HandleNormalizedInboundMessageUseCase(
     {
