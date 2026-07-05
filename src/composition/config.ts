@@ -5,6 +5,7 @@ export interface AppConfig {
   readonly sqlite: SqliteConfig;
   readonly fileStorage: FileStorageConfig;
   readonly telegram: TelegramConfig;
+  readonly codex: CodexConfig;
 }
 
 export interface SqliteConfig {
@@ -19,6 +20,14 @@ export interface TelegramConfig {
   readonly botToken?: string;
   readonly ownerUserId?: string;
   readonly pollingTimeoutSeconds: number;
+}
+
+export interface CodexConfig {
+  readonly model: string;
+  readonly timeoutMs: number;
+  readonly projectRoot: string;
+  readonly tmpDirectory: string;
+  readonly apiKey?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -41,6 +50,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
         env.DOZERCLAW_TELEGRAM_POLL_TIMEOUT_SECONDS,
         30
       )
+    },
+    codex: {
+      model: env.DOZERCLAW_CODEX_MODEL ?? "gpt-5.5",
+      timeoutMs: parsePositiveInteger(env.DOZERCLAW_CODEX_TIMEOUT_MS, 120000),
+      projectRoot: env.DOZERCLAW_CODEX_PROJECT_ROOT ?? ".",
+      tmpDirectory: env.DOZERCLAW_CODEX_TMP_DIR ?? "data/tmp/codex",
+      ...(env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {})
     }
   };
 }

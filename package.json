@@ -9,6 +9,7 @@
     "test": "vitest run",
     "dev": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "dev:health": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-health.ts",
+    "dev:codex-smoke": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-codex-smoke.ts",
     "dev:register-services": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-register-services.ts",
     "dev:store-file": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-store-file.ts",
     "start": "node --env-file-if-exists=.env dist/main.js",
