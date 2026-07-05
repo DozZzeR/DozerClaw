@@ -178,4 +178,91 @@ describe("buildApp", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("lets owner approve a pending personal chat request", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        }
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const pendingReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-pending-start",
+        provider: "telegram",
+        providerUserId: "tg-pending",
+        providerChatId: "tg-pending",
+        chatKind: "family_private",
+        displayName: "Pending Person",
+        text: "/start",
+        attachments: [],
+        receivedAt: new Date("2026-07-05T10:00:00.000Z"),
+        now: new Date("2026-07-05T10:00:00.000Z")
+      });
+      expect(pendingReply.text).toBe(
+        "Access request is pending owner approval."
+      );
+
+      const pendingListReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-owner-pending",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "/pending",
+        attachments: [],
+        receivedAt: new Date("2026-07-05T10:01:00.000Z"),
+        now: new Date("2026-07-05T10:01:00.000Z")
+      });
+      expect(pendingListReply.text).toContain("Pending access requests:");
+      expect(pendingListReply.text).toContain("Pending Person");
+      const actorId = pendingListReply.text.match(/- ([^:]+):/)?.[1];
+      expect(actorId).toBeTruthy();
+
+      const approveReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-owner-approve",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: `/approve ${actorId}`,
+        attachments: [],
+        receivedAt: new Date("2026-07-05T10:02:00.000Z"),
+        now: new Date("2026-07-05T10:02:00.000Z")
+      });
+      expect(approveReply.text).toBe(
+        `Approved access request for ${actorId}.`
+      );
+
+      const familyReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-family",
+        provider: "telegram",
+        providerUserId: "tg-pending",
+        providerChatId: "tg-pending",
+        chatKind: "family_private",
+        displayName: "Pending Person",
+        text: "hello",
+        attachments: [],
+        receivedAt: new Date("2026-07-05T10:03:00.000Z"),
+        now: new Date("2026-07-05T10:03:00.000Z")
+      });
+      expect(familyReply.text).toBe(
+        "Command not implemented yet: family_message."
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

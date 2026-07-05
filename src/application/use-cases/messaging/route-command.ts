@@ -4,6 +4,10 @@ export type CommandKind =
   | "system_health"
   | "admin_mode_activate"
   | "admin_write"
+  | "start"
+  | "pending_access_requests"
+  | "approve_access_request"
+  | "reject_access_request"
   | "family_message";
 
 export interface CommandRoute {
@@ -27,6 +31,38 @@ export function routeCommand(text: string): CommandRoute {
   if (comparable === "/admin" || comparable === "admin") {
     return {
       kind: "admin_mode_activate",
+      action: "owner_read",
+      normalizedText
+    };
+  }
+
+  if (comparable === "/start" || comparable === "start") {
+    return {
+      kind: "start",
+      action: "family_read",
+      normalizedText
+    };
+  }
+
+  if (comparable === "/pending" || comparable === "pending") {
+    return {
+      kind: "pending_access_requests",
+      action: "owner_read",
+      normalizedText
+    };
+  }
+
+  if (comparable.startsWith("/approve ")) {
+    return {
+      kind: "approve_access_request",
+      action: "owner_read",
+      normalizedText
+    };
+  }
+
+  if (comparable.startsWith("/reject ")) {
+    return {
+      kind: "reject_access_request",
       action: "owner_read",
       normalizedText
     };

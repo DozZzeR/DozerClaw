@@ -166,6 +166,16 @@ class FakeIdentityAccessRepository implements IdentityAccessRepositoryPort {
     );
   }
 
+  async updateMessengerChatApproval(): Promise<void> {}
+
+  async listPendingAccessRequests() {
+    return [];
+  }
+
+  async findPendingAccessRequestByActorId() {
+    return undefined;
+  }
+
   async findActorByIdentity(
     provider: string,
     providerUserId: string

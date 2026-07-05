@@ -59,12 +59,20 @@ describe("SqliteIdentityAccessRepository", () => {
 
     await repository.updateActorStatus(actor.id, "blocked");
     await repository.updateActorIdentityStatus("identity-owner", "blocked");
+    await repository.updateMessengerChatApproval("chat-owner", false);
 
     await expect(
       repository.findActorByIdentity("telegram", "tg-user-1")
     ).resolves.toEqual({
       ...actor,
       status: "blocked"
+    });
+    await expect(
+      repository.findChatByProviderChatId("telegram", "tg-chat-1")
+    ).resolves.toEqual({
+      id: "chat-owner",
+      kind: "owner_private",
+      approved: false
     });
 
     await repository.saveAdminSession({
@@ -80,6 +88,58 @@ describe("SqliteIdentityAccessRepository", () => {
       lastActivityAt: new Date("2026-07-02T20:03:00.000Z"),
       expiresAt: new Date("2026-07-02T20:08:00.000Z")
     });
+
+    database.close();
+  });
+
+  it("lists and finds pending personal access requests", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteIdentityAccessRepository(database);
+
+    const actor = await repository.createActor({
+      id: "actor-pending",
+      displayName: "Pending Person",
+      role: "family",
+      status: "pending"
+    });
+    await repository.createActorIdentity({
+      id: "identity-pending",
+      actorId: actor.id,
+      provider: "telegram",
+      providerUserId: "tg-pending",
+      status: "pending"
+    });
+    await repository.createMessengerChat({
+      id: "chat-pending",
+      provider: "telegram",
+      providerChatId: "tg-pending",
+      kind: "family_private",
+      approved: false
+    });
+
+    const expected = {
+      actor,
+      identity: {
+        id: "identity-pending",
+        provider: "telegram",
+        providerUserId: "tg-pending",
+        status: "pending" as const
+      },
+      chat: {
+        id: "chat-pending",
+        provider: "telegram",
+        providerChatId: "tg-pending",
+        kind: "family_private" as const,
+        approved: false
+      }
+    };
+
+    await expect(repository.listPendingAccessRequests()).resolves.toEqual([
+      expected
+    ]);
+    await expect(
+      repository.findPendingAccessRequestByActorId("actor-pending")
+    ).resolves.toEqual(expected);
 
     database.close();
   });

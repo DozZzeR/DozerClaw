@@ -4,6 +4,8 @@ import type { DozerClawApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { StartupDiagnostic } from "../core/domain/diagnostics/startup-diagnostic.js";
 import { BootstrapOwnerIdentityUseCase } from "../application/use-cases/identity/bootstrap-owner-identity.js";
+import { ListPendingAccessRequestsUseCase } from "../application/use-cases/identity/list-pending-access-requests.js";
+import { ReviewPendingIdentityUseCase } from "../application/use-cases/identity/review-pending-identity.js";
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
@@ -46,6 +48,12 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     repository: identityAccessRepository,
     generateId
   });
+  const listPendingAccessRequests = new ListPendingAccessRequestsUseCase({
+    repository: identityAccessRepository
+  });
+  const reviewPendingIdentity = new ReviewPendingIdentityUseCase({
+    repository: identityAccessRepository
+  });
   const processInboundMessage = new ProcessInboundMessageUseCase({
     identityContextResolver: resolveIdentityContext,
     identityRepository: identityAccessRepository
@@ -79,7 +87,11 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     : undefined;
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
-    ...(attachmentStore ? { attachmentStore } : {})
+    ...(attachmentStore ? { attachmentStore } : {}),
+    pendingAccessRequests: {
+      list: () => listPendingAccessRequests.execute(),
+      review: (input) => reviewPendingIdentity.execute(input)
+    }
   });
   const handleNormalizedInboundMessage = new HandleNormalizedInboundMessageUseCase(
     {

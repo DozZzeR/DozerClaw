@@ -6,6 +6,7 @@ import type { ActorIdentity } from "../../../../src/core/domain/identity/actor-i
 import type { ChatContext } from "../../../../src/core/domain/identity/chat-context.js";
 import type { MessengerChat } from "../../../../src/core/domain/identity/messenger-chat.js";
 import { ActivateAdminSessionUseCase } from "../../../../src/application/use-cases/identity/activate-admin-session.js";
+import { ListPendingAccessRequestsUseCase } from "../../../../src/application/use-cases/identity/list-pending-access-requests.js";
 import { RefreshAdminSessionUseCase } from "../../../../src/application/use-cases/identity/refresh-admin-session.js";
 import { ResolveIdentityContextUseCase } from "../../../../src/application/use-cases/identity/resolve-identity-context.js";
 import { ReviewPendingIdentityUseCase } from "../../../../src/application/use-cases/identity/review-pending-identity.js";
@@ -87,43 +88,79 @@ describe("identity access application use cases", () => {
 
   it("approves and rejects pending identities", async () => {
     const repository = new FakeIdentityAccessRepository();
-    repository.actors.push({
-      id: "actor-pending",
-      displayName: "Pending",
-      role: "family",
-      status: "pending"
-    });
-    repository.identities.push({
-      id: "identity-pending",
-      actorId: "actor-pending",
-      provider: "telegram",
-      providerUserId: "tg-pending",
-      status: "pending"
-    });
+    seedPendingPerson(repository);
 
     const useCase = new ReviewPendingIdentityUseCase({ repository });
 
     await expect(
       useCase.execute({
         actorId: "actor-pending",
-        identityId: "identity-pending",
         decision: "approve"
       })
     ).resolves.toEqual({
+      reviewed: true,
       actorStatus: "active",
-      identityStatus: "active"
+      identityStatus: "active",
+      chatApproved: true
     });
-
+    expect(repository.chats[0]?.approved).toBe(true);
     await expect(
       useCase.execute({
         actorId: "actor-pending",
-        identityId: "identity-pending",
         decision: "reject"
       })
     ).resolves.toEqual({
-      actorStatus: "blocked",
-      identityStatus: "blocked"
+      reviewed: false
     });
+
+    const rejectRepository = new FakeIdentityAccessRepository();
+    seedPendingPerson(rejectRepository);
+    const rejectUseCase = new ReviewPendingIdentityUseCase({
+      repository: rejectRepository
+    });
+
+    await expect(
+      rejectUseCase.execute({
+        actorId: "actor-pending",
+        decision: "reject"
+      })
+    ).resolves.toEqual({
+      reviewed: true,
+      actorStatus: "blocked",
+      identityStatus: "blocked",
+      chatApproved: false
+    });
+    expect(rejectRepository.chats[0]?.approved).toBe(false);
+  });
+
+  it("lists pending access requests", async () => {
+    const repository = new FakeIdentityAccessRepository();
+    seedPendingPerson(repository);
+    const useCase = new ListPendingAccessRequestsUseCase({ repository });
+
+    await expect(useCase.execute()).resolves.toEqual([
+      {
+        actor: {
+          id: "actor-pending",
+          displayName: "Pending",
+          role: "family",
+          status: "pending"
+        },
+        identity: {
+          id: "identity-pending",
+          provider: "telegram",
+          providerUserId: "tg-pending",
+          status: "pending"
+        },
+        chat: {
+          id: "chat-pending",
+          provider: "telegram",
+          providerChatId: "tg-pending",
+          kind: "family_private",
+          approved: false
+        }
+      }
+    ]);
   });
 
   it("activates admin session only after policy and secret verification pass", async () => {
@@ -231,6 +268,29 @@ async function seedOwner(repository: FakeIdentityAccessRepository): Promise<void
     providerChatId: "tg-owner-chat",
     kind: ownerPrivateChat.kind,
     approved: ownerPrivateChat.approved
+  });
+}
+
+function seedPendingPerson(repository: FakeIdentityAccessRepository): void {
+  repository.actors.push({
+    id: "actor-pending",
+    displayName: "Pending",
+    role: "family",
+    status: "pending"
+  });
+  repository.identities.push({
+    id: "identity-pending",
+    actorId: "actor-pending",
+    provider: "telegram",
+    providerUserId: "tg-pending",
+    status: "pending"
+  });
+  repository.chats.push({
+    id: "chat-pending",
+    provider: "telegram",
+    providerChatId: "tg-pending",
+    kind: "family_private",
+    approved: false
   });
 }
 
@@ -364,5 +424,57 @@ class FakeIdentityAccessRepository implements IdentityAccessRepositoryPort {
       ...identity,
       status
     };
+  }
+
+  async updateMessengerChatApproval(
+    chatId: string,
+    approved: boolean
+  ): Promise<void> {
+    const chat = this.chats.find((candidate) => candidate.id === chatId);
+
+    if (!chat) {
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    this.chats[this.chats.indexOf(chat)] = {
+      ...chat,
+      approved
+    };
+  }
+
+  async listPendingAccessRequests() {
+    return this.chats
+      .filter((chat) => !chat.approved && chat.kind === "family_private")
+      .flatMap((chat) => {
+        const identity = this.identities.find(
+          (candidate) =>
+            candidate.provider === chat.provider &&
+            candidate.providerUserId === chat.providerChatId
+        );
+        const actor = identity
+          ? this.actors.find((candidate) => candidate.id === identity.actorId)
+          : undefined;
+
+        return actor && identity
+          ? [
+              {
+                actor,
+                identity: {
+                  id: identity.id,
+                  provider: identity.provider,
+                  providerUserId: identity.providerUserId,
+                  status: identity.status
+                },
+                chat
+              }
+            ]
+          : [];
+      });
+  }
+
+  async findPendingAccessRequestByActorId(actorId: string) {
+    return (await this.listPendingAccessRequests()).find(
+      (request) => request.actor.id === actorId
+    );
   }
 }

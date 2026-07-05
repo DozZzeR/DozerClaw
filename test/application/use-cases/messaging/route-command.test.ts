@@ -22,6 +22,35 @@ describe("routeCommand", () => {
     });
   });
 
+  it("routes start command to family read", () => {
+    expect(routeCommand("/start")).toEqual({
+      kind: "start",
+      action: "family_read",
+      normalizedText: "/start"
+    });
+  });
+
+  it("routes pending access list to owner read", () => {
+    expect(routeCommand("/pending")).toEqual({
+      kind: "pending_access_requests",
+      action: "owner_read",
+      normalizedText: "/pending"
+    });
+  });
+
+  it("routes access review commands to owner read", () => {
+    expect(routeCommand("/approve actor-1")).toEqual({
+      kind: "approve_access_request",
+      action: "owner_read",
+      normalizedText: "/approve actor-1"
+    });
+    expect(routeCommand("/reject actor-1")).toEqual({
+      kind: "reject_access_request",
+      action: "owner_read",
+      normalizedText: "/reject actor-1"
+    });
+  });
+
   it("routes explicit restart command to admin write", () => {
     expect(routeCommand("/restart service")).toEqual({
       kind: "admin_write",

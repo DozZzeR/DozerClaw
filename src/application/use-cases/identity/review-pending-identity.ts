@@ -5,14 +5,19 @@ export type PendingIdentityDecision = "approve" | "reject";
 
 export interface ReviewPendingIdentityInput {
   readonly actorId: string;
-  readonly identityId: string;
   readonly decision: PendingIdentityDecision;
 }
 
-export interface ReviewPendingIdentityResult {
-  readonly actorStatus: ActorStatus;
-  readonly identityStatus: ActorStatus;
-}
+export type ReviewPendingIdentityResult =
+  | {
+      readonly reviewed: true;
+      readonly actorStatus: ActorStatus;
+      readonly identityStatus: ActorStatus;
+      readonly chatApproved: boolean;
+    }
+  | {
+      readonly reviewed: false;
+    };
 
 export class ReviewPendingIdentityUseCase {
   constructor(
@@ -24,18 +29,34 @@ export class ReviewPendingIdentityUseCase {
   async execute(
     input: ReviewPendingIdentityInput
   ): Promise<ReviewPendingIdentityResult> {
+    const request =
+      await this.dependencies.repository.findPendingAccessRequestByActorId(
+        input.actorId
+      );
+
+    if (!request) {
+      return { reviewed: false };
+    }
+
     const status: ActorStatus =
       input.decision === "approve" ? "active" : "blocked";
+    const chatApproved = input.decision === "approve";
 
     await this.dependencies.repository.updateActorStatus(input.actorId, status);
     await this.dependencies.repository.updateActorIdentityStatus(
-      input.identityId,
+      request.identity.id,
       status
+    );
+    await this.dependencies.repository.updateMessengerChatApproval(
+      request.chat.id,
+      chatApproved
     );
 
     return {
+      reviewed: true,
       actorStatus: status,
-      identityStatus: status
+      identityStatus: status,
+      chatApproved
     };
   }
 }

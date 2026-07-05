@@ -7,6 +7,7 @@ import type {
 } from "../../../core/domain/identity/chat-context.js";
 import type { MessengerChat } from "../../../core/domain/identity/messenger-chat.js";
 import type { IdentityAccessRepositoryPort } from "../../../ports/identity-access-repository-port.js";
+import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 export class SqliteIdentityAccessRepository
@@ -148,6 +149,100 @@ export class SqliteIdentityAccessRepository
       .run({ identityId, status });
   }
 
+  async updateMessengerChatApproval(
+    chatId: string,
+    approved: boolean
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          update messenger_chats
+          set approved = @approved
+          where id = @chatId
+        `
+      )
+      .run({ chatId, approved: approved ? 1 : 0 });
+  }
+
+  async listPendingAccessRequests(): Promise<readonly PendingAccessRequest[]> {
+    const rows = this.database
+      .prepare(
+        `
+          select
+            actors.id as actor_id,
+            actors.display_name,
+            actors.role,
+            actors.status as actor_status,
+            actor_identities.id as identity_id,
+            actor_identities.provider,
+            actor_identities.provider_user_id,
+            actor_identities.status as identity_status,
+            messenger_chats.id as chat_id,
+            messenger_chats.provider_chat_id,
+            messenger_chats.kind,
+            messenger_chats.approved
+          from actors
+          inner join actor_identities
+            on actor_identities.actor_id = actors.id
+          inner join messenger_chats
+            on messenger_chats.provider = actor_identities.provider
+            and messenger_chats.provider_chat_id = actor_identities.provider_user_id
+          where actors.role = 'family'
+            and messenger_chats.kind = 'family_private'
+            and (
+              actors.status = 'pending'
+              or actor_identities.status = 'pending'
+              or messenger_chats.approved = 0
+            )
+          order by actors.display_name, actors.id
+        `
+      )
+      .all() as PendingAccessRequestRow[];
+
+    return rows.map(pendingAccessRequestFromRow);
+  }
+
+  async findPendingAccessRequestByActorId(
+    actorId: string
+  ): Promise<PendingAccessRequest | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            actors.id as actor_id,
+            actors.display_name,
+            actors.role,
+            actors.status as actor_status,
+            actor_identities.id as identity_id,
+            actor_identities.provider,
+            actor_identities.provider_user_id,
+            actor_identities.status as identity_status,
+            messenger_chats.id as chat_id,
+            messenger_chats.provider_chat_id,
+            messenger_chats.kind,
+            messenger_chats.approved
+          from actors
+          inner join actor_identities
+            on actor_identities.actor_id = actors.id
+          inner join messenger_chats
+            on messenger_chats.provider = actor_identities.provider
+            and messenger_chats.provider_chat_id = actor_identities.provider_user_id
+          where actors.id = @actorId
+            and actors.role = 'family'
+            and messenger_chats.kind = 'family_private'
+            and (
+              actors.status = 'pending'
+              or actor_identities.status = 'pending'
+              or messenger_chats.approved = 0
+            )
+          limit 1
+        `
+      )
+      .get({ actorId }) as PendingAccessRequestRow | undefined;
+
+    return row ? pendingAccessRequestFromRow(row) : undefined;
+  }
+
   async findActorByIdentity(
     provider: string,
     providerUserId: string
@@ -229,6 +324,21 @@ interface AdminSessionRow {
   readonly expires_at: string;
 }
 
+interface PendingAccessRequestRow {
+  readonly actor_id: string;
+  readonly display_name: string;
+  readonly role: ActorRole;
+  readonly actor_status: ActorStatus;
+  readonly identity_id: string;
+  readonly provider: string;
+  readonly provider_user_id: string;
+  readonly identity_status: ActorStatus;
+  readonly chat_id: string;
+  readonly provider_chat_id: string;
+  readonly kind: ChatContextKind;
+  readonly approved: 0 | 1;
+}
+
 function actorFromRow(row: ActorRow): Actor {
   return {
     id: row.id,
@@ -253,5 +363,31 @@ function adminSessionFromRow(row: AdminSessionRow): AdminSession {
     chatId: row.chat_id,
     lastActivityAt: new Date(row.last_activity_at),
     expiresAt: new Date(row.expires_at)
+  };
+}
+
+function pendingAccessRequestFromRow(
+  row: PendingAccessRequestRow
+): PendingAccessRequest {
+  return {
+    actor: {
+      id: row.actor_id,
+      displayName: row.display_name,
+      role: row.role,
+      status: row.actor_status
+    },
+    identity: {
+      id: row.identity_id,
+      provider: row.provider,
+      providerUserId: row.provider_user_id,
+      status: row.identity_status
+    },
+    chat: {
+      id: row.chat_id,
+      provider: row.provider,
+      providerChatId: row.provider_chat_id,
+      kind: row.kind,
+      approved: row.approved === 1
+    }
   };
 }
