@@ -125,10 +125,15 @@ export class DispatchAcceptedCommandUseCase {
           text: context.text,
           attachments: context.attachments
         };
-    const intent = await this.dependencies.intentClassifier!.execute({
-      text: classifierInput.text,
-      attachments: classifierInput.attachments
-    });
+    let intent: InboundIntent;
+    try {
+      intent = await this.dependencies.intentClassifier!.execute({
+        text: classifierInput.text,
+        attachments: classifierInput.attachments
+      });
+    } catch {
+      return this.dispatchModelFailure(context, classifierInput.attachments);
+    }
 
     if (intent.kind === "ask_clarification") {
       await this.dependencies.pendingClarifications?.save({
@@ -182,6 +187,32 @@ export class DispatchAcceptedCommandUseCase {
       chatId: context.chat.id,
       text: "Command not implemented yet: family_message."
     });
+  }
+
+  private async dispatchModelFailure(
+    context: AcceptedMessageContext,
+    attachments: readonly MessageAttachment[]
+  ): Promise<OutboundReply> {
+    await this.dependencies.pendingClarifications?.clearByChatId(
+      context.chat.id
+    );
+
+    if (attachments.length > 0 && this.dependencies.attachmentStore) {
+      const reply = await this.storeFamilyMessageAttachments({
+        ...context,
+        attachments
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: `${reply.text} Model routing is temporarily unavailable, so I could not classify it yet.`
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: "Model routing is temporarily unavailable. Please try again in a moment."
+    };
   }
 
   private async listPendingAccessRequests(chatId: string): Promise<OutboundReply> {

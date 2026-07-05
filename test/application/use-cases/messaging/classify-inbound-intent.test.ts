@@ -36,7 +36,12 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.purpose).toBe(
       "Classify DozerClaw inbound family message intent"
     );
-    expect(model.request?.outputSchema?.name).toBe("dozerclaw_inbound_intent");
+    expect(model.request?.outputSchema).toMatchObject({
+      name: "dozerclaw_inbound_intent",
+      schema: {
+        required: ["kind", "question", "summary", "query", "reason"]
+      }
+    });
     expect(model.request?.input).toContain("scan.jpg");
   });
 });

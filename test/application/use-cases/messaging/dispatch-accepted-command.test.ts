@@ -238,6 +238,43 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("falls back to attachment storage when model intent classification fails", async () => {
+    const attachmentStore = new FakeAttachmentStore(1);
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      intentClassifier: {
+        async execute() {
+          throw new Error("model failed");
+        }
+      }
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved 1 attachment(s). Model routing is temporarily unavailable, so I could not classify it yet."
+    });
+    expect(attachmentStore.seenInput?.attachments).toEqual([
+      {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1"
+      }
+    ]);
+  });
+
   it("reports when family message attachments have no downloadable files", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: {

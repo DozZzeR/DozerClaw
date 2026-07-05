@@ -145,19 +145,19 @@ const inboundIntentSchema = {
       ]
     },
     question: {
-      type: "string"
+      type: ["string", "null"]
     },
     summary: {
-      type: "string"
+      type: ["string", "null"]
     },
     query: {
-      type: "string"
+      type: ["string", "null"]
     },
     reason: {
-      type: "string"
+      type: ["string", "null"]
     }
   },
-  required: ["kind"]
+  required: ["kind", "question", "summary", "query", "reason"]
 };
 
 function fallbackIntent(): InboundIntent {
