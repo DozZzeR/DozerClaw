@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { ModelPort } from "../../../ports/model-port.js";
 
@@ -42,16 +46,7 @@ export class ModelInboundIntentClassifier implements InboundIntentClassifier {
   async execute(input: ClassifyInboundIntentInput): Promise<InboundIntent> {
     const response = await this.dependencies.model.runTextRequest({
       purpose: "Classify DozerClaw inbound family message intent",
-      input: JSON.stringify({
-        text: input.text,
-        attachments: input.attachments.map((attachment) => ({
-          id: attachment.id,
-          fileName: attachment.fileName,
-          mimeType: attachment.mimeType,
-          sizeBytes: attachment.sizeBytes,
-          hasProviderFileId: Boolean(attachment.providerFileId)
-        }))
-      }),
+      input: buildClassifierPrompt(input),
       outputSchema: {
         name: "dozerclaw_inbound_intent",
         schema: inboundIntentSchema
@@ -60,6 +55,38 @@ export class ModelInboundIntentClassifier implements InboundIntentClassifier {
 
     return parseInboundIntent(response.text);
   }
+}
+
+function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
+  return [
+    readAgentInstruction("MASTER_PROMPT.md"),
+    readAgentInstruction("skills/structured-output/SKILL.md"),
+    "# Task",
+    "Classify the inbound family message into one intent.",
+    "",
+    "# Input",
+    JSON.stringify({
+      text: input.text,
+      attachments: input.attachments.map((attachment) => ({
+        id: attachment.id,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        hasProviderFileId: Boolean(attachment.providerFileId)
+      }))
+    })
+  ].join("\n\n");
+}
+
+function readAgentInstruction(relativePath: string): string {
+  return readFileSync(join(agentRootDirectory(), relativePath), "utf8").trim();
+}
+
+function agentRootDirectory(): string {
+  return join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../../agent"
+  );
 }
 
 export function parseInboundIntent(text: string): InboundIntent {

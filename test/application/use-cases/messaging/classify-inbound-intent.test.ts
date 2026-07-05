@@ -36,6 +36,11 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.purpose).toBe(
       "Classify DozerClaw inbound family message intent"
     );
+    expect(model.request?.input).toContain("# DozerClaw Agent");
+    expect(model.request?.input).toContain("# Structured Output Skill");
+    expect(model.request?.input).toContain(
+      "Every field declared in `properties` must be listed in `required`."
+    );
     expect(model.request?.outputSchema).toMatchObject({
       name: "dozerclaw_inbound_intent",
       schema: {
