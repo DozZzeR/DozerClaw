@@ -239,6 +239,38 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("records a family fact from model record_fact intent", async () => {
+    const factRecorder = new FakeFamilyFactRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "record_fact",
+        summary: "Max prefers chamomile tea before sleep."
+      }),
+      familyFactRecorder: factRecorder,
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "remember that Max prefers chamomile tea before sleep"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family fact: Max prefers chamomile tea before sleep."
+    });
+    expect(factRecorder.seenInput).toEqual({
+      summary: "Max prefers chamomile tea before sleep.",
+      sourceActorId: "actor-owner",
+      sourceChatId: "chat-owner",
+      sourceMessageText: "remember that Max prefers chamomile tea before sleep"
+    });
+  });
+
   it("falls back to attachment storage when model intent classification fails", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -642,10 +674,38 @@ class FakeIntentClassifier {
     private readonly intent:
       | { readonly kind: "ask_clarification"; readonly question: string }
       | { readonly kind: "store_file"; readonly summary?: string }
+      | { readonly kind: "record_fact"; readonly summary: string }
   ) {}
 
   async execute(_input: ClassifyInboundIntentInput) {
     return this.intent;
+  }
+}
+
+class FakeFamilyFactRecorder {
+  seenInput:
+    | {
+        summary: string;
+        sourceActorId: string;
+        sourceChatId: string;
+        sourceMessageText: string;
+      }
+    | undefined;
+
+  async execute(input: NonNullable<FakeFamilyFactRecorder["seenInput"]>) {
+    this.seenInput = input;
+
+    return {
+      id: "fact-1",
+      category: "preference" as const,
+      body: input.summary,
+      sourceActorId: input.sourceActorId,
+      sourceChatId: input.sourceChatId,
+      sourceMessageText: input.sourceMessageText,
+      status: "active" as const,
+      createdAt: new Date("2026-07-07T10:00:00.000Z"),
+      updatedAt: new Date("2026-07-07T10:00:00.000Z")
+    };
   }
 }
 

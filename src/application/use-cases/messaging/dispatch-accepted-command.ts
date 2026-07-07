@@ -1,9 +1,11 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
+import type { RecordFamilyFactInput } from "../family-memory/record-family-fact.js";
 import type {
   FileDuplicateMutationDecision,
   ResolveFileDuplicateDecisionInput,
@@ -34,6 +36,10 @@ export interface MessageAttachmentStore {
   execute(
     input: StoreMessageAttachmentsInput
   ): Promise<readonly StoreInboundFileResult[]>;
+}
+
+export interface FamilyFactRecorder {
+  execute(input: RecordFamilyFactInput): Promise<FamilyFact>;
 }
 
 export interface PendingAccessRequestReviewer {
@@ -76,6 +82,7 @@ export interface DispatchAcceptedCommandInput {
 export interface DispatchAcceptedCommandDependencies {
   readonly systemHealthHandler: SystemHealthCommandHandler;
   readonly attachmentStore?: MessageAttachmentStore;
+  readonly familyFactRecorder?: FamilyFactRecorder;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<DuplicateDecision>;
@@ -208,6 +215,10 @@ export class DispatchAcceptedCommandUseCase {
       context.chat.id
     );
 
+    if (intent.kind === "record_fact") {
+      return this.recordFamilyFact(context, intent);
+    }
+
     return {
       chatId: context.chat.id,
       text: `I understood this as ${intent.kind}, but that action is not connected yet.`
@@ -250,6 +261,30 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: "Model routing is temporarily unavailable. Please try again in a moment."
+    };
+  }
+
+  private async recordFamilyFact(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "record_fact" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.familyFactRecorder) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const fact = await this.dependencies.familyFactRecorder.execute({
+      summary: intent.summary,
+      sourceActorId: context.actor.id,
+      sourceChatId: context.chat.id,
+      sourceMessageText: context.text
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: `Saved family fact: ${fact.body}`
     };
   }
 

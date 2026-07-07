@@ -11,6 +11,7 @@ import { ModelPendingChoiceClassifier } from "../application/use-cases/messaging
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
 import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/file-inbox/resolve-file-duplicate-decision.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
+import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
 import { GetServiceHealthUseCase } from "../application/use-cases/health/get-service-health.js";
@@ -25,6 +26,7 @@ import { RegistryServiceMonitor } from "../infrastructure/providers/local-monito
 import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-cli-model-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
+import { SqliteFamilyMemoryRepository } from "../infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sqlite-file-inbox-repository.js";
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
@@ -46,6 +48,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const identityAccessRepository = new SqliteIdentityAccessRepository(database);
   const serviceRegistryRepository = new SqliteServiceRegistryRepository(database);
   const fileInboxRepository = new SqliteFileInboxRepository(database);
+  const familyMemoryRepository = new SqliteFamilyMemoryRepository(database);
   const generateId = () => randomUUID();
   const bootstrapOwnerIdentity = new BootstrapOwnerIdentityUseCase({
     repository: identityAccessRepository,
@@ -76,6 +79,11 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const systemHealthHandler = new HandleSystemHealthCommandUseCase({
     getHostHealth,
     getServiceHealth
+  });
+  const familyFactRecorder = new RecordFamilyFactUseCase({
+    repository: familyMemoryRepository,
+    generateId,
+    now: () => new Date()
   });
   const fileStorage = new LocalFileStorage({
     rootDirectory: config.fileStorage.rootDirectory,
@@ -127,6 +135,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     systemHealthHandler,
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
+    familyFactRecorder,
     pendingAccessRequests: {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)

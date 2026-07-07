@@ -90,6 +90,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
 
   ensureMonitoredServicesTable(database);
   ensureFileInboxRecordsTable(database);
+  ensureFamilyFactsTable(database);
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
 }
@@ -176,6 +177,25 @@ function ensureMonitoredServicesTable(database: SqliteDatabase): void {
     from monitored_services_old;
 
     drop table monitored_services_old;
+  `);
+}
+
+function ensureFamilyFactsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists family_facts (
+      id text primary key,
+      category text not null check (
+        category in ('event', 'preference', 'place', 'reference_link')
+      ),
+      body text not null,
+      subject_id text,
+      source_actor_id text not null,
+      source_chat_id text not null,
+      source_message_text text not null,
+      status text not null check (status in ('active', 'archived')),
+      created_at text not null,
+      updated_at text not null
+    );
   `);
 }
 

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../../src/composition/build-app.js";
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
+import { SqliteFamilyMemoryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteServiceRegistryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import type { ModelPort } from "../../src/ports/model-port.js";
 
@@ -175,6 +176,71 @@ describe("buildApp", () => {
       expect(reply.text).toContain(
         `- local-service: failed (path missing: ${servicePath})`
       );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stores a model-classified family fact through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider: {
+          async runTextRequest() {
+            return {
+              text: JSON.stringify({
+                kind: "record_fact",
+                question: null,
+                summary: "Max prefers chamomile tea before sleep.",
+                query: null,
+                reason: null
+              })
+            };
+          }
+        }
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-fact",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "remember Max prefers chamomile tea before sleep",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:00:00.000Z"),
+        now: new Date("2026-07-07T10:00:00.000Z")
+      });
+      expect(reply.text).toBe(
+        "Saved family fact: Max prefers chamomile tea before sleep."
+      );
+
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteFamilyMemoryRepository(database);
+      await expect(repository.listRecentActiveFamilyFacts(10)).resolves.toEqual([
+        expect.objectContaining({
+          category: "preference",
+          body: "Max prefers chamomile tea before sleep.",
+          sourceActorId: expect.any(String),
+          sourceChatId: expect.any(String),
+          sourceMessageText: "remember Max prefers chamomile tea before sleep",
+          status: "active"
+        })
+      ]);
+      database.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
