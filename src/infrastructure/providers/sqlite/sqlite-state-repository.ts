@@ -114,6 +114,9 @@ export class SqliteStateRepository implements StateRepositoryPort {
             file_name as fileName,
             suggested_copy_name as suggestedCopyName,
             existing_record_id as existingRecordId,
+            provider,
+            received_at as receivedAt,
+            source_attachment_json as sourceAttachmentJson,
             created_at as createdAt,
             expires_at as expiresAt
           from pending_file_duplicate_decisions
@@ -128,12 +131,19 @@ export class SqliteStateRepository implements StateRepositoryPort {
       return undefined;
     }
 
+    const sourceAttachment = row.sourceAttachmentJson
+      ? parseAttachment(row.sourceAttachmentJson)
+      : undefined;
+
     return {
       chatId: row.chatId,
       actorId: row.actorId,
       fileName: row.fileName,
       suggestedCopyName: row.suggestedCopyName,
       existingRecordId: row.existingRecordId,
+      ...(row.provider ? { provider: row.provider } : {}),
+      ...(row.receivedAt ? { receivedAt: new Date(row.receivedAt) } : {}),
+      ...(sourceAttachment ? { sourceAttachment } : {}),
       createdAt: new Date(row.createdAt),
       expiresAt: new Date(row.expiresAt)
     };
@@ -151,15 +161,21 @@ export class SqliteStateRepository implements StateRepositoryPort {
             file_name,
             suggested_copy_name,
             existing_record_id,
+            provider,
+            received_at,
+            source_attachment_json,
             created_at,
             expires_at
           )
-          values (?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(chat_id) do update set
             actor_id = excluded.actor_id,
             file_name = excluded.file_name,
             suggested_copy_name = excluded.suggested_copy_name,
             existing_record_id = excluded.existing_record_id,
+            provider = excluded.provider,
+            received_at = excluded.received_at,
+            source_attachment_json = excluded.source_attachment_json,
             created_at = excluded.created_at,
             expires_at = excluded.expires_at
         `
@@ -170,6 +186,9 @@ export class SqliteStateRepository implements StateRepositoryPort {
         input.fileName,
         input.suggestedCopyName,
         input.existingRecordId,
+        input.provider ?? null,
+        input.receivedAt?.toISOString() ?? null,
+        input.sourceAttachment ? JSON.stringify(input.sourceAttachment) : null,
         input.createdAt.toISOString(),
         input.expiresAt.toISOString()
       );
@@ -200,6 +219,9 @@ interface PendingFileDuplicateDecisionRow {
   readonly fileName: string;
   readonly suggestedCopyName: string;
   readonly existingRecordId: string;
+  readonly provider: string | null;
+  readonly receivedAt: string | null;
+  readonly sourceAttachmentJson: string | null;
   readonly createdAt: string;
   readonly expiresAt: string;
 }
@@ -234,4 +256,8 @@ function parseAttachments(json: string): readonly MessageAttachment[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseAttachment(json: string): MessageAttachment | undefined {
+  return parseAttachments(`[${json}]`)[0];
 }

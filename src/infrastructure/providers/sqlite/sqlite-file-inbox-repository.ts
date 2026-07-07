@@ -40,6 +40,14 @@ export class SqliteFileInboxRepository implements FileInboxRepositoryPort {
             @receivedAt,
             @createdAt
           )
+          on conflict(id) do update set
+            original_file_name = excluded.original_file_name,
+            mime_type = excluded.mime_type,
+            size_bytes = excluded.size_bytes,
+            storage_id = excluded.storage_id,
+            storage_path = excluded.storage_path,
+            received_at = excluded.received_at,
+            created_at = excluded.created_at
         `
       )
       .run({

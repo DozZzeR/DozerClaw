@@ -89,6 +89,15 @@ describe("SqliteStateRepository", () => {
       fileName: "report.pdf",
       suggestedCopyName: "report (2).pdf",
       existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T19:59:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 123
+      },
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
     });
@@ -104,6 +113,15 @@ describe("SqliteStateRepository", () => {
       fileName: "report.pdf",
       suggestedCopyName: "report (2).pdf",
       existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T19:59:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 123
+      },
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
     });

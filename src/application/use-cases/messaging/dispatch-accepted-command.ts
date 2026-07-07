@@ -5,6 +5,11 @@ import type { PendingClarification } from "../../../ports/state-repository-port.
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type {
+  FileDuplicateMutationDecision,
+  ResolveFileDuplicateDecisionInput,
+  ResolveFileDuplicateDecisionResult
+} from "../file-inbox/resolve-file-duplicate-decision.js";
+import type {
   InboundIntent,
   InboundIntentClassifier
 } from "./classify-inbound-intent.js";
@@ -48,6 +53,12 @@ export interface PendingClarificationStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface FileDuplicateDecisionResolver {
+  execute(
+    input: ResolveFileDuplicateDecisionInput
+  ): Promise<ResolveFileDuplicateDecisionResult>;
+}
+
 export interface PendingFileDuplicateDecisionStore {
   findActiveByChatId(
     chatId: string,
@@ -68,6 +79,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<DuplicateDecision>;
+  readonly duplicateDecisionResolver?: FileDuplicateDecisionResolver;
   readonly pendingClarifications?: PendingClarificationStore;
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
   readonly now?: () => Date;
@@ -352,6 +364,9 @@ export class DispatchAcceptedCommandUseCase {
           fileName: first.fileName,
           suggestedCopyName: suggestCopyName(first.fileName),
           existingRecordId: first.existingRecord.id,
+          provider: context.provider,
+          receivedAt: context.receivedAt,
+          ...sourceAttachmentForDuplicate(context.attachments, first.fileName),
           createdAt: now,
           expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
         });
@@ -404,17 +419,43 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    if (decision === "copy") {
+    const result = await this.resolveDuplicateMutation(decision, pending);
+
+    if (result.status === "copied") {
       return {
         chatId: context.chat.id,
-        text: `Понял: нужно сохранить копию как ${pending.suggestedCopyName}. Само сохранение копии пока не подключено.`
+        text: `Готово: сохранил копию как ${pending.suggestedCopyName}.`
+      };
+    }
+
+    if (result.status === "overwritten") {
+      return {
+        chatId: context.chat.id,
+        text: `Готово: перезаписал ${pending.fileName}.`
       };
     }
 
     return {
       chatId: context.chat.id,
-      text: `Понял: нужно перезаписать ${pending.fileName}. Сама перезапись пока не подключена, поэтому существующий файл не изменял.`
+      text: `Не могу применить решение по файлу ${pending.fileName}: не сохранились данные исходного вложения. Пришли файл еще раз.`
     };
+  }
+
+  private async resolveDuplicateMutation(
+    decision: FileDuplicateMutationDecision,
+    pending: PendingFileDuplicateDecision
+  ): Promise<ResolveFileDuplicateDecisionResult> {
+    if (!this.dependencies.duplicateDecisionResolver) {
+      return {
+        status: "unavailable",
+        reason: "missing_source_attachment"
+      };
+    }
+
+    return await this.dependencies.duplicateDecisionResolver.execute({
+      decision,
+      pending
+    });
   }
 
   private async classifyPendingDuplicateDecision(
@@ -483,6 +524,17 @@ function duplicateAttachmentReply(
   }
 
   return duplicateDecisionPrompt(first.fileName, suggestCopyName(first.fileName));
+}
+
+function sourceAttachmentForDuplicate(
+  attachments: readonly MessageAttachment[],
+  fileName: string
+): { readonly sourceAttachment: MessageAttachment } | Record<string, never> {
+  const sourceAttachment =
+    attachments.find((attachment) => attachment.fileName === fileName) ??
+    attachments.find((attachment) => Boolean(attachment.providerFileId));
+
+  return sourceAttachment ? { sourceAttachment } : {};
 }
 
 function suggestCopyName(fileName: string): string {

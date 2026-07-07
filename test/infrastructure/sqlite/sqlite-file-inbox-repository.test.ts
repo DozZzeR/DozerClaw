@@ -94,4 +94,44 @@ describe("SqliteFileInboxRepository", () => {
 
     database.close();
   });
+
+  it("updates an existing file inbox record by id", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteFileInboxRepository(database);
+
+    await repository.saveFileInboxRecord({
+      id: "file-inbox-1",
+      originalFileName: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 123,
+      storageId: "stored-file-1",
+      storagePath: "inbox/file-inbox-1/report.pdf",
+      receivedAt: new Date("2026-07-03T10:59:00.000Z"),
+      createdAt: new Date("2026-07-03T11:00:00.000Z")
+    });
+    await repository.saveFileInboxRecord({
+      id: "file-inbox-1",
+      originalFileName: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 456,
+      storageId: "stored-file-2",
+      storagePath: "inbox/file-inbox-1/report-new.pdf",
+      receivedAt: new Date("2026-07-03T11:59:00.000Z"),
+      createdAt: new Date("2026-07-03T11:00:00.000Z")
+    });
+
+    await expect(repository.findFileInboxRecordById("file-inbox-1")).resolves.toEqual({
+      id: "file-inbox-1",
+      originalFileName: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 456,
+      storageId: "stored-file-2",
+      storagePath: "inbox/file-inbox-1/report-new.pdf",
+      receivedAt: new Date("2026-07-03T11:59:00.000Z"),
+      createdAt: new Date("2026-07-03T11:00:00.000Z")
+    });
+
+    database.close();
+  });
+
 });

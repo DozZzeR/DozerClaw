@@ -201,10 +201,17 @@ function ensurePendingFileDuplicateDecisionsTable(database: SqliteDatabase): voi
       file_name text not null,
       suggested_copy_name text not null,
       existing_record_id text not null,
+      provider text,
+      received_at text,
+      source_attachment_json text,
       created_at text not null,
       expires_at text not null
     );
   `);
+
+  ensureColumn(database, "pending_file_duplicate_decisions", "provider", "provider text");
+  ensureColumn(database, "pending_file_duplicate_decisions", "received_at", "received_at text");
+  ensureColumn(database, "pending_file_duplicate_decisions", "source_attachment_json", "source_attachment_json text");
 }
 
 function ensureColumn(

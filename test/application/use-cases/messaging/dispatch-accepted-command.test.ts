@@ -346,6 +346,13 @@ describe("DispatchAcceptedCommandUseCase", () => {
       fileName: "report.pdf",
       suggestedCopyName: "report (2).pdf",
       existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf"
+      },
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
     });
@@ -360,6 +367,13 @@ describe("DispatchAcceptedCommandUseCase", () => {
       fileName: "report.pdf",
       suggestedCopyName: "report (2).pdf",
       existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf"
+      },
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
     };
@@ -367,9 +381,11 @@ describe("DispatchAcceptedCommandUseCase", () => {
       kind: "ask_clarification",
       question: "should not be reached"
     });
+    const duplicateDecisionResolver = new FakeDuplicateDecisionResolver("overwritten");
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       intentClassifier,
+      duplicateDecisionResolver,
       pendingFileDuplicateDecisions,
       now: () => new Date("2026-07-02T20:05:00.000Z")
     });
@@ -384,9 +400,28 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Понял: нужно перезаписать report.pdf. Сама перезапись пока не подключена, поэтому существующий файл не изменял."
+      text: "Готово: перезаписал report.pdf."
     });
     expect(intentClassifier.seenInput).toBeUndefined();
+    expect(duplicateDecisionResolver.seenInput).toEqual({
+      decision: "overwrite",
+      pending: {
+        chatId: "chat-owner",
+        actorId: "actor-owner",
+        fileName: "report.pdf",
+        suggestedCopyName: "report (2).pdf",
+        existingRecordId: "file-existing",
+        provider: "telegram",
+        receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+        sourceAttachment: {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "report.pdf"
+        },
+        createdAt: new Date("2026-07-02T20:00:00.000Z"),
+        expiresAt: new Date("2026-07-02T20:30:00.000Z")
+      }
+    });
     expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
@@ -399,6 +434,13 @@ describe("DispatchAcceptedCommandUseCase", () => {
       fileName: "report.pdf",
       suggestedCopyName: "report (2).pdf",
       existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf"
+      },
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
     };
@@ -411,6 +453,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       systemHealthHandler: unusedHealthHandler,
       intentClassifier,
       pendingChoiceClassifier: choiceClassifier,
+      duplicateDecisionResolver: new FakeDuplicateDecisionResolver("overwritten"),
       pendingFileDuplicateDecisions,
       now: () => new Date("2026-07-02T20:05:00.000Z")
     });
@@ -425,7 +468,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Понял: нужно перезаписать report.pdf. Сама перезапись пока не подключена, поэтому существующий файл не изменял."
+      text: "Готово: перезаписал report.pdf."
     });
     expect(intentClassifier.seenInput).toBeUndefined();
     expect(choiceClassifier.seenInput).toEqual({
@@ -661,6 +704,9 @@ class FakePendingFileDuplicateDecisions {
         fileName: string;
         suggestedCopyName: string;
         existingRecordId: string;
+        provider?: string;
+        receivedAt?: Date;
+        sourceAttachment?: AcceptedMessageContext["attachments"][number];
         createdAt: Date;
         expiresAt: Date;
       }
@@ -687,6 +733,44 @@ class FakePendingFileDuplicateDecisions {
   async clearByChatId(chatId: string) {
     this.deletedChatIds.push(chatId);
     this.pending = undefined;
+  }
+}
+
+class FakeDuplicateDecisionResolver {
+  seenInput:
+    | {
+        decision: "copy" | "overwrite";
+        pending: NonNullable<FakePendingFileDuplicateDecisions["pending"]> | undefined;
+      }
+    | undefined;
+
+  constructor(private readonly status: "copied" | "overwritten" | "unavailable") {}
+
+  async execute(input: {
+    decision: "copy" | "overwrite";
+    pending: NonNullable<FakePendingFileDuplicateDecisions["pending"]>;
+  }) {
+    this.seenInput = input;
+
+    if (this.status === "unavailable") {
+      return { status: "unavailable" as const, reason: "missing_source_attachment" as const };
+    }
+
+    return {
+      status: this.status,
+      record: {
+        id: input.pending.existingRecordId,
+        originalFileName:
+          input.decision === "copy"
+            ? input.pending.suggestedCopyName
+            : input.pending.fileName,
+        sizeBytes: 3,
+        storageId: "storage-new",
+        storagePath: "/tmp/report.pdf",
+        receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+        createdAt: new Date("2026-07-02T20:00:00.000Z")
+      }
+    };
   }
 }
 

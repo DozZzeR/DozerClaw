@@ -9,6 +9,7 @@ import { ReviewPendingIdentityUseCase } from "../application/use-cases/identity/
 import { ModelInboundIntentClassifier } from "../application/use-cases/messaging/classify-inbound-intent.js";
 import { ModelPendingChoiceClassifier } from "../application/use-cases/messaging/classify-pending-choice.js";
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
+import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/file-inbox/resolve-file-duplicate-decision.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
@@ -76,11 +77,12 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     getHostHealth,
     getServiceHealth
   });
+  const fileStorage = new LocalFileStorage({
+    rootDirectory: config.fileStorage.rootDirectory,
+    generateId
+  });
   const fileStore = new StoreInboundFileUseCase({
-    fileStorage: new LocalFileStorage({
-      rootDirectory: config.fileStorage.rootDirectory,
-      generateId
-    }),
+    fileStorage,
     repository: fileInboxRepository,
     generateId,
     now: () => new Date()
@@ -89,6 +91,15 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ? new StoreMessageAttachmentsUseCase({
         attachmentDownloader: options.attachmentDownloader,
         fileStore
+      })
+    : undefined;
+  const duplicateDecisionResolver = options.attachmentDownloader
+    ? new ResolveFileDuplicateDecisionUseCase({
+        attachmentDownloader: options.attachmentDownloader,
+        fileStorage,
+        repository: fileInboxRepository,
+        generateId,
+        now: () => new Date()
       })
     : undefined;
   const modelProvider = options.modelProvider
@@ -115,6 +126,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
     ...(attachmentStore ? { attachmentStore } : {}),
+    ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     pendingAccessRequests: {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)

@@ -39,6 +39,9 @@ export interface PendingFileDuplicateDecision {
   readonly fileName: string;
   readonly suggestedCopyName: string;
   readonly existingRecordId: string;
+  readonly provider?: string;
+  readonly receivedAt?: Date;
+  readonly sourceAttachment?: MessageAttachment;
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }
