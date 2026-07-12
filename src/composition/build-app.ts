@@ -12,6 +12,7 @@ import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/sto
 import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/file-inbox/resolve-file-duplicate-decision.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
+import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
 import { GetServiceHealthUseCase } from "../application/use-cases/health/get-service-health.js";
@@ -85,6 +86,10 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     generateId,
     now: () => new Date()
   });
+  const familyFactRecall = new RecallFamilyFactsUseCase({
+    repository: familyMemoryRepository,
+    recentLimit: 10
+  });
   const fileStorage = new LocalFileStorage({
     rootDirectory: config.fileStorage.rootDirectory,
     generateId
@@ -136,6 +141,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
+    familyFactRecall,
     pendingAccessRequests: {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)

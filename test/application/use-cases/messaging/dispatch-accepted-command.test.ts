@@ -271,6 +271,34 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("recalls family facts from model answer_from_memory intent", async () => {
+    const factRecall = new FakeFamilyFactRecall();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "answer_from_memory",
+        query: "what do you remember about Max?"
+      }),
+      familyFactRecall: factRecall
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "what do you remember about Max?"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+    expect(factRecall.seenInput).toEqual({
+      query: "what do you remember about Max?"
+    });
+  });
+
   it("falls back to attachment storage when model intent classification fails", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -675,10 +703,23 @@ class FakeIntentClassifier {
       | { readonly kind: "ask_clarification"; readonly question: string }
       | { readonly kind: "store_file"; readonly summary?: string }
       | { readonly kind: "record_fact"; readonly summary: string }
+      | { readonly kind: "answer_from_memory"; readonly query: string }
   ) {}
 
   async execute(_input: ClassifyInboundIntentInput) {
     return this.intent;
+  }
+}
+
+class FakeFamilyFactRecall {
+  seenInput: { query: string } | undefined;
+
+  async execute(input: { query: string }) {
+    this.seenInput = input;
+
+    return {
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    };
   }
 }
 

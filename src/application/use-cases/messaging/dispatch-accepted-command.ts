@@ -5,6 +5,7 @@ import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
+import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
 import type { RecordFamilyFactInput } from "../family-memory/record-family-fact.js";
 import type {
   FileDuplicateMutationDecision,
@@ -40,6 +41,10 @@ export interface MessageAttachmentStore {
 
 export interface FamilyFactRecorder {
   execute(input: RecordFamilyFactInput): Promise<FamilyFact>;
+}
+
+export interface FamilyFactRecall {
+  execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
 }
 
 export interface PendingAccessRequestReviewer {
@@ -83,6 +88,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly systemHealthHandler: SystemHealthCommandHandler;
   readonly attachmentStore?: MessageAttachmentStore;
   readonly familyFactRecorder?: FamilyFactRecorder;
+  readonly familyFactRecall?: FamilyFactRecall;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<DuplicateDecision>;
@@ -219,6 +225,10 @@ export class DispatchAcceptedCommandUseCase {
       return this.recordFamilyFact(context, intent);
     }
 
+    if (intent.kind === "answer_from_memory") {
+      return this.recallFamilyFacts(context, intent);
+    }
+
     return {
       chatId: context.chat.id,
       text: `I understood this as ${intent.kind}, but that action is not connected yet.`
@@ -285,6 +295,27 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: `Saved family fact: ${fact.body}`
+    };
+  }
+
+  private async recallFamilyFacts(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "answer_from_memory" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.familyFactRecall) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.familyFactRecall.execute({
+      query: intent.query
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
     };
   }
 
