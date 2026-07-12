@@ -46,6 +46,60 @@ describe("ResolveFamilyFactDecisionUseCase", () => {
     });
   });
 
+  it("updates the selected candidate by index", async () => {
+    const repository = new RecordingFamilyMemoryRepository();
+    const useCase = new ResolveFamilyFactDecisionUseCase({
+      repository,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        decision: "update",
+        candidateIndex: 1,
+        pending: pendingDecision({
+          candidates: [
+            familyFact({
+              id: "fact-first",
+              body: "Max prefers chamomile tea before sleep.",
+              createdAt: new Date("2026-07-07T09:00:00.000Z")
+            }),
+            familyFact({
+              id: "fact-second",
+              body: "Max likes peppermint tea.",
+              createdAt: new Date("2026-07-07T08:00:00.000Z")
+            })
+          ]
+        })
+      })
+    ).resolves.toEqual({
+      status: "updated",
+      fact: {
+        ...pendingDecision().newFact,
+        id: "fact-second",
+        createdAt: new Date("2026-07-07T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:05:00.000Z")
+      }
+    });
+    expect(repository.saved?.id).toBe("fact-second");
+  });
+
+  it("falls back to the first candidate when selected index is out of range", async () => {
+    const repository = new RecordingFamilyMemoryRepository();
+    const useCase = new ResolveFamilyFactDecisionUseCase({
+      repository,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await useCase.execute({
+      decision: "update",
+      candidateIndex: 8,
+      pending: pendingDecision()
+    });
+
+    expect(repository.saved?.id).toBe("fact-existing");
+  });
+
   it("creates the pending new fact", async () => {
     const repository = new RecordingFamilyMemoryRepository();
     const useCase = new ResolveFamilyFactDecisionUseCase({
@@ -139,7 +193,11 @@ class ThrowingSemanticMemory extends RecordingSemanticMemory {
   }
 }
 
-function pendingDecision(): PendingFamilyFactDecision {
+function pendingDecision(
+  overrides: {
+    readonly candidates?: readonly FamilyFact[];
+  } = {}
+): PendingFamilyFactDecision {
   return {
     chatId: "chat-family",
     actorId: "actor-owner",
@@ -148,7 +206,7 @@ function pendingDecision(): PendingFamilyFactDecision {
       body: "Max prefers tea before bedtime.",
       createdAt: new Date("2026-07-07T10:00:00.000Z")
     }),
-    candidates: [
+    candidates: overrides.candidates ?? [
       familyFact({
         id: "fact-existing",
         body: "Max prefers chamomile tea before sleep.",

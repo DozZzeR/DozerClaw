@@ -371,6 +371,54 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFamilyFactDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("passes selected memory candidate index from an update reply", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision({
+      candidates: [
+        familyFact({
+          id: "fact-first",
+          body: "Max prefers chamomile tea before sleep."
+        }),
+        familyFact({
+          id: "fact-second",
+          body: "Max likes peppermint tea."
+        })
+      ]
+    });
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("updated");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "обнови второй"
+      }
+    });
+
+    expect(factDecisionResolver.seenInput).toEqual({
+      decision: "update",
+      candidateIndex: 1,
+      pending: pendingFamilyFactDecision({
+        candidates: [
+          familyFact({
+            id: "fact-first",
+            body: "Max prefers chamomile tea before sleep."
+          }),
+          familyFact({
+            id: "fact-second",
+            body: "Max likes peppermint tea."
+          })
+        ]
+      })
+    });
+  });
+
   it("creates a new family fact from a pending memory decision", async () => {
     const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
     pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
@@ -946,7 +994,11 @@ function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
   };
 }
 
-function pendingFamilyFactDecision(): PendingFamilyFactDecision {
+function pendingFamilyFactDecision(
+  overrides: {
+    readonly candidates?: readonly FamilyFact[];
+  } = {}
+): PendingFamilyFactDecision {
   return {
     chatId: "chat-owner",
     actorId: "actor-owner",
@@ -954,7 +1006,7 @@ function pendingFamilyFactDecision(): PendingFamilyFactDecision {
       id: "fact-new",
       body: "Max prefers tea before bedtime."
     }),
-    candidates: [
+    candidates: overrides.candidates ?? [
       familyFact({
         id: "fact-existing",
         body: "Max prefers chamomile tea before sleep."
@@ -969,6 +1021,7 @@ class FakeFamilyFactDecisionResolver {
   seenInput:
     | {
         decision: "update" | "create" | "cancel";
+        candidateIndex?: number;
         pending: PendingFamilyFactDecision;
       }
     | undefined;

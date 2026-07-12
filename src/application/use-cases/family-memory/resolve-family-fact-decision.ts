@@ -13,6 +13,7 @@ export interface ResolveFamilyFactDecisionDependencies {
 
 export interface ResolveFamilyFactDecisionInput {
   readonly decision: FamilyFactDecision;
+  readonly candidateIndex?: number;
   readonly pending: PendingFamilyFactDecision;
 }
 
@@ -53,7 +54,9 @@ export class ResolveFamilyFactDecisionUseCase {
       };
     }
 
-    const candidate = input.pending.candidates[0];
+    const candidate =
+      input.pending.candidates[input.candidateIndex ?? 0] ??
+      input.pending.candidates[0];
 
     if (!candidate) {
       await this.dependencies.repository.saveFamilyFact(input.pending.newFact);

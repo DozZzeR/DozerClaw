@@ -574,9 +574,9 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFamilyFactDecision
   ): Promise<OutboundReply> {
-    const decision = parseFamilyFactDecision(context.text);
+    const parsedDecision = parseFamilyFactDecision(context.text);
 
-    if (!decision) {
+    if (!parsedDecision) {
       return {
         chatId: context.chat.id,
         text: [
@@ -598,7 +598,10 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const result = await this.dependencies.factDecisionResolver.execute({
-      decision,
+      decision: parsedDecision.decision,
+      ...(parsedDecision.candidateIndex !== undefined
+        ? { candidateIndex: parsedDecision.candidateIndex }
+        : {}),
       pending
     });
 
@@ -788,28 +791,60 @@ function parseDuplicateDecision(text: string): DuplicateDecision | undefined {
   return undefined;
 }
 
-function parseFamilyFactDecision(text: string): FamilyFactDecision | undefined {
+function parseFamilyFactDecision(
+  text: string
+): { readonly decision: FamilyFactDecision; readonly candidateIndex?: number } | undefined {
   const normalized = text.trim().toLowerCase();
+  const candidateIndex = parseCandidateIndex(normalized);
 
   if (
     /\b(update|replace)\b/.test(normalized) ||
     /обнов|замен|перезап/.test(normalized)
   ) {
-    return "update";
+    return {
+      decision: "update",
+      ...(candidateIndex !== undefined ? { candidateIndex } : {})
+    };
   }
 
   if (
     /\b(create|new|separate)\b/.test(normalized) ||
     /созд|нов|отдельн/.test(normalized)
   ) {
-    return "create";
+    return {
+      decision: "create"
+    };
   }
 
   if (
     /\b(cancel|skip|nothing)\b/.test(normalized) ||
     /отмен|ничего|не надо|забей/.test(normalized)
   ) {
-    return "cancel";
+    return {
+      decision: "cancel"
+    };
+  }
+
+  return undefined;
+}
+
+function parseCandidateIndex(normalizedText: string): number | undefined {
+  const numeric = normalizedText.match(/\b([1-9]\d*)\b/);
+
+  if (numeric) {
+    return Number(numeric[1]) - 1;
+  }
+
+  if (/\b(second|2nd)\b|втор/.test(normalizedText)) {
+    return 1;
+  }
+
+  if (/\b(third|3rd)\b|трет/.test(normalizedText)) {
+    return 2;
+  }
+
+  if (/\b(first|1st)\b|перв/.test(normalizedText)) {
+    return 0;
   }
 
   return undefined;
