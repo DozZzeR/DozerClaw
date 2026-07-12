@@ -26,15 +26,18 @@ describe("RecordFamilyFactUseCase", () => {
         sourceMessageText: "remember that Max prefers chamomile tea before sleep"
       })
     ).resolves.toEqual({
-      id: "fact-1",
-      category: "preference",
-      body: "Max prefers chamomile tea before sleep.",
-      sourceActorId: "actor-owner",
-      sourceChatId: "chat-family",
-      sourceMessageText: "remember that Max prefers chamomile tea before sleep",
-      status: "active",
-      createdAt: new Date("2026-07-07T10:00:00.000Z"),
-      updatedAt: new Date("2026-07-07T10:00:00.000Z")
+      status: "created",
+      fact: {
+        id: "fact-1",
+        category: "preference",
+        body: "Max prefers chamomile tea before sleep.",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember that Max prefers chamomile tea before sleep",
+        status: "active",
+        createdAt: new Date("2026-07-07T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:00:00.000Z")
+      }
     });
     expect(repository.saved).toEqual({
       id: "fact-1",
@@ -89,23 +92,68 @@ describe("RecordFamilyFactUseCase", () => {
       })
     ).resolves.toEqual(
       expect.objectContaining({
-        id: "fact-1",
-        body: "Max prefers chamomile tea before sleep."
+        status: "created",
+        fact: expect.objectContaining({
+          id: "fact-1",
+          body: "Max prefers chamomile tea before sleep."
+        })
       })
     );
     expect(repository.saved?.body).toBe("Max prefers chamomile tea before sleep.");
+  });
+
+  it("asks for confirmation when a related active fact already exists", async () => {
+    const existingFact = familyFact({
+      id: "fact-existing",
+      body: "Max prefers chamomile tea before sleep."
+    });
+    const repository = new RecordingFamilyMemoryRepository([existingFact]);
+    const semanticMemory = new RecordingSemanticMemory();
+    const useCase = new RecordFamilyFactUseCase({
+      repository,
+      semanticMemory,
+      generateId: () => "fact-new",
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        summary: "Max prefers tea before bedtime.",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Max prefers tea before bedtime"
+      })
+    ).resolves.toEqual({
+      status: "needs_confirmation",
+      newFact: {
+        id: "fact-new",
+        category: "preference",
+        body: "Max prefers tea before bedtime.",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Max prefers tea before bedtime",
+        status: "active",
+        createdAt: new Date("2026-07-07T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:00:00.000Z")
+      },
+      candidates: [existingFact]
+    });
+    expect(repository.saved).toBeUndefined();
+    expect(semanticMemory.stored).toBeUndefined();
   });
 });
 
 class RecordingFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
   saved: FamilyFact | undefined;
 
+  constructor(private readonly facts: readonly FamilyFact[] = []) {}
+
   async saveFamilyFact(fact: FamilyFact): Promise<void> {
     this.saved = fact;
   }
 
   async listRecentActiveFamilyFacts(): Promise<readonly FamilyFact[]> {
-    return [];
+    return this.facts;
   }
 }
 
@@ -130,4 +178,18 @@ class ThrowingSemanticMemory extends RecordingSemanticMemory {
   async store(): Promise<never> {
     throw new Error("semantic memory unavailable");
   }
+}
+
+function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
+  return {
+    id: input.id,
+    category: "preference",
+    body: input.body,
+    sourceActorId: "actor-owner",
+    sourceChatId: "chat-family",
+    sourceMessageText: input.body,
+    status: "active",
+    createdAt: new Date("2026-07-07T09:00:00.000Z"),
+    updatedAt: new Date("2026-07-07T09:00:00.000Z")
+  };
 }

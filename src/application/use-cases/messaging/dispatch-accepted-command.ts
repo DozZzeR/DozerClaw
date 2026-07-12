@@ -1,12 +1,14 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
-import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
-import type { RecordFamilyFactInput } from "../family-memory/record-family-fact.js";
+import type {
+  RecordFamilyFactInput,
+  RecordFamilyFactResult
+} from "../family-memory/record-family-fact.js";
 import type {
   FileDuplicateMutationDecision,
   ResolveFileDuplicateDecisionInput,
@@ -40,7 +42,7 @@ export interface MessageAttachmentStore {
 }
 
 export interface FamilyFactRecorder {
-  execute(input: RecordFamilyFactInput): Promise<FamilyFact>;
+  execute(input: RecordFamilyFactInput): Promise<RecordFamilyFactResult>;
 }
 
 export interface FamilyFactRecall {
@@ -285,16 +287,23 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    const fact = await this.dependencies.familyFactRecorder.execute({
+    const result = await this.dependencies.familyFactRecorder.execute({
       summary: intent.summary,
       sourceActorId: context.actor.id,
       sourceChatId: context.chat.id,
       sourceMessageText: context.text
     });
 
+    if (result.status === "needs_confirmation") {
+      return {
+        chatId: context.chat.id,
+        text: formatFamilyFactConfirmation(result)
+      };
+    }
+
     return {
       chatId: context.chat.id,
-      text: `Saved family fact: ${fact.body}`
+      text: `Saved family fact: ${result.fact.body}`
     };
   }
 
@@ -671,4 +680,16 @@ function parseDuplicateDecision(text: string): DuplicateDecision | undefined {
   }
 
   return undefined;
+}
+
+function formatFamilyFactConfirmation(
+  result: Extract<RecordFamilyFactResult, { readonly status: "needs_confirmation" }>
+): string {
+  return [
+    "This may update an existing family fact.",
+    `New fact: ${result.newFact.body}`,
+    "Existing candidates:",
+    ...result.candidates.map((fact, index) => `${index + 1}. ${fact.body}`),
+    "Reply whether to update an existing fact or create a new one."
+  ].join("\n");
 }

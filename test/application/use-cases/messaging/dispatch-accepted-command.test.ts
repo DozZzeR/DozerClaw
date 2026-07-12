@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-cases/messaging/dispatch-accepted-command.js";
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
+import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
@@ -268,6 +269,50 @@ describe("DispatchAcceptedCommandUseCase", () => {
       sourceActorId: "actor-owner",
       sourceChatId: "chat-owner",
       sourceMessageText: "remember that Max prefers chamomile tea before sleep"
+    });
+  });
+
+  it("asks for confirmation when recording a related family fact", async () => {
+    const factRecorder = new FakeFamilyFactRecorder({
+      status: "needs_confirmation",
+      newFact: familyFact({
+        id: "fact-new",
+        body: "Max prefers tea before bedtime."
+      }),
+      candidates: [
+        familyFact({
+          id: "fact-existing",
+          body: "Max prefers chamomile tea before sleep."
+        })
+      ]
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "record_fact",
+        summary: "Max prefers tea before bedtime."
+      }),
+      familyFactRecorder: factRecorder,
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "remember Max prefers tea before bedtime"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "This may update an existing family fact.",
+        "New fact: Max prefers tea before bedtime.",
+        "Existing candidates:",
+        "1. Max prefers chamomile tea before sleep.",
+        "Reply whether to update an existing fact or create a new one."
+      ].join("\n")
     });
   });
 
@@ -733,21 +778,57 @@ class FakeFamilyFactRecorder {
       }
     | undefined;
 
+  constructor(
+    private readonly result:
+      | {
+          readonly status: "created";
+          readonly fact: FamilyFact;
+        }
+      | {
+          readonly status: "needs_confirmation";
+          readonly newFact: FamilyFact;
+          readonly candidates: readonly FamilyFact[];
+        } = {
+      status: "created",
+      fact: familyFact({
+        id: "fact-1",
+        body: "Max prefers chamomile tea before sleep."
+      })
+    }
+  ) {}
+
   async execute(input: NonNullable<FakeFamilyFactRecorder["seenInput"]>) {
     this.seenInput = input;
 
-    return {
-      id: "fact-1",
-      category: "preference" as const,
-      body: input.summary,
-      sourceActorId: input.sourceActorId,
-      sourceChatId: input.sourceChatId,
-      sourceMessageText: input.sourceMessageText,
-      status: "active" as const,
-      createdAt: new Date("2026-07-07T10:00:00.000Z"),
-      updatedAt: new Date("2026-07-07T10:00:00.000Z")
-    };
+    if (this.result.status === "created") {
+      return {
+        status: "created" as const,
+        fact: {
+          ...this.result.fact,
+          body: input.summary,
+          sourceActorId: input.sourceActorId,
+          sourceChatId: input.sourceChatId,
+          sourceMessageText: input.sourceMessageText
+        }
+      };
+    }
+
+    return this.result;
   }
+}
+
+function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
+  return {
+    id: input.id,
+    category: "preference",
+    body: input.body,
+    sourceActorId: "actor-owner",
+    sourceChatId: "chat-owner",
+    sourceMessageText: input.body,
+    status: "active",
+    createdAt: new Date("2026-07-07T10:00:00.000Z"),
+    updatedAt: new Date("2026-07-07T10:00:00.000Z")
+  };
 }
 
 class RecordingIntentClassifier extends FakeIntentClassifier {

@@ -7,6 +7,7 @@ export interface RecordFamilyFactDependencies {
   readonly semanticMemory?: MemoryPort;
   readonly generateId: () => string;
   readonly now: () => Date;
+  readonly confirmationCandidateLimit?: number;
 }
 
 export interface RecordFamilyFactInput {
@@ -16,10 +17,21 @@ export interface RecordFamilyFactInput {
   readonly sourceMessageText: string;
 }
 
+export type RecordFamilyFactResult =
+  | {
+      readonly status: "created";
+      readonly fact: FamilyFact;
+    }
+  | {
+      readonly status: "needs_confirmation";
+      readonly newFact: FamilyFact;
+      readonly candidates: readonly FamilyFact[];
+    };
+
 export class RecordFamilyFactUseCase {
   constructor(private readonly dependencies: RecordFamilyFactDependencies) {}
 
-  async execute(input: RecordFamilyFactInput): Promise<FamilyFact> {
+  async execute(input: RecordFamilyFactInput): Promise<RecordFamilyFactResult> {
     const now = this.dependencies.now();
     const fact: FamilyFact = {
       id: this.dependencies.generateId(),
@@ -32,11 +44,33 @@ export class RecordFamilyFactUseCase {
       createdAt: now,
       updatedAt: now
     };
+    const candidates = await this.findRelatedFacts(fact);
+
+    if (candidates.length > 0) {
+      return {
+        status: "needs_confirmation",
+        newFact: fact,
+        candidates
+      };
+    }
 
     await this.dependencies.repository.saveFamilyFact(fact);
     await this.storeSemanticSummary(fact);
 
-    return fact;
+    return {
+      status: "created",
+      fact
+    };
+  }
+
+  private async findRelatedFacts(
+    fact: FamilyFact
+  ): Promise<readonly FamilyFact[]> {
+    const facts = await this.dependencies.repository.listRecentActiveFamilyFacts(
+      this.dependencies.confirmationCandidateLimit ?? 20
+    );
+
+    return facts.filter((candidate) => areRelatedFacts(fact, candidate));
   }
 
   private async storeSemanticSummary(fact: FamilyFact): Promise<void> {
@@ -54,3 +88,50 @@ export class RecordFamilyFactUseCase {
     }
   }
 }
+
+function areRelatedFacts(left: FamilyFact, right: FamilyFact): boolean {
+  if (left.category !== right.category) {
+    return false;
+  }
+
+  const leftTokens = meaningfulTokens(left.body);
+  const rightTokens = new Set(meaningfulTokens(right.body));
+  const overlap = leftTokens.filter((token) => rightTokens.has(token)).length;
+
+  return overlap >= 3;
+}
+
+function meaningfulTokens(text: string): readonly string[] {
+  const seen = new Set<string>();
+
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/giu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !stopWords.has(token))
+    .filter((token) => {
+      if (seen.has(token)) {
+        return false;
+      }
+
+      seen.add(token);
+
+      return true;
+    });
+}
+
+const stopWords = new Set([
+  "the",
+  "and",
+  "for",
+  "that",
+  "this",
+  "before",
+  "after",
+  "про",
+  "что",
+  "как",
+  "это",
+  "для"
+]);
