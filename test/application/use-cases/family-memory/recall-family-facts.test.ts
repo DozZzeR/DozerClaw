@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { RecallFamilyFactsUseCase } from "../../../../src/application/use-cases/family-memory/recall-family-facts.js";
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../../src/ports/family-memory-repository-port.js";
+import type {
+  ModelPort,
+  ModelTextRequest,
+  ModelTextResponse
+} from "../../../../src/ports/model-port.js";
 
 describe("RecallFamilyFactsUseCase", () => {
   it("returns an empty-state reply when no active family facts exist", async () => {
@@ -53,6 +58,99 @@ describe("RecallFamilyFactsUseCase", () => {
     });
     expect(repository.seenLimit).toBe(10);
   });
+
+  it("filters unrelated facts when the query matches at least one fact", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-unrelated",
+        category: "preference",
+        body: "Sofia likes pasta for lunch."
+      }),
+      familyFact({
+        id: "fact-match",
+        category: "preference",
+        body: "Max prefers chamomile tea before sleep."
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      recentLimit: 10
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what tea does Max like before bed?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+  });
+
+  it("uses model semantic selection and synthesis when configured", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-unrelated",
+        category: "event",
+        body: "Sofia started piano lessons."
+      }),
+      familyFact({
+        id: "fact-match",
+        category: "preference",
+        body: "Max prefers chamomile tea before sleep."
+      })
+    ]);
+    const model = new QueueModel([
+      JSON.stringify({
+        factIds: ["fact-match", "fact-missing"]
+      }),
+      "Max prefers chamomile tea before sleep."
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      recentLimit: 10,
+      model
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what helps Max settle at bedtime?"
+      })
+    ).resolves.toEqual({
+      text: "Max prefers chamomile tea before sleep."
+    });
+    expect(model.requests.map((request) => request.purpose)).toEqual([
+      "Select relevant DozerClaw family facts",
+      "Synthesize DozerClaw family memory answer"
+    ]);
+    expect(model.requests[0]?.input).toContain("fact-match");
+    expect(model.requests[1]?.input).toContain(
+      "Max prefers chamomile tea before sleep."
+    );
+    expect(model.requests[1]?.input).not.toContain("Sofia started piano lessons.");
+  });
+
+  it("falls back to deterministic bullets when model recall fails", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-match",
+        category: "preference",
+        body: "Max prefers chamomile tea before sleep."
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      recentLimit: 10,
+      model: new ThrowingModel()
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what tea does Max like?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+  });
 });
 
 class StubFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
@@ -68,6 +166,29 @@ class StubFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
     this.seenLimit = limit;
 
     return this.facts;
+  }
+}
+
+class QueueModel implements ModelPort {
+  readonly requests: ModelTextRequest[] = [];
+
+  constructor(private readonly texts: string[]) {}
+
+  async runTextRequest(request: ModelTextRequest) {
+    this.requests.push(request);
+    const text = this.texts.shift();
+
+    if (!text) {
+      throw new Error("no queued model response");
+    }
+
+    return { text };
+  }
+}
+
+class ThrowingModel implements ModelPort {
+  async runTextRequest(): Promise<ModelTextResponse> {
+    throw new Error("model unavailable");
   }
 }
 

@@ -86,10 +86,6 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     generateId,
     now: () => new Date()
   });
-  const familyFactRecall = new RecallFamilyFactsUseCase({
-    repository: familyMemoryRepository,
-    recentLimit: 10
-  });
   const fileStorage = new LocalFileStorage({
     rootDirectory: config.fileStorage.rootDirectory,
     generateId
@@ -124,8 +120,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
           projectRoot: config.codex.projectRoot,
           tmpDirectory: config.codex.tmpDirectory,
           ...(config.codex.apiKey ? { apiKey: config.codex.apiKey } : {})
-        })
+      })
       : undefined;
+  const familyFactRecall = new RecallFamilyFactsUseCase({
+    repository: familyMemoryRepository,
+    recentLimit: 50,
+    resultLimit: 10,
+    ...(modelProvider ? { model: modelProvider } : {})
+  });
   const intentClassifier = modelProvider
     ? new ModelInboundIntentClassifier({
         model: modelProvider

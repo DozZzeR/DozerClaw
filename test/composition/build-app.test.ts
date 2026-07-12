@@ -263,7 +263,11 @@ describe("buildApp", () => {
         summary: null,
         query: "what do you remember about Max?",
         reason: null
-      })
+      }),
+      JSON.stringify({
+        factIds: ["fact-1"]
+      }),
+      "Max prefers chamomile tea before sleep."
     ]);
 
     try {
@@ -307,9 +311,7 @@ describe("buildApp", () => {
         now: new Date("2026-07-07T10:01:00.000Z")
       });
 
-      expect(reply.text).toBe(
-        "Saved family facts:\n- Max prefers chamomile tea before sleep."
-      );
+      expect(reply.text).toBe("Max prefers chamomile tea before sleep.");
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
