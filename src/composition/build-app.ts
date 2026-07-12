@@ -25,6 +25,7 @@ import { LocalFileStorage } from "../infrastructure/providers/local-file-storage
 import { LocalServerMonitor } from "../infrastructure/providers/local-monitor/local-server-monitor.js";
 import { RegistryServiceMonitor } from "../infrastructure/providers/local-monitor/registry-service-monitor.js";
 import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-cli-model-provider.js";
+import { MempalaceMemoryProvider } from "../infrastructure/providers/mempalace/mempalace-memory-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteFamilyMemoryRepository } from "../infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
@@ -81,8 +82,12 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     getHostHealth,
     getServiceHealth
   });
+  const semanticMemory = config.memory?.mempalace
+    ? new MempalaceMemoryProvider(config.memory.mempalace)
+    : undefined;
   const familyFactRecorder = new RecordFamilyFactUseCase({
     repository: familyMemoryRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     generateId,
     now: () => new Date()
   });
@@ -124,8 +129,10 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       : undefined;
   const familyFactRecall = new RecallFamilyFactsUseCase({
     repository: familyMemoryRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     recentLimit: 50,
     resultLimit: 10,
+    semanticLimit: config.memory?.mempalace?.searchLimit ?? 5,
     ...(modelProvider ? { model: modelProvider } : {})
   });
   const intentClassifier = modelProvider

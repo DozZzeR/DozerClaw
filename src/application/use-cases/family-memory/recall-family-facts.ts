@@ -1,11 +1,14 @@
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
+import type { MemoryPort, MemorySearchResult } from "../../../ports/memory-port.js";
 import type { ModelPort } from "../../../ports/model-port.js";
 
 export interface RecallFamilyFactsDependencies {
   readonly repository: FamilyMemoryRepositoryPort;
+  readonly semanticMemory?: MemoryPort;
   readonly recentLimit: number;
   readonly resultLimit?: number;
+  readonly semanticLimit?: number;
   readonly model?: ModelPort;
 }
 
@@ -24,15 +27,20 @@ export class RecallFamilyFactsUseCase {
     const facts = await this.dependencies.repository.listRecentActiveFamilyFacts(
       this.dependencies.recentLimit
     );
+    const semanticResults = await this.searchSemanticMemory(input.query);
 
-    if (facts.length === 0) {
+    if (facts.length === 0 && semanticResults.length === 0) {
       return {
         text: "I do not have any saved family facts yet."
       };
     }
 
     const selectedFacts = await this.selectFacts(input.query, facts);
-    const synthesized = await this.synthesizeAnswer(input.query, selectedFacts);
+    const selectedItems = [
+      ...selectedFacts.map(toLocalMemoryItem),
+      ...semanticResults.map(toSemanticMemoryItem)
+    ];
+    const synthesized = await this.synthesizeAnswer(input.query, selectedItems);
 
     if (synthesized) {
       return {
@@ -41,8 +49,25 @@ export class RecallFamilyFactsUseCase {
     }
 
     return {
-      text: formatFactBullets(selectedFacts)
+      text: formatMemoryBullets(selectedItems)
     };
+  }
+
+  private async searchSemanticMemory(
+    query: string
+  ): Promise<readonly MemorySearchResult[]> {
+    if (!this.dependencies.semanticMemory) {
+      return [];
+    }
+
+    try {
+      return await this.dependencies.semanticMemory.search({
+        text: query,
+        limit: this.dependencies.semanticLimit ?? this.resultLimit()
+      });
+    } catch {
+      return [];
+    }
   }
 
   private async selectFacts(
@@ -86,7 +111,7 @@ export class RecallFamilyFactsUseCase {
 
   private async synthesizeAnswer(
     query: string,
-    facts: readonly FamilyFact[]
+    items: readonly RecallMemoryItem[]
   ): Promise<string | undefined> {
     if (!this.dependencies.model) {
       return undefined;
@@ -95,7 +120,7 @@ export class RecallFamilyFactsUseCase {
     try {
       const response = await this.dependencies.model.runTextRequest({
         purpose: "Synthesize DozerClaw family memory answer",
-        input: buildSynthesisPrompt(query, facts)
+        input: buildSynthesisPrompt(query, items)
       });
       const text = response.text.trim();
 
@@ -108,6 +133,13 @@ export class RecallFamilyFactsUseCase {
   private resultLimit(): number {
     return this.dependencies.resultLimit ?? this.dependencies.recentLimit;
   }
+}
+
+interface RecallMemoryItem {
+  readonly id: string;
+  readonly source: "structured_fact" | "semantic_memory";
+  readonly body: string;
+  readonly category?: FamilyFact["category"];
 }
 
 interface RankedFact {
@@ -225,8 +257,25 @@ function limitFacts(
   return facts.slice(0, limit);
 }
 
-function formatFactBullets(facts: readonly FamilyFact[]): string {
-  return ["Saved family facts:", ...facts.map((fact) => `- ${fact.body}`)].join(
+function toLocalMemoryItem(fact: FamilyFact): RecallMemoryItem {
+  return {
+    id: fact.id,
+    source: "structured_fact",
+    body: fact.body,
+    category: fact.category
+  };
+}
+
+function toSemanticMemoryItem(result: MemorySearchResult): RecallMemoryItem {
+  return {
+    id: result.entry.id,
+    source: "semantic_memory",
+    body: result.entry.body
+  };
+}
+
+function formatMemoryBullets(items: readonly RecallMemoryItem[]): string {
+  return ["Saved family facts:", ...items.map((item) => `- ${item.body}`)].join(
     "\n"
   );
 }
@@ -258,7 +307,7 @@ function buildSelectionPrompt(
 
 function buildSynthesisPrompt(
   query: string,
-  facts: readonly FamilyFact[]
+  items: readonly RecallMemoryItem[]
 ): string {
   return [
     "Answer the user query using only the provided family facts.",
@@ -267,12 +316,13 @@ function buildSynthesisPrompt(
     "# User query",
     query,
     "",
-    "# Family facts",
+    "# Family memory context",
     JSON.stringify(
-      facts.map((fact) => ({
-        id: fact.id,
-        category: fact.category,
-        body: fact.body
+      items.map((item) => ({
+        id: item.id,
+        source: item.source,
+        ...(item.category ? { category: item.category } : {}),
+        body: item.body
       }))
     )
   ].join("\n");

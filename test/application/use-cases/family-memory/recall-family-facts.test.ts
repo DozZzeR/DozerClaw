@@ -4,6 +4,12 @@ import { RecallFamilyFactsUseCase } from "../../../../src/application/use-cases/
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../../src/ports/family-memory-repository-port.js";
 import type {
+  MemoryEntryInput,
+  MemoryPort,
+  MemorySearchQuery,
+  MemorySearchResult
+} from "../../../../src/ports/memory-port.js";
+import type {
   ModelPort,
   ModelTextRequest,
   ModelTextResponse
@@ -151,6 +157,53 @@ describe("RecallFamilyFactsUseCase", () => {
       text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
     });
   });
+
+  it("includes semantic memory search results in recall output", async () => {
+    const useCase = new RecallFamilyFactsUseCase({
+      repository: new StubFamilyMemoryRepository([]),
+      semanticMemory: new StubSemanticMemory([
+        {
+          entry: {
+            id: "drawer-1",
+            body: "Family fact: Max prefers chamomile tea before sleep."
+          },
+          score: 0.2
+        }
+      ]),
+      recentLimit: 10,
+      semanticLimit: 5
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what helps Max sleep?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Family fact: Max prefers chamomile tea before sleep."
+    });
+  });
+
+  it("falls back to local facts when semantic memory search fails", async () => {
+    const useCase = new RecallFamilyFactsUseCase({
+      repository: new StubFamilyMemoryRepository([
+        familyFact({
+          id: "fact-match",
+          category: "preference",
+          body: "Max prefers chamomile tea before sleep."
+        })
+      ]),
+      semanticMemory: new ThrowingSemanticMemory(),
+      recentLimit: 10
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what tea does Max like?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+  });
 });
 
 class StubFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
@@ -189,6 +242,35 @@ class QueueModel implements ModelPort {
 class ThrowingModel implements ModelPort {
   async runTextRequest(): Promise<ModelTextResponse> {
     throw new Error("model unavailable");
+  }
+}
+
+class StubSemanticMemory implements MemoryPort {
+  seenQuery: MemorySearchQuery | undefined;
+
+  constructor(private readonly results: readonly MemorySearchResult[]) {}
+
+  async store(input: MemoryEntryInput) {
+    return {
+      id: "drawer-1",
+      body: input.body
+    };
+  }
+
+  async search(query: MemorySearchQuery) {
+    this.seenQuery = query;
+
+    return this.results;
+  }
+}
+
+class ThrowingSemanticMemory extends StubSemanticMemory {
+  constructor() {
+    super([]);
+  }
+
+  async search(): Promise<never> {
+    throw new Error("semantic memory unavailable");
   }
 }
 

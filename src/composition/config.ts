@@ -6,6 +6,7 @@ export interface AppConfig {
   readonly fileStorage: FileStorageConfig;
   readonly telegram: TelegramConfig;
   readonly codex: CodexConfig;
+  readonly memory?: MemoryConfig;
 }
 
 export interface SqliteConfig {
@@ -29,6 +30,20 @@ export interface CodexConfig {
   readonly projectRoot: string;
   readonly tmpDirectory: string;
   readonly apiKey?: string;
+}
+
+export interface MemoryConfig {
+  readonly mempalace?: MempalaceMemoryConfig;
+}
+
+export interface MempalaceMemoryConfig {
+  readonly endpointUrl: string;
+  readonly wing: string;
+  readonly room: string;
+  readonly hall?: string;
+  readonly bearerToken?: string;
+  readonly maxDistance?: number;
+  readonly searchLimit: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -61,7 +76,38 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       projectRoot: env.DOZERCLAW_CODEX_PROJECT_ROOT ?? ".",
       tmpDirectory: env.DOZERCLAW_CODEX_TMP_DIR ?? "data/tmp/codex",
       ...(env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {})
-    }
+    },
+    ...memoryConfig(env)
+  };
+}
+
+function memoryConfig(env: NodeJS.ProcessEnv): { readonly memory?: MemoryConfig } {
+  const mempalace = mempalaceMemoryConfig(env);
+
+  return mempalace ? { memory: { mempalace } } : {};
+}
+
+function mempalaceMemoryConfig(
+  env: NodeJS.ProcessEnv
+): MempalaceMemoryConfig | undefined {
+  const endpointUrl = env.DOZERCLAW_MEMPALACE_MCP_URL?.trim();
+
+  if (!endpointUrl) {
+    return undefined;
+  }
+
+  return {
+    endpointUrl,
+    wing: env.DOZERCLAW_MEMPALACE_WING?.trim() || "family",
+    room: env.DOZERCLAW_MEMPALACE_ROOM?.trim() || "facts",
+    searchLimit: parsePositiveInteger(env.DOZERCLAW_MEMPALACE_SEARCH_LIMIT, 5),
+    ...(env.DOZERCLAW_MEMPALACE_HALL
+      ? { hall: env.DOZERCLAW_MEMPALACE_HALL }
+      : {}),
+    ...(env.DOZERCLAW_MEMPALACE_BEARER_TOKEN
+      ? { bearerToken: env.DOZERCLAW_MEMPALACE_BEARER_TOKEN }
+      : {}),
+    ...parseOptionalNumber("maxDistance", env.DOZERCLAW_MEMPALACE_MAX_DISTANCE)
   };
 }
 
@@ -84,4 +130,17 @@ function parsePositiveInteger(
   const parsed = Number.parseInt(value, 10);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseOptionalNumber(
+  key: "maxDistance",
+  value: string | undefined
+): { readonly maxDistance?: number } {
+  if (!value) {
+    return {};
+  }
+
+  const parsed = Number.parseFloat(value);
+
+  return Number.isFinite(parsed) ? { [key]: parsed } : {};
 }

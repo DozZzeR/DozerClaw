@@ -1,8 +1,10 @@
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
+import type { MemoryPort } from "../../../ports/memory-port.js";
 
 export interface RecordFamilyFactDependencies {
   readonly repository: FamilyMemoryRepositoryPort;
+  readonly semanticMemory?: MemoryPort;
   readonly generateId: () => string;
   readonly now: () => Date;
 }
@@ -32,7 +34,23 @@ export class RecordFamilyFactUseCase {
     };
 
     await this.dependencies.repository.saveFamilyFact(fact);
+    await this.storeSemanticSummary(fact);
 
     return fact;
+  }
+
+  private async storeSemanticSummary(fact: FamilyFact): Promise<void> {
+    if (!this.dependencies.semanticMemory) {
+      return;
+    }
+
+    try {
+      await this.dependencies.semanticMemory.store({
+        body: `Family fact: ${fact.body}`,
+        references: [`family_fact:${fact.id}`]
+      });
+    } catch {
+      return;
+    }
   }
 }

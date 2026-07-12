@@ -1,4 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -317,6 +319,118 @@ describe("buildApp", () => {
     }
   });
 
+  it("uses configured MemPalace memory provider for family fact storage and recall", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const mempalace = await startMempalaceStub([
+      {
+        success: true,
+        drawer_id: "drawer-fact-1"
+      },
+      {
+        results: [
+          {
+            drawer_id: "drawer-fact-1",
+            content: "Family fact: Max prefers chamomile tea before sleep.",
+            distance: 0.2
+          }
+        ]
+      }
+    ]);
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "record_fact",
+        question: null,
+        summary: "Max prefers chamomile tea before sleep.",
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "answer_from_memory",
+        question: null,
+        summary: null,
+        query: "what helps Max sleep?",
+        reason: null
+      }),
+      JSON.stringify({
+        factIds: ["fact-1"]
+      }),
+      "Max prefers chamomile tea before sleep."
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_MEMPALACE_MCP_URL: mempalace.url,
+          DOZERCLAW_MEMPALACE_BEARER_TOKEN: "secret",
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-fact",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "remember Max prefers chamomile tea before sleep",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:00:00.000Z"),
+        now: new Date("2026-07-07T10:00:00.000Z")
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-recall",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "what helps Max sleep?",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:01:00.000Z"),
+        now: new Date("2026-07-07T10:01:00.000Z")
+      });
+
+      expect(reply.text).toBe("Max prefers chamomile tea before sleep.");
+      expect(mempalace.requests.map((request) => request.params.name)).toEqual([
+        "mempalace_add_drawer",
+        "mempalace_search"
+      ]);
+      expect(mempalace.requests[0]?.params.arguments).toEqual(
+        expect.objectContaining({
+          wing: "family",
+          room: "facts",
+          content: expect.stringContaining("Family fact: Max prefers chamomile")
+        })
+      );
+      expect(mempalace.requests[1]?.params.arguments).toEqual(
+        expect.objectContaining({
+          query: "what helps Max sleep?",
+          limit: 5,
+          wing: "family",
+          room: "facts"
+        })
+      );
+      expect(mempalace.authorizationHeaders).toEqual([
+        "Bearer secret",
+        "Bearer secret"
+      ]);
+    } finally {
+      await mempalace.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("lets owner approve a pending personal chat request", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");
@@ -503,4 +617,58 @@ class QueueModelProvider implements ModelPort {
 
     return { text };
   }
+}
+
+interface MempalaceStubRequest {
+  readonly params: {
+    readonly name: string;
+    readonly arguments: Record<string, unknown>;
+  };
+}
+
+async function startMempalaceStub(responses: readonly unknown[]) {
+  const requests: MempalaceStubRequest[] = [];
+  const authorizationHeaders: string[] = [];
+  let responseIndex = 0;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      authorizationHeaders.push(request.headers.authorization ?? "");
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+        readonly id: number;
+        readonly params: MempalaceStubRequest["params"];
+      };
+      requests.push({ params: body.params });
+      const payload = responses[responseIndex++] ?? {};
+
+      response.writeHead(200, {
+        "Content-Type": "application/json"
+      });
+      response.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(payload)
+              }
+            ]
+          }
+        })
+      );
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${address.port}/mcp`,
+    requests,
+    authorizationHeaders,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve()))
+  };
 }
