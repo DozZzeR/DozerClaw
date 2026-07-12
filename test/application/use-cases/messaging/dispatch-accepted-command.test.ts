@@ -8,6 +8,7 @@ import type { AcceptedMessageContext } from "../../../../src/application/use-cas
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
 import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
+import type { PendingFamilyFactDecision } from "../../../../src/ports/state-repository-port.js";
 
 describe("DispatchAcceptedCommandUseCase", () => {
   it("dispatches system health command to handler", async () => {
@@ -273,6 +274,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
   });
 
   it("asks for confirmation when recording a related family fact", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
     const factRecorder = new FakeFamilyFactRecorder({
       status: "needs_confirmation",
       newFact: familyFact({
@@ -293,6 +295,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
         summary: "Max prefers tea before bedtime."
       }),
       familyFactRecorder: factRecorder,
+      pendingFamilyFactDecisions,
       now: () => new Date("2026-07-07T10:00:00.000Z")
     });
 
@@ -314,6 +317,118 @@ describe("DispatchAcceptedCommandUseCase", () => {
         "Reply whether to update an existing fact or create a new one."
       ].join("\n")
     });
+    expect(pendingFamilyFactDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      newFact: familyFact({
+        id: "fact-new",
+        body: "Max prefers tea before bedtime."
+      }),
+      candidates: [
+        familyFact({
+          id: "fact-existing",
+          body: "Max prefers chamomile tea before sleep."
+        })
+      ],
+      createdAt: new Date("2026-07-07T10:00:00.000Z"),
+      expiresAt: new Date("2026-07-07T10:30:00.000Z")
+    });
+  });
+
+  it("updates an existing family fact from a pending memory decision", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("updated");
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      factDecisionResolver,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "обнови существующий"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Готово: обновил семейный факт: Max prefers tea before bedtime."
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(factDecisionResolver.seenInput).toEqual({
+      decision: "update",
+      pending: pendingFamilyFactDecision()
+    });
+    expect(pendingFamilyFactDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("creates a new family fact from a pending memory decision", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("created");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "создай новый"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Готово: сохранил новый семейный факт: Max prefers tea before bedtime."
+    });
+    expect(factDecisionResolver.seenInput).toEqual({
+      decision: "create",
+      pending: pendingFamilyFactDecision()
+    });
+    expect(pendingFamilyFactDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("cancels a pending memory decision", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("cancelled");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "отмена"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Ок, не меняю семейную память."
+    });
+    expect(factDecisionResolver.seenInput).toEqual({
+      decision: "cancel",
+      pending: pendingFamilyFactDecision()
+    });
+    expect(pendingFamilyFactDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
   it("recalls family facts from model answer_from_memory intent", async () => {
@@ -831,6 +946,57 @@ function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
   };
 }
 
+function pendingFamilyFactDecision(): PendingFamilyFactDecision {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    newFact: familyFact({
+      id: "fact-new",
+      body: "Max prefers tea before bedtime."
+    }),
+    candidates: [
+      familyFact({
+        id: "fact-existing",
+        body: "Max prefers chamomile tea before sleep."
+      })
+    ],
+    createdAt: new Date("2026-07-07T10:00:00.000Z"),
+    expiresAt: new Date("2026-07-07T10:30:00.000Z")
+  };
+}
+
+class FakeFamilyFactDecisionResolver {
+  seenInput:
+    | {
+        decision: "update" | "create" | "cancel";
+        pending: PendingFamilyFactDecision;
+      }
+    | undefined;
+
+  constructor(private readonly status: "updated" | "created" | "cancelled") {}
+
+  async execute(input: NonNullable<FakeFamilyFactDecisionResolver["seenInput"]>) {
+    this.seenInput = input;
+
+    if (this.status === "cancelled") {
+      return {
+        status: "cancelled" as const
+      };
+    }
+
+    return {
+      status: this.status,
+      fact:
+        this.status === "updated"
+          ? {
+              ...input.pending.newFact,
+              id: input.pending.candidates[0]!.id
+            }
+          : input.pending.newFact
+    };
+  }
+}
+
 class RecordingIntentClassifier extends FakeIntentClassifier {
   seenInput: ClassifyInboundIntentInput | undefined;
 
@@ -868,6 +1034,33 @@ class FakePendingClarifications {
   }
 
   async save(input: NonNullable<FakePendingClarifications["pending"]>) {
+    this.saved = input;
+    this.pending = input;
+  }
+
+  async clearByChatId(chatId: string) {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
+class FakePendingFamilyFactDecisions {
+  pending: PendingFamilyFactDecision | undefined;
+  saved: PendingFamilyFactDecision | undefined;
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: PendingFamilyFactDecision) {
     this.saved = input;
     this.pending = input;
   }

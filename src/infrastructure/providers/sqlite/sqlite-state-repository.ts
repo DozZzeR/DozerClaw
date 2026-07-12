@@ -1,6 +1,8 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type {
   PendingClarification,
+  PendingFamilyFactDecision,
   PendingFileDuplicateDecision,
   StateRepositoryPort
 } from "../../../ports/state-repository-port.js";
@@ -201,6 +203,81 @@ export class SqliteStateRepository implements StateRepositoryPort {
       .prepare("delete from pending_file_duplicate_decisions where chat_id = ?")
       .run(chatId);
   }
+
+  async findActivePendingFamilyFactDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFamilyFactDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            new_fact_json as newFactJson,
+            candidates_json as candidatesJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_family_fact_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as
+      | PendingFamilyFactDecisionRow
+      | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      newFact: parseFamilyFact(row.newFactJson),
+      candidates: parseFamilyFacts(row.candidatesJson),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingFamilyFactDecision(
+    input: PendingFamilyFactDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_family_fact_decisions (
+            chat_id,
+            actor_id,
+            new_fact_json,
+            candidates_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            new_fact_json = excluded.new_fact_json,
+            candidates_json = excluded.candidates_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        JSON.stringify(familyFactToJson(input.newFact)),
+        JSON.stringify(input.candidates.map(familyFactToJson)),
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingFamilyFactDecisionByChatId(chatId: string): Promise<void> {
+    this.database
+      .prepare("delete from pending_family_fact_decisions where chat_id = ?")
+      .run(chatId);
+  }
 }
 
 interface PendingClarificationRow {
@@ -222,6 +299,15 @@ interface PendingFileDuplicateDecisionRow {
   readonly provider: string | null;
   readonly receivedAt: string | null;
   readonly sourceAttachmentJson: string | null;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+interface PendingFamilyFactDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly newFactJson: string;
+  readonly candidatesJson: string;
   readonly createdAt: string;
   readonly expiresAt: string;
 }
@@ -260,4 +346,66 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseAttachment(json: string): MessageAttachment | undefined {
   return parseAttachments(`[${json}]`)[0];
+}
+
+function familyFactToJson(fact: FamilyFact): Record<string, unknown> {
+  return {
+    ...fact,
+    createdAt: fact.createdAt.toISOString(),
+    updatedAt: fact.updatedAt.toISOString()
+  };
+}
+
+function parseFamilyFacts(json: string): readonly FamilyFact[] {
+  const parsed = JSON.parse(json) as unknown;
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed.flatMap((value) => {
+    const fact = parseFamilyFactValue(value);
+
+    return fact ? [fact] : [];
+  });
+}
+
+function parseFamilyFact(json: string): FamilyFact {
+  const fact = parseFamilyFactValue(JSON.parse(json) as unknown);
+
+  if (!fact) {
+    throw new Error("Invalid pending family fact payload");
+  }
+
+  return fact;
+}
+
+function parseFamilyFactValue(value: unknown): FamilyFact | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.category !== "string" ||
+    typeof value.body !== "string" ||
+    typeof value.sourceActorId !== "string" ||
+    typeof value.sourceChatId !== "string" ||
+    typeof value.sourceMessageText !== "string" ||
+    typeof value.status !== "string" ||
+    typeof value.createdAt !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    id: value.id,
+    category: value.category as FamilyFact["category"],
+    body: value.body,
+    ...(typeof value.subjectId === "string" ? { subjectId: value.subjectId } : {}),
+    sourceActorId: value.sourceActorId,
+    sourceChatId: value.sourceChatId,
+    sourceMessageText: value.sourceMessageText,
+    status: value.status as FamilyFact["status"],
+    createdAt: new Date(value.createdAt),
+    updatedAt: new Date(value.updatedAt)
+  };
 }

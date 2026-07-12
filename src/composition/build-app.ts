@@ -13,6 +13,7 @@ import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/fi
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
+import { ResolveFamilyFactDecisionUseCase } from "../application/use-cases/family-memory/resolve-family-fact-decision.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
 import { GetServiceHealthUseCase } from "../application/use-cases/health/get-service-health.js";
@@ -91,6 +92,11 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     generateId,
     now: () => new Date()
   });
+  const factDecisionResolver = new ResolveFamilyFactDecisionUseCase({
+    repository: familyMemoryRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
+    now: () => new Date()
+  });
   const fileStorage = new LocalFileStorage({
     rootDirectory: config.fileStorage.rootDirectory,
     generateId
@@ -151,6 +157,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,
+    factDecisionResolver,
     pendingAccessRequests: {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)
@@ -171,6 +178,13 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       save: (input) => stateRepository.savePendingFileDuplicateDecision(input),
       clearByChatId: (chatId) =>
         stateRepository.clearPendingFileDuplicateDecisionByChatId(chatId)
+    },
+    pendingFamilyFactDecisions: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingFamilyFactDecisionByChatId(chatId, now),
+      save: (input) => stateRepository.savePendingFamilyFactDecision(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingFamilyFactDecisionByChatId(chatId)
     },
     ...(intentClassifier ? { intentClassifier } : {}),
     ...(pendingChoiceClassifier ? { pendingChoiceClassifier } : {})

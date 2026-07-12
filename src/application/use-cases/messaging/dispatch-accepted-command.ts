@@ -2,9 +2,15 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
+import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
+import type {
+  FamilyFactDecision,
+  ResolveFamilyFactDecisionInput,
+  ResolveFamilyFactDecisionResult
+} from "../family-memory/resolve-family-fact-decision.js";
 import type {
   RecordFamilyFactInput,
   RecordFamilyFactResult
@@ -49,6 +55,12 @@ export interface FamilyFactRecall {
   execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
 }
 
+export interface FamilyFactDecisionResolver {
+  execute(
+    input: ResolveFamilyFactDecisionInput
+  ): Promise<ResolveFamilyFactDecisionResult>;
+}
+
 export interface PendingAccessRequestReviewer {
   list(): Promise<readonly PendingAccessRequest[]>;
   review(input: {
@@ -81,6 +93,15 @@ export interface PendingFileDuplicateDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingFamilyFactDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFamilyFactDecision | undefined>;
+  save(input: PendingFamilyFactDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -91,12 +112,14 @@ export interface DispatchAcceptedCommandDependencies {
   readonly attachmentStore?: MessageAttachmentStore;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
+  readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<DuplicateDecision>;
   readonly duplicateDecisionResolver?: FileDuplicateDecisionResolver;
   readonly pendingClarifications?: PendingClarificationStore;
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
+  readonly pendingFamilyFactDecisions?: PendingFamilyFactDecisionStore;
   readonly now?: () => Date;
 }
 
@@ -159,6 +182,16 @@ export class DispatchAcceptedCommandUseCase {
 
     if (pendingDuplicate && context.attachments.length === 0) {
       return this.dispatchPendingDuplicateDecision(context, pendingDuplicate);
+    }
+
+    const pendingFamilyFact =
+      await this.dependencies.pendingFamilyFactDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingFamilyFact && context.attachments.length === 0) {
+      return this.dispatchPendingFamilyFactDecision(context, pendingFamilyFact);
     }
 
     const pending =
@@ -237,9 +270,20 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private dispatchFamilyMessageWithoutModel(
+  private async dispatchFamilyMessageWithoutModel(
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
+    const now = this.dependencies.now?.() ?? new Date();
+    const pendingFamilyFact =
+      await this.dependencies.pendingFamilyFactDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingFamilyFact && context.attachments.length === 0) {
+      return this.dispatchPendingFamilyFactDecision(context, pendingFamilyFact);
+    }
+
     if (context.attachments.length > 0 && this.dependencies.attachmentStore) {
       return this.storeFamilyMessageAttachments(context);
     }
@@ -295,6 +339,16 @@ export class DispatchAcceptedCommandUseCase {
     });
 
     if (result.status === "needs_confirmation") {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingFamilyFactDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        newFact: result.newFact,
+        candidates: result.candidates,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
       return {
         chatId: context.chat.id,
         text: formatFamilyFactConfirmation(result)
@@ -516,6 +570,58 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
+  private async dispatchPendingFamilyFactDecision(
+    context: AcceptedMessageContext,
+    pending: PendingFamilyFactDecision
+  ): Promise<OutboundReply> {
+    const decision = parseFamilyFactDecision(context.text);
+
+    if (!decision) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          "Я жду решение по семейному факту.",
+          "Можно написать: \"обнови существующий\", \"создай новый\" или \"отмена\"."
+        ].join("\n")
+      };
+    }
+
+    await this.dependencies.pendingFamilyFactDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    if (!this.dependencies.factDecisionResolver) {
+      return {
+        chatId: context.chat.id,
+        text: "Memory decision resolver is not configured."
+      };
+    }
+
+    const result = await this.dependencies.factDecisionResolver.execute({
+      decision,
+      pending
+    });
+
+    if (result.status === "cancelled") {
+      return {
+        chatId: context.chat.id,
+        text: "Ок, не меняю семейную память."
+      };
+    }
+
+    if (result.status === "updated") {
+      return {
+        chatId: context.chat.id,
+        text: `Готово: обновил семейный факт: ${result.fact.body}`
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: `Готово: сохранил новый семейный факт: ${result.fact.body}`
+    };
+  }
+
   private async resolveDuplicateMutation(
     decision: FileDuplicateMutationDecision,
     pending: PendingFileDuplicateDecision
@@ -677,6 +783,33 @@ function parseDuplicateDecision(text: string): DuplicateDecision | undefined {
     /ничего|отмен|не надо|забей/.test(normalized)
   ) {
     return "skip";
+  }
+
+  return undefined;
+}
+
+function parseFamilyFactDecision(text: string): FamilyFactDecision | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (
+    /\b(update|replace)\b/.test(normalized) ||
+    /обнов|замен|перезап/.test(normalized)
+  ) {
+    return "update";
+  }
+
+  if (
+    /\b(create|new|separate)\b/.test(normalized) ||
+    /созд|нов|отдельн/.test(normalized)
+  ) {
+    return "create";
+  }
+
+  if (
+    /\b(cancel|skip|nothing)\b/.test(normalized) ||
+    /отмен|ничего|не надо|забей/.test(normalized)
+  ) {
+    return "cancel";
   }
 
   return undefined;

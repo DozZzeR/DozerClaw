@@ -143,4 +143,93 @@ describe("SqliteStateRepository", () => {
 
     database.close();
   });
+
+  it("stores and clears active pending family fact decisions by chat", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.savePendingFamilyFactDecision({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      newFact: {
+        id: "fact-new",
+        category: "preference",
+        body: "Max prefers tea before bedtime.",
+        sourceActorId: "actor-1",
+        sourceChatId: "chat-1",
+        sourceMessageText: "remember Max prefers tea before bedtime",
+        status: "active",
+        createdAt: new Date("2026-07-07T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:00:00.000Z")
+      },
+      candidates: [
+        {
+          id: "fact-existing",
+          category: "preference",
+          body: "Max prefers chamomile tea before sleep.",
+          sourceActorId: "actor-1",
+          sourceChatId: "chat-1",
+          sourceMessageText: "remember Max prefers chamomile tea before sleep",
+          status: "active",
+          createdAt: new Date("2026-07-07T09:00:00.000Z"),
+          updatedAt: new Date("2026-07-07T09:00:00.000Z")
+        }
+      ],
+      createdAt: new Date("2026-07-07T10:00:00.000Z"),
+      expiresAt: new Date("2026-07-07T10:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingFamilyFactDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-07T10:05:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      newFact: {
+        id: "fact-new",
+        category: "preference",
+        body: "Max prefers tea before bedtime.",
+        sourceActorId: "actor-1",
+        sourceChatId: "chat-1",
+        sourceMessageText: "remember Max prefers tea before bedtime",
+        status: "active",
+        createdAt: new Date("2026-07-07T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:00:00.000Z")
+      },
+      candidates: [
+        {
+          id: "fact-existing",
+          category: "preference",
+          body: "Max prefers chamomile tea before sleep.",
+          sourceActorId: "actor-1",
+          sourceChatId: "chat-1",
+          sourceMessageText: "remember Max prefers chamomile tea before sleep",
+          status: "active",
+          createdAt: new Date("2026-07-07T09:00:00.000Z"),
+          updatedAt: new Date("2026-07-07T09:00:00.000Z")
+        }
+      ],
+      createdAt: new Date("2026-07-07T10:00:00.000Z"),
+      expiresAt: new Date("2026-07-07T10:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingFamilyFactDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-07T10:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.clearPendingFamilyFactDecisionByChatId("chat-1");
+    await expect(
+      repository.findActivePendingFamilyFactDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-07T10:05:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
 });
