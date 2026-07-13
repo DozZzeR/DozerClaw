@@ -320,6 +320,111 @@ describe("buildApp", () => {
     }
   });
 
+  it("uses chat-managed subject aliases during recall", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "save_subject_alias",
+        question: null,
+        summary: null,
+        category: null,
+        subjectId: null,
+        aliasSubjectId: "Maksim",
+        canonicalSubjectId: "Max",
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "record_fact",
+        question: null,
+        summary: "Max prefers chamomile tea before sleep.",
+        category: "preference",
+        subjectId: "max",
+        aliasSubjectId: null,
+        canonicalSubjectId: null,
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "answer_from_memory",
+        question: null,
+        summary: null,
+        category: null,
+        subjectId: null,
+        aliasSubjectId: null,
+        canonicalSubjectId: null,
+        query: "what helps Maksim sleep?",
+        reason: null
+      }),
+      selectFirstMemoryItem,
+      synthesizeFromFirstMemoryItem
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      await expect(
+        app.handleNormalizedInboundMessage({
+          messageId: "message-alias",
+          provider: "telegram",
+          providerUserId: "tg-owner",
+          providerChatId: "tg-owner",
+          chatKind: "owner_private",
+          displayName: "Owner",
+          text: "Maksim is Max",
+          attachments: [],
+          receivedAt: new Date("2026-07-07T10:00:00.000Z"),
+          now: new Date("2026-07-07T10:00:00.000Z")
+        })
+      ).resolves.toMatchObject({
+        text: "Saved subject alias: maksim -> max"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-fact",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "remember Max prefers chamomile tea before sleep",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:01:00.000Z"),
+        now: new Date("2026-07-07T10:01:00.000Z")
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-recall",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "what helps Maksim sleep?",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:02:00.000Z"),
+        now: new Date("2026-07-07T10:02:00.000Z")
+      });
+
+      expect(reply.text).toBe("Max prefers chamomile tea before sleep.");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses configured MemPalace memory provider for family fact storage and recall", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");

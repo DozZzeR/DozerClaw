@@ -30,6 +30,21 @@ export type InboundIntent =
       readonly query: string;
     }
   | {
+      readonly kind: "save_subject_alias";
+      readonly aliasSubjectId: string;
+      readonly canonicalSubjectId: string;
+    }
+  | {
+      readonly kind: "list_subject_aliases";
+    }
+  | {
+      readonly kind: "delete_subject_alias";
+      readonly aliasSubjectId: string;
+    }
+  | {
+      readonly kind: "diagnose_subject_aliases";
+    }
+  | {
       readonly kind: "unsupported";
       readonly reason: string;
     };
@@ -78,6 +93,24 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use category `place` for addresses, schools, venues, favorite locations, and where something belongs.",
       "- Use category `reference_link` for URLs, document links, external references, and pointers to saved resources.",
       "- If category is unclear, use `preference`; if subject is unclear, set `subjectId` to `null`."
+    ].join("\n"),
+    "",
+    "# subject_alias field rules",
+    [
+      "- Use `save_subject_alias` when the user says one subject name is another subject, for example `Maksim is Max`.",
+      "- `aliasSubjectId`: the alternate name or spelling.",
+      "- `canonicalSubjectId`: the stable subject key the alias should resolve to.",
+      "- Use `list_subject_aliases` when the user asks to show subject aliases.",
+      "- Use `delete_subject_alias` when the user asks to remove one alias.",
+      "- Use `diagnose_subject_aliases` when the user asks to check aliases for problems or conflicts."
+    ].join("\n"),
+    "",
+    "# subject_alias examples",
+    [
+      '{"kind":"save_subject_alias","aliasSubjectId":"Maksim","canonicalSubjectId":"max"}',
+      '{"kind":"list_subject_aliases"}',
+      '{"kind":"delete_subject_alias","aliasSubjectId":"Maksim"}',
+      '{"kind":"diagnose_subject_aliases"}'
     ].join("\n"),
     "",
     "# record_fact examples",
@@ -168,6 +201,49 @@ export function parseInboundIntent(text: string): InboundIntent {
       };
     }
 
+    if (
+      parsed.kind === "save_subject_alias" &&
+      typeof parsed.aliasSubjectId === "string" &&
+      typeof parsed.canonicalSubjectId === "string"
+    ) {
+      const aliasSubjectId = parsed.aliasSubjectId.trim();
+      const canonicalSubjectId = parsed.canonicalSubjectId.trim();
+
+      if (aliasSubjectId && canonicalSubjectId) {
+        return {
+          kind: "save_subject_alias",
+          aliasSubjectId,
+          canonicalSubjectId
+        };
+      }
+    }
+
+    if (parsed.kind === "list_subject_aliases") {
+      return {
+        kind: "list_subject_aliases"
+      };
+    }
+
+    if (
+      parsed.kind === "delete_subject_alias" &&
+      typeof parsed.aliasSubjectId === "string"
+    ) {
+      const aliasSubjectId = parsed.aliasSubjectId.trim();
+
+      if (aliasSubjectId) {
+        return {
+          kind: "delete_subject_alias",
+          aliasSubjectId
+        };
+      }
+    }
+
+    if (parsed.kind === "diagnose_subject_aliases") {
+      return {
+        kind: "diagnose_subject_aliases"
+      };
+    }
+
     if (parsed.kind === "unsupported" && typeof parsed.reason === "string") {
       return {
         kind: "unsupported",
@@ -193,6 +269,10 @@ const inboundIntentSchema = {
         "record_fact",
         "create_reminder",
         "answer_from_memory",
+        "save_subject_alias",
+        "list_subject_aliases",
+        "delete_subject_alias",
+        "diagnose_subject_aliases",
         "unsupported"
       ]
     },
@@ -209,6 +289,12 @@ const inboundIntentSchema = {
     subjectId: {
       type: ["string", "null"]
     },
+    aliasSubjectId: {
+      type: ["string", "null"]
+    },
+    canonicalSubjectId: {
+      type: ["string", "null"]
+    },
     query: {
       type: ["string", "null"]
     },
@@ -222,6 +308,8 @@ const inboundIntentSchema = {
     "summary",
     "category",
     "subjectId",
+    "aliasSubjectId",
+    "canonicalSubjectId",
     "query",
     "reason"
   ]

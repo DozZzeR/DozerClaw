@@ -2,6 +2,7 @@ import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
 import type { MemoryPort, MemorySearchResult } from "../../../ports/memory-port.js";
 import type { ModelPort } from "../../../ports/model-port.js";
+import type { SubjectAliasRepositoryPort } from "../../../ports/subject-alias-repository-port.js";
 
 export interface RecallFamilyFactsDependencies {
   readonly repository: FamilyMemoryRepositoryPort;
@@ -10,6 +11,7 @@ export interface RecallFamilyFactsDependencies {
   readonly resultLimit?: number;
   readonly semanticLimit?: number;
   readonly model?: ModelPort;
+  readonly subjectAliases?: SubjectAliasRepositoryPort;
 }
 
 export interface RecallFamilyFactsInput {
@@ -50,8 +52,10 @@ export class RecallFamilyFactsUseCase {
       );
     }
 
+    const queryProfile = await this.buildQueryProfile(input.query);
     const selectedItems = await this.selectItems(
       input.query,
+      queryProfile,
       facts,
       semanticResults
     );
@@ -95,10 +99,11 @@ export class RecallFamilyFactsUseCase {
 
   private async selectItems(
     query: string,
+    queryProfile: QueryProfile,
     facts: readonly FamilyFact[],
     semanticResults: readonly MemorySearchResult[]
   ): Promise<readonly RecallMemoryItem[]> {
-    const rankedFacts = rankFacts(query, facts);
+    const rankedFacts = rankFacts(queryProfile, facts);
     const deterministicFacts = matchingFacts(rankedFacts);
     const fallbackItems = [
       ...limitFacts(
@@ -188,6 +193,40 @@ export class RecallFamilyFactsUseCase {
   private resultLimit(): number {
     return this.dependencies.resultLimit ?? this.dependencies.recentLimit;
   }
+
+  private async buildQueryProfile(query: string): Promise<QueryProfile> {
+    const tokens = queryTokens(query);
+
+    if (!this.dependencies.subjectAliases) {
+      return {
+        tokens,
+        categoryHints: hintedCategories(tokens)
+      };
+    }
+
+    const expandedTokens = new Set(tokens);
+
+    await Promise.all(
+      tokens.map(async (token) => {
+        try {
+          expandedTokens.add(
+            await this.dependencies.subjectAliases!.resolveCanonicalSubjectId(
+              token
+            )
+          );
+        } catch {
+          expandedTokens.add(token);
+        }
+      })
+    );
+
+    const resolvedTokens = [...expandedTokens].filter(Boolean);
+
+    return {
+      tokens: resolvedTokens,
+      categoryHints: hintedCategories(resolvedTokens)
+    };
+  }
 }
 
 interface RecallMemoryItem {
@@ -226,18 +265,20 @@ interface RankedFact {
   readonly index: number;
 }
 
+interface QueryProfile {
+  readonly tokens: readonly string[];
+  readonly categoryHints: ReadonlySet<FamilyFact["category"]>;
+}
+
 function rankFacts(
-  query: string,
+  queryProfile: QueryProfile,
   facts: readonly FamilyFact[]
 ): readonly RankedFact[] {
-  const tokens = queryTokens(query);
-  const categoryHints = hintedCategories(tokens);
-
   return facts
     .map((fact, index) => ({
       fact,
       index,
-      score: scoreFact(fact, tokens, categoryHints)
+      score: scoreFact(fact, queryProfile.tokens, queryProfile.categoryHints)
     }))
     .sort((left, right) => right.score - left.score || left.index - right.index);
 }

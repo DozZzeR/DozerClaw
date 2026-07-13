@@ -13,6 +13,7 @@ import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/fi
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
+import { ManageSubjectAliasesUseCase } from "../application/use-cases/family-memory/manage-subject-aliases.js";
 import { ResolveFamilyFactDecisionUseCase } from "../application/use-cases/family-memory/resolve-family-fact-decision.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
@@ -139,10 +140,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const familyFactRecall = new RecallFamilyFactsUseCase({
     repository: familyMemoryRepository,
     ...(semanticMemory ? { semanticMemory } : {}),
+    subjectAliases: subjectAliasRepository,
     recentLimit: 50,
     resultLimit: 10,
     semanticLimit: config.memory?.mempalace?.searchLimit ?? 5,
     ...(modelProvider ? { model: modelProvider } : {})
+  });
+  const subjectAliasManager = new ManageSubjectAliasesUseCase({
+    repository: subjectAliasRepository
   });
   const intentClassifier = modelProvider
     ? new ModelInboundIntentClassifier({
@@ -160,6 +165,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,
+    subjectAliasManager,
     factDecisionResolver,
     pendingAccessRequests: {
       list: () => listPendingAccessRequests.execute(),

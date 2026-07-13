@@ -45,6 +45,7 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("subjectId");
     expect(model.request?.input).toContain("Use category `event`");
     expect(model.request?.input).toContain("Use category `reference_link`");
+    expect(model.request?.input).toContain("save_subject_alias");
     expect(model.request?.outputSchema).toMatchObject({
       name: "dozerclaw_inbound_intent",
       schema: {
@@ -54,6 +55,8 @@ describe("ModelInboundIntentClassifier", () => {
           "summary",
           "category",
           "subjectId",
+          "aliasSubjectId",
+          "canonicalSubjectId",
           "query",
           "reason"
         ]
@@ -93,6 +96,51 @@ describe("parseInboundIntent", () => {
       summary: "Max started swimming lessons.",
       category: "event",
       subjectId: "max"
+    });
+  });
+
+  it("parses subject alias intents", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "save_subject_alias",
+          aliasSubjectId: "  Maksim ",
+          canonicalSubjectId: " Max "
+        })
+      )
+    ).toEqual({
+      kind: "save_subject_alias",
+      aliasSubjectId: "Maksim",
+      canonicalSubjectId: "Max"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "delete_subject_alias",
+          aliasSubjectId: "Maksim"
+        })
+      )
+    ).toEqual({
+      kind: "delete_subject_alias",
+      aliasSubjectId: "Maksim"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "list_subject_aliases"
+        })
+      )
+    ).toEqual({
+      kind: "list_subject_aliases"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "diagnose_subject_aliases"
+        })
+      )
+    ).toEqual({
+      kind: "diagnose_subject_aliases"
     });
   });
 

@@ -14,6 +14,7 @@ import type {
   ModelTextRequest,
   ModelTextResponse
 } from "../../../../src/ports/model-port.js";
+import type { SubjectAliasRepositoryPort } from "../../../../src/ports/subject-alias-repository-port.js";
 
 describe("RecallFamilyFactsUseCase", () => {
   it("returns an empty-state reply when no active family facts exist", async () => {
@@ -89,6 +90,38 @@ describe("RecallFamilyFactsUseCase", () => {
       })
     ).resolves.toEqual({
       text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+  });
+
+  it("matches structured facts when the query uses a subject alias", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-unrelated",
+        category: "preference",
+        body: "Sofia has a blue backpack.",
+        subjectId: "sofia"
+      }),
+      familyFact({
+        id: "fact-match",
+        category: "preference",
+        body: "Favorite hoodie is green.",
+        subjectId: "max"
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      subjectAliases: new StubSubjectAliasRepository({
+        maksim: "max"
+      }),
+      recentLimit: 10
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what about Maksim?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Favorite hoodie is green."
     });
   });
 
@@ -414,8 +447,27 @@ class ThrowingSemanticMemory extends StubSemanticMemory {
   }
 }
 
+class StubSubjectAliasRepository implements SubjectAliasRepositoryPort {
+  constructor(private readonly aliases: Record<string, string>) {}
+
+  async resolveCanonicalSubjectId(subjectId: string): Promise<string> {
+    return this.aliases[subjectId] ?? subjectId;
+  }
+
+  async saveSubjectAlias(): Promise<void> {}
+
+  async listSubjectAliases() {
+    return [];
+  }
+
+  async deleteSubjectAlias(): Promise<boolean> {
+    return false;
+  }
+}
+
 function familyFact(
-  input: Pick<FamilyFact, "id" | "category" | "body">
+  input: Pick<FamilyFact, "id" | "category" | "body"> &
+    Partial<Pick<FamilyFact, "subjectId">>
 ): FamilyFact {
   return {
     ...input,

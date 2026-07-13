@@ -621,6 +621,115 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("saves a subject alias from a model intent", async () => {
+    const subjectAliasManager = new FakeSubjectAliasManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "save_subject_alias",
+        aliasSubjectId: "Maksim",
+        canonicalSubjectId: "max"
+      }),
+      subjectAliasManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "Maksim is Max"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved subject alias: maksim -> max"
+    });
+    expect(subjectAliasManager.seenInput).toEqual({
+      action: "save",
+      aliasSubjectId: "Maksim",
+      canonicalSubjectId: "max"
+    });
+  });
+
+  it("lists and diagnoses subject aliases from model intents", async () => {
+    const subjectAliasManager = new FakeSubjectAliasManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new QueueIntentClassifier([
+        {
+          kind: "list_subject_aliases"
+        },
+        {
+          kind: "diagnose_subject_aliases"
+        }
+      ]),
+      subjectAliasManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "show subject aliases"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Subject aliases:\n- maksim -> max"
+    });
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "diagnose subject aliases"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Subject alias diagnostics: OK"
+    });
+    expect(subjectAliasManager.seenInputs).toEqual([
+      {
+        action: "list"
+      },
+      {
+        action: "diagnose"
+      }
+    ]);
+  });
+
+  it("deletes a subject alias from a model intent", async () => {
+    const subjectAliasManager = new FakeSubjectAliasManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "delete_subject_alias",
+        aliasSubjectId: "Maksim"
+      }),
+      subjectAliasManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "delete Maksim alias"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Deleted subject alias: maksim"
+    });
+    expect(subjectAliasManager.seenInput).toEqual({
+      action: "delete",
+      aliasSubjectId: "Maksim"
+    });
+  });
+
   it("falls back to attachment storage when model intent classification fails", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -1031,10 +1140,74 @@ class FakeIntentClassifier {
           readonly subjectId?: string;
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
+      | {
+          readonly kind: "save_subject_alias";
+          readonly aliasSubjectId: string;
+          readonly canonicalSubjectId: string;
+        }
+      | { readonly kind: "list_subject_aliases" }
+      | { readonly kind: "delete_subject_alias"; readonly aliasSubjectId: string }
+      | { readonly kind: "diagnose_subject_aliases" }
   ) {}
 
   async execute(_input: ClassifyInboundIntentInput) {
     return this.intent;
+  }
+}
+
+class QueueIntentClassifier {
+  constructor(
+    private readonly intents: ConstructorParameters<
+      typeof FakeIntentClassifier
+    >[0][]
+  ) {}
+
+  async execute(_input: ClassifyInboundIntentInput) {
+    const intent = this.intents.shift();
+
+    if (!intent) {
+      throw new Error("no queued intent");
+    }
+
+    return intent;
+  }
+}
+
+class FakeSubjectAliasManager {
+  readonly seenInputs: unknown[] = [];
+
+  get seenInput() {
+    return this.seenInputs.at(-1);
+  }
+
+  async execute(input: unknown) {
+    this.seenInputs.push(input);
+
+    if (
+      isRecord(input) &&
+      input.action === "save" &&
+      input.aliasSubjectId === "Maksim"
+    ) {
+      return {
+        text: "Saved subject alias: maksim -> max"
+      };
+    }
+
+    if (isRecord(input) && input.action === "list") {
+      return {
+        text: "Subject aliases:\n- maksim -> max"
+      };
+    }
+
+    if (isRecord(input) && input.action === "diagnose") {
+      return {
+        text: "Subject alias diagnostics: OK"
+      };
+    }
+
+    return {
+      text: "Deleted subject alias: maksim"
+    };
   }
 }
 
@@ -1113,6 +1286,10 @@ function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
     createdAt: new Date("2026-07-07T10:00:00.000Z"),
     updatedAt: new Date("2026-07-07T10:00:00.000Z")
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function pendingFamilyFactDecision(

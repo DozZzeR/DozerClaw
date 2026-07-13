@@ -7,6 +7,10 @@ import type { PendingFileDuplicateDecision } from "../../../ports/state-reposito
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
 import type {
+  ManageSubjectAliasesInput,
+  ManageSubjectAliasesResult
+} from "../family-memory/manage-subject-aliases.js";
+import type {
   FamilyFactDecision,
   ResolveFamilyFactDecisionInput,
   ResolveFamilyFactDecisionResult
@@ -53,6 +57,10 @@ export interface FamilyFactRecorder {
 
 export interface FamilyFactRecall {
   execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
+}
+
+export interface SubjectAliasManager {
+  execute(input: ManageSubjectAliasesInput): Promise<ManageSubjectAliasesResult>;
 }
 
 export interface FamilyFactDecisionResolver {
@@ -112,6 +120,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly attachmentStore?: MessageAttachmentStore;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
+  readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
@@ -264,6 +273,15 @@ export class DispatchAcceptedCommandUseCase {
       return this.recallFamilyFacts(context, intent);
     }
 
+    if (
+      intent.kind === "save_subject_alias" ||
+      intent.kind === "list_subject_aliases" ||
+      intent.kind === "delete_subject_alias" ||
+      intent.kind === "diagnose_subject_aliases"
+    ) {
+      return this.manageSubjectAliases(context, intent);
+    }
+
     return {
       chatId: context.chat.id,
       text: `I understood this as ${intent.kind}, but that action is not connected yet.`
@@ -377,6 +395,36 @@ export class DispatchAcceptedCommandUseCase {
     const result = await this.dependencies.familyFactRecall.execute({
       query: intent.query
     });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async manageSubjectAliases(
+    context: AcceptedMessageContext,
+    intent: Extract<
+      InboundIntent,
+      {
+        readonly kind:
+          | "save_subject_alias"
+          | "list_subject_aliases"
+          | "delete_subject_alias"
+          | "diagnose_subject_aliases";
+      }
+    >
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.subjectAliasManager) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.subjectAliasManager.execute(
+      toSubjectAliasAction(intent)
+    );
 
     return {
       chatId: context.chat.id,
@@ -908,6 +956,44 @@ function parseCandidateIndex(normalizedText: string): number | undefined {
   }
 
   return undefined;
+}
+
+function toSubjectAliasAction(
+  intent: Extract<
+    InboundIntent,
+    {
+      readonly kind:
+        | "save_subject_alias"
+        | "list_subject_aliases"
+        | "delete_subject_alias"
+        | "diagnose_subject_aliases";
+    }
+  >
+): ManageSubjectAliasesInput {
+  if (intent.kind === "save_subject_alias") {
+    return {
+      action: "save",
+      aliasSubjectId: intent.aliasSubjectId,
+      canonicalSubjectId: intent.canonicalSubjectId
+    };
+  }
+
+  if (intent.kind === "delete_subject_alias") {
+    return {
+      action: "delete",
+      aliasSubjectId: intent.aliasSubjectId
+    };
+  }
+
+  if (intent.kind === "diagnose_subject_aliases") {
+    return {
+      action: "diagnose"
+    };
+  }
+
+  return {
+    action: "list"
+  };
 }
 
 function formatFamilyFactConfirmation(
