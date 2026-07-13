@@ -171,6 +171,78 @@ describe("MempalaceMemoryProvider", () => {
     });
   });
 
+  it("lists drawers to replace entries when search results omit drawer ids", async () => {
+    const fetcher = new RecordingFetch([
+      jsonRpcToolResult({
+        results: [
+          {
+            text: [
+              "Family fact: Max prefers chamomile tea before sleep.",
+              "",
+              "References:",
+              "- family_fact:fact-1"
+            ].join("\n")
+          }
+        ]
+      }),
+      jsonRpcToolResult({
+        drawers: [
+          {
+            drawer_id: "drawer-old",
+            content_preview: [
+              "Family fact: Max prefers chamomile tea before sleep.",
+              "",
+              "References:",
+              "- family_fact:fact-1"
+            ].join("\n")
+          },
+          {
+            drawer_id: "drawer-other",
+            content_preview: "Family fact: Sofia likes pasta."
+          }
+        ]
+      }),
+      jsonRpcToolResult({
+        success: true,
+        drawer_id: "drawer-old"
+      }),
+      jsonRpcToolResult({
+        success: true,
+        drawer_id: "drawer-new"
+      })
+    ]);
+    const provider = new MempalaceMemoryProvider({
+      endpointUrl: "http://127.0.0.1:4118/mcp",
+      wing: "family",
+      room: "facts",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.replace({
+        body: "Family fact: Max prefers peppermint tea before sleep.",
+        references: ["family_fact:fact-1"]
+      })
+    ).resolves.toEqual({
+      id: "drawer-new",
+      body: "Family fact: Max prefers peppermint tea before sleep."
+    });
+    expect(fetcher.requests.map((request) => request.body.params.name)).toEqual([
+      "mempalace_search",
+      "mempalace_list_drawers",
+      "mempalace_delete_drawer",
+      "mempalace_add_drawer"
+    ]);
+    expect(fetcher.requests[1]?.body.params.arguments).toEqual({
+      wing: "family",
+      room: "facts",
+      limit: 100
+    });
+    expect(fetcher.requests[2]?.body.params.arguments).toEqual({
+      drawer_id: "drawer-old"
+    });
+  });
+
   it("updates an existing memory entry through mempalace_update_drawer", async () => {
     const fetcher = new RecordingFetch([
       jsonRpcToolResult({

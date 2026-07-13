@@ -34,6 +34,10 @@ interface MempalaceSearchPayload {
 
 type MempalaceSearchResultRow = Record<string, unknown>;
 
+interface MempalaceListDrawersPayload {
+  readonly drawers?: readonly unknown[];
+}
+
 export class MempalaceMemoryProvider implements MemoryPort {
   private nextRequestId = 1;
   private readonly fetcher: typeof fetch;
@@ -98,14 +102,37 @@ export class MempalaceMemoryProvider implements MemoryPort {
     const drawerIds = new Set<string>();
 
     for (const reference of references) {
-      const results = await this.search({
-        text: reference,
-        limit: 20
-      });
+      const payload = (await this.callTool("mempalace_search", {
+        query: reference,
+        limit: 20,
+        wing: this.options.wing,
+        room: this.options.room,
+        ...(this.options.maxDistance === undefined
+          ? {}
+          : { max_distance: this.options.maxDistance })
+      })) as MempalaceSearchPayload;
+      const matchingRows = (payload.results ?? [])
+        .filter(isRecord)
+        .filter((row) =>
+          (textField(row, ["content", "text", "body"]) ?? "").includes(reference)
+        );
 
-      for (const result of results) {
-        if (result.entry.body.includes(reference)) {
-          drawerIds.add(result.entry.id);
+      for (const row of matchingRows) {
+        const drawerId = drawerIdFromRow(row);
+
+        if (drawerId) {
+          drawerIds.add(drawerId);
+        }
+      }
+
+      if (
+        matchingRows.length > 0 &&
+        matchingRows.some((row) => !drawerIdFromRow(row))
+      ) {
+        for (const drawerId of await this.listDrawerIdsMatchingReference(
+          reference
+        )) {
+          drawerIds.add(drawerId);
         }
       }
     }
@@ -117,10 +144,31 @@ export class MempalaceMemoryProvider implements MemoryPort {
     }
   }
 
+  private async listDrawerIdsMatchingReference(
+    reference: string
+  ): Promise<readonly string[]> {
+    const payload = (await this.callTool("mempalace_list_drawers", {
+      wing: this.options.wing,
+      room: this.options.room,
+      limit: 100
+    })) as MempalaceListDrawersPayload;
+
+    return (payload.drawers ?? [])
+      .filter(isRecord)
+      .filter((row) =>
+        (
+          textField(row, ["content", "content_preview", "text", "body"]) ?? ""
+        ).includes(reference)
+      )
+      .map(drawerIdFromRow)
+      .filter((drawerId): drawerId is string => Boolean(drawerId));
+  }
+
   private async callTool(
     name:
       | "mempalace_add_drawer"
       | "mempalace_delete_drawer"
+      | "mempalace_list_drawers"
       | "mempalace_update_drawer"
       | "mempalace_search",
     args: Record<string, unknown>
@@ -208,11 +256,15 @@ function toMemorySearchResult(
 
   return {
     entry: {
-      id: textField(row, ["drawer_id", "drawerId", "id"]) ?? "mempalace-drawer",
+      id: drawerIdFromRow(row) ?? "mempalace-drawer",
       body
     },
     ...numericScore(row)
   };
+}
+
+function drawerIdFromRow(row: MempalaceSearchResultRow): string | undefined {
+  return textField(row, ["drawer_id", "drawerId", "id", "parent_drawer_id"]);
 }
 
 function textField(
