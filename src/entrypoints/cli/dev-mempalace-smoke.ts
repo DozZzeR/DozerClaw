@@ -142,7 +142,7 @@ class DevMempalaceSmokeModelProvider implements ModelPort {
             question: null,
             summary: this.body,
             category: "preference",
-            subjectId: "smoke",
+            subjectId: null,
             query: null,
             reason: null
           })

@@ -177,6 +177,74 @@ describe("RecordFamilyFactUseCase", () => {
     expect(repository.saved).toBeUndefined();
     expect(semanticMemory.stored).toBeUndefined();
   });
+
+  it("does not ask for confirmation when explicit subject ids differ", async () => {
+    const existingFact = familyFact({
+      id: "fact-existing",
+      body: "Sofia prefers chamomile tea before sleep.",
+      subjectId: "sofia"
+    });
+    const repository = new RecordingFamilyMemoryRepository([existingFact]);
+    const useCase = new RecordFamilyFactUseCase({
+      repository,
+      generateId: () => "fact-new",
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        summary: "Max prefers chamomile tea before sleep.",
+        subjectId: "max",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Max prefers chamomile tea before sleep"
+      })
+    ).resolves.toEqual({
+      status: "created",
+      fact: expect.objectContaining({
+        id: "fact-new",
+        subjectId: "max"
+      })
+    });
+    expect(repository.saved).toEqual(
+      expect.objectContaining({
+        id: "fact-new",
+        subjectId: "max"
+      })
+    );
+  });
+
+  it("asks for confirmation for matching subject ids with lower token overlap", async () => {
+    const existingFact = familyFact({
+      id: "fact-existing",
+      body: "Max likes pasta.",
+      subjectId: "max"
+    });
+    const repository = new RecordingFamilyMemoryRepository([existingFact]);
+    const useCase = new RecordFamilyFactUseCase({
+      repository,
+      generateId: () => "fact-new",
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        summary: "Max likes soup.",
+        subjectId: "max",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Max likes soup"
+      })
+    ).resolves.toEqual({
+      status: "needs_confirmation",
+      newFact: expect.objectContaining({
+        id: "fact-new",
+        subjectId: "max"
+      }),
+      candidates: [existingFact]
+    });
+    expect(repository.saved).toBeUndefined();
+  });
 });
 
 class RecordingFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
@@ -216,11 +284,16 @@ class ThrowingSemanticMemory extends RecordingSemanticMemory {
   }
 }
 
-function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
+function familyFact(
+  input: Pick<FamilyFact, "id" | "body"> & {
+    readonly subjectId?: string;
+  }
+): FamilyFact {
   return {
     id: input.id,
     category: "preference",
     body: input.body,
+    ...(input.subjectId ? { subjectId: input.subjectId } : {}),
     sourceActorId: "actor-owner",
     sourceChatId: "chat-family",
     sourceMessageText: input.body,

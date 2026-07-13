@@ -106,9 +106,17 @@ function areRelatedFacts(left: FamilyFact, right: FamilyFact): boolean {
     return false;
   }
 
+  if (left.subjectId && right.subjectId && left.subjectId !== right.subjectId) {
+    return false;
+  }
+
   const leftTokens = meaningfulTokens(left.body);
   const rightTokens = new Set(meaningfulTokens(right.body));
   const overlap = leftTokens.filter((token) => rightTokens.has(token)).length;
+
+  if (left.subjectId && right.subjectId && left.subjectId === right.subjectId) {
+    return overlap >= 1;
+  }
 
   return overlap >= 3;
 }
