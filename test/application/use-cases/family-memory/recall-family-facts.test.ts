@@ -125,7 +125,7 @@ describe("RecallFamilyFactsUseCase", () => {
       text: "Max prefers chamomile tea before sleep."
     });
     expect(model.requests.map((request) => request.purpose)).toEqual([
-      "Select relevant DozerClaw family facts",
+      "Select relevant DozerClaw family memories",
       "Synthesize DozerClaw family memory answer"
     ]);
     expect(model.requests[0]?.input).toContain("fact-match");
@@ -133,6 +133,57 @@ describe("RecallFamilyFactsUseCase", () => {
       "Max prefers chamomile tea before sleep."
     );
     expect(model.requests[1]?.input).not.toContain("Sofia started piano lessons.");
+  });
+
+  it("lets model selection choose semantic memory results for synthesis", async () => {
+    const model = new QueueModel([
+      JSON.stringify({
+        memoryItemIds: ["drawer-tea"]
+      }),
+      "Max prefers chamomile tea before sleep."
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository: new StubFamilyMemoryRepository([]),
+      semanticMemory: new StubSemanticMemory([
+        {
+          entry: {
+            id: "drawer-tea",
+            body: "Family fact: Max prefers chamomile tea before sleep."
+          },
+          score: 0.2
+        },
+        {
+          entry: {
+            id: "drawer-piano",
+            body: "Family fact: Sofia started piano lessons."
+          },
+          score: 0.4
+        }
+      ]),
+      recentLimit: 10,
+      semanticLimit: 5,
+      model
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what helps Max sleep?"
+      })
+    ).resolves.toEqual({
+      text: "Max prefers chamomile tea before sleep."
+    });
+    expect(model.requests.map((request) => request.purpose)).toEqual([
+      "Select relevant DozerClaw family memories",
+      "Synthesize DozerClaw family memory answer"
+    ]);
+    expect(model.requests[0]?.input).toContain("drawer-tea");
+    expect(model.requests[0]?.input).toContain("drawer-piano");
+    expect(model.requests[1]?.input).toContain(
+      "Family fact: Max prefers chamomile tea before sleep."
+    );
+    expect(model.requests[1]?.input).not.toContain(
+      "Family fact: Sofia started piano lessons."
+    );
   });
 
   it("falls back to deterministic bullets when model recall fails", async () => {

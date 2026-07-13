@@ -35,11 +35,7 @@ export class RecallFamilyFactsUseCase {
       };
     }
 
-    const selectedFacts = await this.selectFacts(input.query, facts);
-    const selectedItems = [
-      ...selectedFacts.map(toLocalMemoryItem),
-      ...semanticResults.map(toSemanticMemoryItem)
-    ];
+    const selectedItems = await this.selectItems(input.query, facts, semanticResults);
     const synthesized = await this.synthesizeAnswer(input.query, selectedItems);
 
     if (synthesized) {
@@ -70,43 +66,58 @@ export class RecallFamilyFactsUseCase {
     }
   }
 
-  private async selectFacts(
+  private async selectItems(
     query: string,
-    facts: readonly FamilyFact[]
-  ): Promise<readonly FamilyFact[]> {
+    facts: readonly FamilyFact[],
+    semanticResults: readonly MemorySearchResult[]
+  ): Promise<readonly RecallMemoryItem[]> {
     const rankedFacts = rankFacts(query, facts);
     const deterministicFacts = matchingFacts(rankedFacts);
-    const fallbackFacts = limitFacts(
-      deterministicFacts.length > 0 ? deterministicFacts : rankedFacts.map((item) => item.fact),
-      this.resultLimit()
-    );
+    const fallbackItems = [
+      ...limitFacts(
+        deterministicFacts.length > 0
+          ? deterministicFacts
+          : rankedFacts.map((item) => item.fact),
+        this.resultLimit()
+      ).map(toLocalMemoryItem),
+      ...semanticResults.map(toSemanticMemoryItem)
+    ];
 
     if (!this.dependencies.model) {
-      return fallbackFacts;
+      return fallbackItems;
+    }
+
+    const candidateItems = [
+      ...rankedFacts.map((item) => toLocalMemoryItem(item.fact)),
+      ...semanticResults.map(toSemanticMemoryItem)
+    ];
+
+    if (candidateItems.length === 0) {
+      return fallbackItems;
     }
 
     try {
       const response = await this.dependencies.model.runTextRequest({
-        purpose: "Select relevant DozerClaw family facts",
-        input: buildSelectionPrompt(query, rankedFacts.map((item) => item.fact)),
+        purpose: "Select relevant DozerClaw family memories",
+        input: buildSelectionPrompt(query, candidateItems),
         outputSchema: {
-          name: "dozerclaw_family_fact_selection",
-          schema: factSelectionSchema
+          name: "dozerclaw_family_memory_selection",
+          schema: memorySelectionSchema
         }
       });
-      const selectedIds = parseSelectedFactIds(response.text);
-      const selectedFacts = selectedIds
-        .map((id) => facts.find((fact) => fact.id === id))
-        .filter((fact): fact is FamilyFact => Boolean(fact));
+      const selectedIds = parseSelectedMemoryItemIds(response.text);
+      const selectedItems = selectedIds
+        .map((id) => candidateItems.find((item) => item.id === id))
+        .filter((item): item is RecallMemoryItem => Boolean(item));
 
-      if (selectedFacts.length > 0) {
-        return limitFacts(selectedFacts, this.resultLimit());
+      if (selectedItems.length > 0) {
+        return limitItems(selectedItems, this.resultLimit());
       }
     } catch {
-      return fallbackFacts;
+      return fallbackItems;
     }
 
-    return fallbackFacts;
+    return fallbackItems;
   }
 
   private async synthesizeAnswer(
@@ -140,6 +151,9 @@ interface RecallMemoryItem {
   readonly source: "structured_fact" | "semantic_memory";
   readonly body: string;
   readonly category?: FamilyFact["category"];
+  readonly subjectId?: string;
+  readonly sourceMessageText?: string;
+  readonly createdAt?: Date;
 }
 
 interface RankedFact {
@@ -257,12 +271,22 @@ function limitFacts(
   return facts.slice(0, limit);
 }
 
+function limitItems(
+  items: readonly RecallMemoryItem[],
+  limit: number
+): readonly RecallMemoryItem[] {
+  return items.slice(0, limit);
+}
+
 function toLocalMemoryItem(fact: FamilyFact): RecallMemoryItem {
   return {
     id: fact.id,
     source: "structured_fact",
     body: fact.body,
-    category: fact.category
+    category: fact.category,
+    ...(fact.subjectId ? { subjectId: fact.subjectId } : {}),
+    sourceMessageText: fact.sourceMessageText,
+    createdAt: fact.createdAt
   };
 }
 
@@ -282,24 +306,27 @@ function formatMemoryBullets(items: readonly RecallMemoryItem[]): string {
 
 function buildSelectionPrompt(
   query: string,
-  facts: readonly FamilyFact[]
+  items: readonly RecallMemoryItem[]
 ): string {
   return [
-    "Select the family facts that are relevant to the user query.",
-    "Return only fact IDs from the provided list.",
+    "Select the family memories that are relevant to the user query.",
+    "Return only memory item IDs from the provided list.",
     "",
     "# User query",
     query,
     "",
-    "# Candidate facts",
+    "# Candidate memory items",
     JSON.stringify(
-      facts.map((fact) => ({
-        id: fact.id,
-        category: fact.category,
-        subjectId: fact.subjectId ?? null,
-        body: fact.body,
-        sourceMessageText: fact.sourceMessageText,
-        createdAt: fact.createdAt.toISOString()
+      items.map((item) => ({
+        id: item.id,
+        source: item.source,
+        ...(item.category ? { category: item.category } : {}),
+        ...(item.subjectId ? { subjectId: item.subjectId } : {}),
+        body: item.body,
+        ...(item.sourceMessageText
+          ? { sourceMessageText: item.sourceMessageText }
+          : {}),
+        ...(item.createdAt ? { createdAt: item.createdAt.toISOString() } : {})
       }))
     )
   ].join("\n");
@@ -328,15 +355,25 @@ function buildSynthesisPrompt(
   ].join("\n");
 }
 
-function parseSelectedFactIds(text: string): readonly string[] {
+function parseSelectedMemoryItemIds(text: string): readonly string[] {
   try {
     const parsed = JSON.parse(text) as unknown;
 
-    if (!isRecord(parsed) || !Array.isArray(parsed.factIds)) {
+    if (!isRecord(parsed)) {
       return [];
     }
 
-    return parsed.factIds.filter((id): id is string => typeof id === "string");
+    if (Array.isArray(parsed.memoryItemIds)) {
+      return parsed.memoryItemIds.filter(
+        (id): id is string => typeof id === "string"
+      );
+    }
+
+    if (Array.isArray(parsed.factIds)) {
+      return parsed.factIds.filter((id): id is string => typeof id === "string");
+    }
+
+    return [];
   } catch {
     return [];
   }
@@ -346,18 +383,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-const factSelectionSchema = {
+const memorySelectionSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    factIds: {
+    memoryItemIds: {
       type: "array",
       items: {
         type: "string"
       }
     }
   },
-  required: ["factIds"]
+  required: ["memoryItemIds"]
 };
 
 const stopWords = new Set([
