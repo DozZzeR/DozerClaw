@@ -456,6 +456,15 @@ class RecordingSubjectAliasRepository implements SubjectAliasRepositoryPort {
   }
 
   async saveSubjectAlias(): Promise<void> {}
+
+  async listSubjectAliases() {
+    return Object.entries(this.aliases).map(
+      ([aliasSubjectId, canonicalSubjectId]) => ({
+        aliasSubjectId,
+        canonicalSubjectId
+      })
+    );
+  }
 }
 
 function familyFact(

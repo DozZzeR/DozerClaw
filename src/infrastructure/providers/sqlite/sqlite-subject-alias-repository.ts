@@ -1,10 +1,12 @@
 import type {
+  SubjectAlias,
   SubjectAliasInput,
   SubjectAliasRepositoryPort
 } from "../../../ports/subject-alias-repository-port.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 interface SubjectAliasRow {
+  readonly alias_subject_id: string;
   readonly canonical_subject_id: string;
 }
 
@@ -44,5 +46,24 @@ export class SqliteSubjectAliasRepository
         `
       )
       .run(input);
+  }
+
+  async listSubjectAliases(): Promise<readonly SubjectAlias[]> {
+    const rows = this.database
+      .prepare(
+        `
+          select
+            alias_subject_id,
+            canonical_subject_id
+          from family_subject_aliases
+          order by canonical_subject_id asc, alias_subject_id asc
+        `
+      )
+      .all() as SubjectAliasRow[];
+
+    return rows.map((row) => ({
+      aliasSubjectId: row.alias_subject_id,
+      canonicalSubjectId: row.canonical_subject_id
+    }));
   }
 }

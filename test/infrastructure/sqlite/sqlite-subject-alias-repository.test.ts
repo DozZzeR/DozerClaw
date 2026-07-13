@@ -24,4 +24,41 @@ describe("SqliteSubjectAliasRepository", () => {
       database.close();
     }
   });
+
+  it("lists subject aliases in stable order", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteSubjectAliasRepository(database);
+
+    try {
+      await repository.saveSubjectAlias({
+        aliasSubjectId: "sasha",
+        canonicalSubjectId: "alex"
+      });
+      await repository.saveSubjectAlias({
+        aliasSubjectId: "maksim",
+        canonicalSubjectId: "max"
+      });
+      await repository.saveSubjectAlias({
+        aliasSubjectId: "alexey",
+        canonicalSubjectId: "alex"
+      });
+
+      await expect(repository.listSubjectAliases()).resolves.toEqual([
+        {
+          aliasSubjectId: "alexey",
+          canonicalSubjectId: "alex"
+        },
+        {
+          aliasSubjectId: "sasha",
+          canonicalSubjectId: "alex"
+        },
+        {
+          aliasSubjectId: "maksim",
+          canonicalSubjectId: "max"
+        }
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
