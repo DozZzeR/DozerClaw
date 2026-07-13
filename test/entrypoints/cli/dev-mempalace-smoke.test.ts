@@ -91,6 +91,50 @@ describe("runDevMempalaceSmoke", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("prints recall diagnostics when trace flag is enabled", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-mempalace-smoke-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const mempalace = await startMempalaceStub();
+    const lines: string[] = [];
+
+    try {
+      const exitCode = await runDevMempalaceSmoke({
+        env: {
+          NODE_ENV: "test",
+          DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_MEMPALACE_MCP_URL: mempalace.url,
+          DOZERCLAW_MEMPALACE_BEARER_TOKEN: "secret",
+          DOZERCLAW_MEMPALACE_WING: "family",
+          DOZERCLAW_MEMPALACE_ROOM: "facts",
+          DOZERCLAW_MEMPALACE_HALL: "facts",
+          DOZERCLAW_DEV_MEMPALACE_SMOKE_BODY:
+            "Smoke child prefers kiwi before chess.",
+          DOZERCLAW_DEV_MEMPALACE_SMOKE_QUERY:
+            "what does Smoke child prefer before chess?",
+          DOZERCLAW_DEV_MEMPALACE_SMOKE_TRACE_RECALL: "1"
+        },
+        write(line) {
+          lines.push(line);
+        }
+      });
+
+      expect(exitCode).toBe(0);
+      expect(lines).toEqual([
+        "record_reply=Saved family fact: Smoke child prefers kiwi before chess.",
+        expect.stringMatching(/^sqlite_fact=fact:.+ semantic:drawer-/),
+        "mempalace_match=true",
+        "recall_reply=Smoke child prefers kiwi before chess.",
+        "recall_trace=recall.local_candidates=1",
+        "recall_trace=recall.semantic_candidates=1",
+        expect.stringMatching(/^recall_trace=recall.selected_ids=.+/),
+        "recall_trace=recall.synthesis=accepted"
+      ]);
+    } finally {
+      await mempalace.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 interface MempalaceRequest {
@@ -131,10 +175,14 @@ async function startMempalaceStub() {
         };
       } else if (toolName === "mempalace_search") {
         const query = String(args.query ?? "");
+        const queryTokens = query
+          .toLowerCase()
+          .split(/[^a-z0-9а-яё]+/iu)
+          .filter((token) => token.length >= 4);
         payload = {
           results: [...drawers.entries()]
             .filter(([, content]) =>
-              content.toLowerCase().includes(query.toLowerCase().split(" ")[0] ?? "")
+              queryTokens.some((token) => content.toLowerCase().includes(token))
             )
             .map(([drawerId, content]) => ({
               drawer_id: drawerId,

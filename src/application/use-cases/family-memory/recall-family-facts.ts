@@ -14,10 +14,12 @@ export interface RecallFamilyFactsDependencies {
 
 export interface RecallFamilyFactsInput {
   readonly query: string;
+  readonly includeDiagnostics?: boolean;
 }
 
 export interface RecallFamilyFactsResult {
   readonly text: string;
+  readonly diagnostics?: readonly string[];
 }
 
 export class RecallFamilyFactsUseCase {
@@ -28,25 +30,50 @@ export class RecallFamilyFactsUseCase {
       this.dependencies.recentLimit
     );
     const semanticResults = await this.searchSemanticMemory(input.query);
+    const includeDiagnostics = input.includeDiagnostics === true;
+    const diagnostics = [
+      `recall.local_candidates=${facts.length}`,
+      `recall.semantic_candidates=${semanticResults.length}`
+    ];
 
     if (facts.length === 0 && semanticResults.length === 0) {
-      return {
-        text: "I do not have any saved family facts yet."
-      };
+      return withDiagnostics(
+        {
+          text: "I do not have any saved family facts yet."
+        },
+        includeDiagnostics,
+        [
+          ...diagnostics,
+          "recall.selected_ids=",
+          "recall.synthesis=unavailable"
+        ]
+      );
     }
 
-    const selectedItems = await this.selectItems(input.query, facts, semanticResults);
+    const selectedItems = await this.selectItems(
+      input.query,
+      facts,
+      semanticResults
+    );
+    diagnostics.push(
+      `recall.selected_ids=${selectedItems.map((item) => item.id).join(",")}`
+    );
     const synthesized = await this.synthesizeAnswer(input.query, selectedItems);
+    diagnostics.push(`recall.synthesis=${synthesized.status}`);
 
-    if (synthesized) {
-      return {
-        text: synthesized
-      };
+    if (synthesized.answer) {
+      return withDiagnostics(
+        { text: synthesized.answer },
+        includeDiagnostics,
+        diagnostics
+      );
     }
 
-    return {
-      text: formatMemoryBullets(selectedItems)
-    };
+    return withDiagnostics(
+      { text: formatMemoryBullets(selectedItems) },
+      includeDiagnostics,
+      diagnostics
+    );
   }
 
   private async searchSemanticMemory(
@@ -123,9 +150,11 @@ export class RecallFamilyFactsUseCase {
   private async synthesizeAnswer(
     query: string,
     items: readonly RecallMemoryItem[]
-  ): Promise<string | undefined> {
+  ): Promise<SynthesisResult> {
     if (!this.dependencies.model) {
-      return undefined;
+      return {
+        status: "unavailable"
+      };
     }
 
     try {
@@ -140,12 +169,19 @@ export class RecallFamilyFactsUseCase {
       const parsed = parseSynthesizedAnswer(response.text);
 
       if (!parsed || !isGroundedSynthesis(parsed, items)) {
-        return undefined;
+        return {
+          status: "rejected"
+        };
       }
 
-      return parsed.answer;
+      return {
+        status: "accepted",
+        answer: parsed.answer
+      };
     } catch {
-      return undefined;
+      return {
+        status: "failed"
+      };
     }
   }
 
@@ -162,6 +198,26 @@ interface RecallMemoryItem {
   readonly subjectId?: string;
   readonly sourceMessageText?: string;
   readonly createdAt?: Date;
+}
+
+interface SynthesisResult {
+  readonly status: "accepted" | "rejected" | "unavailable" | "failed";
+  readonly answer?: string;
+}
+
+function withDiagnostics(
+  result: Pick<RecallFamilyFactsResult, "text">,
+  includeDiagnostics: boolean,
+  diagnostics: readonly string[]
+): RecallFamilyFactsResult {
+  if (!includeDiagnostics) {
+    return result;
+  }
+
+  return {
+    ...result,
+    diagnostics
+  };
 }
 
 interface RankedFact {

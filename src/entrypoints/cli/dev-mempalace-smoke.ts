@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
+import { RecallFamilyFactsUseCase } from "../../application/use-cases/family-memory/recall-family-facts.js";
 import { buildApp } from "../../composition/build-app.js";
 import { loadConfig } from "../../composition/config.js";
 import type { FamilyFact } from "../../core/domain/family-memory/family-fact.js";
@@ -125,7 +126,53 @@ export async function runDevMempalaceSmoke(
 
   options.write(`recall_reply=${recallReply.text}`);
 
+  if (options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_TRACE_RECALL === "1") {
+    const recallDiagnostics = await traceRecall({
+      databasePath: config.sqlite.databasePath,
+      semanticMemory,
+      modelProvider,
+      query,
+      semanticLimit: config.memory.mempalace.searchLimit
+    });
+
+    for (const diagnostic of recallDiagnostics) {
+      options.write(`recall_trace=${diagnostic}`);
+    }
+  }
+
   return recallReply.text.includes(body) ? 0 : 1;
+}
+
+interface TraceRecallInput {
+  readonly databasePath: string;
+  readonly semanticMemory: MempalaceMemoryProvider;
+  readonly modelProvider: ModelPort;
+  readonly query: string;
+  readonly semanticLimit: number;
+}
+
+async function traceRecall(input: TraceRecallInput): Promise<readonly string[]> {
+  const database = createSqliteDatabase({ path: input.databasePath });
+  const repository = new SqliteFamilyMemoryRepository(database);
+
+  try {
+    const recall = new RecallFamilyFactsUseCase({
+      repository,
+      semanticMemory: input.semanticMemory,
+      recentLimit: 50,
+      resultLimit: 10,
+      semanticLimit: input.semanticLimit,
+      model: input.modelProvider
+    });
+    const result = await recall.execute({
+      query: input.query,
+      includeDiagnostics: true
+    });
+
+    return result.diagnostics ?? [];
+  } finally {
+    database.close();
+  }
 }
 
 class DevMempalaceSmokeModelProvider implements ModelPort {

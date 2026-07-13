@@ -227,6 +227,54 @@ describe("RecallFamilyFactsUseCase", () => {
     );
   });
 
+  it("reports recall pipeline diagnostics", async () => {
+    const model = new QueueModel([
+      JSON.stringify({
+        memoryItemIds: ["drawer-tea"]
+      }),
+      JSON.stringify({
+        answer: "Max prefers chamomile tea before sleep.",
+        usedMemoryItemIds: ["drawer-tea"]
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository: new StubFamilyMemoryRepository([
+        familyFact({
+          id: "fact-local",
+          category: "preference",
+          body: "Max prefers chamomile tea before sleep."
+        })
+      ]),
+      semanticMemory: new StubSemanticMemory([
+        {
+          entry: {
+            id: "drawer-tea",
+            body: "Family fact: Max prefers chamomile tea before sleep."
+          },
+          score: 0.2
+        }
+      ]),
+      recentLimit: 10,
+      semanticLimit: 5,
+      model
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what helps Max sleep?",
+        includeDiagnostics: true
+      })
+    ).resolves.toEqual({
+      text: "Max prefers chamomile tea before sleep.",
+      diagnostics: [
+        "recall.local_candidates=1",
+        "recall.semantic_candidates=1",
+        "recall.selected_ids=drawer-tea",
+        "recall.synthesis=accepted"
+      ]
+    });
+  });
+
   it("falls back to deterministic bullets when model recall fails", async () => {
     const repository = new StubFamilyMemoryRepository([
       familyFact({
