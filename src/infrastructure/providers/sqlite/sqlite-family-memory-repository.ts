@@ -7,6 +7,7 @@ interface FamilyFactRow {
   readonly category: FamilyFact["category"];
   readonly body: string;
   readonly subject_id: string | null;
+  readonly semantic_memory_entry_id: string | null;
   readonly source_actor_id: string;
   readonly source_chat_id: string;
   readonly source_message_text: string;
@@ -29,6 +30,7 @@ export class SqliteFamilyMemoryRepository
             category,
             body,
             subject_id,
+            semantic_memory_entry_id,
             source_actor_id,
             source_chat_id,
             source_message_text,
@@ -41,6 +43,7 @@ export class SqliteFamilyMemoryRepository
             @category,
             @body,
             @subjectId,
+            @semanticMemoryEntryId,
             @sourceActorId,
             @sourceChatId,
             @sourceMessageText,
@@ -52,6 +55,7 @@ export class SqliteFamilyMemoryRepository
             category = excluded.category,
             body = excluded.body,
             subject_id = excluded.subject_id,
+            semantic_memory_entry_id = excluded.semantic_memory_entry_id,
             source_actor_id = excluded.source_actor_id,
             source_chat_id = excluded.source_chat_id,
             source_message_text = excluded.source_message_text,
@@ -64,6 +68,7 @@ export class SqliteFamilyMemoryRepository
         category: fact.category,
         body: fact.body,
         subjectId: fact.subjectId ?? null,
+        semanticMemoryEntryId: fact.semanticMemoryEntryId ?? null,
         sourceActorId: fact.sourceActorId,
         sourceChatId: fact.sourceChatId,
         sourceMessageText: fact.sourceMessageText,
@@ -84,6 +89,7 @@ export class SqliteFamilyMemoryRepository
             category,
             body,
             subject_id,
+            semantic_memory_entry_id,
             source_actor_id,
             source_chat_id,
             source_message_text,
@@ -108,6 +114,9 @@ function toFamilyFact(row: FamilyFactRow): FamilyFact {
     category: row.category,
     body: row.body,
     ...(row.subject_id ? { subjectId: row.subject_id } : {}),
+    ...(row.semantic_memory_entry_id
+      ? { semanticMemoryEntryId: row.semantic_memory_entry_id }
+      : {}),
     sourceActorId: row.source_actor_id,
     sourceChatId: row.source_chat_id,
     sourceMessageText: row.source_message_text,

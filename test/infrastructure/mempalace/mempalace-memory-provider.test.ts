@@ -171,6 +171,48 @@ describe("MempalaceMemoryProvider", () => {
     });
   });
 
+  it("updates an existing memory entry through mempalace_update_drawer", async () => {
+    const fetcher = new RecordingFetch([
+      jsonRpcToolResult({
+        success: true,
+        drawer_id: "drawer-1"
+      })
+    ]);
+    const provider = new MempalaceMemoryProvider({
+      endpointUrl: "http://127.0.0.1:4118/mcp",
+      wing: "family",
+      room: "facts",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.update("drawer-1", {
+        body: "Family fact: Max prefers peppermint tea before sleep.",
+        references: ["family_fact:fact-1"]
+      })
+    ).resolves.toEqual({
+      id: "drawer-1",
+      body: "Family fact: Max prefers peppermint tea before sleep."
+    });
+    expect(fetcher.requests[0]?.body).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "mempalace_update_drawer",
+        arguments: {
+          drawer_id: "drawer-1",
+          content: [
+            "Family fact: Max prefers peppermint tea before sleep.",
+            "",
+            "References:",
+            "- family_fact:fact-1"
+          ].join("\n")
+        }
+      }
+    });
+  });
+
   it("throws when MemPalace returns a JSON-RPC error", async () => {
     const fetcher = new RecordingFetch([
       {

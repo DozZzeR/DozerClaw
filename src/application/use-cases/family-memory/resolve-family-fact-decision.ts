@@ -46,11 +46,11 @@ export class ResolveFamilyFactDecisionUseCase {
 
     if (input.decision === "create") {
       await this.dependencies.repository.saveFamilyFact(input.pending.newFact);
-      await this.storeSemanticSummary(input.pending.newFact);
+      const savedFact = await this.storeSemanticSummary(input.pending.newFact);
 
       return {
         status: "created",
-        fact: input.pending.newFact
+        fact: savedFact
       };
     }
 
@@ -60,62 +60,95 @@ export class ResolveFamilyFactDecisionUseCase {
 
     if (!candidate) {
       await this.dependencies.repository.saveFamilyFact(input.pending.newFact);
-      await this.storeSemanticSummary(input.pending.newFact);
+      const savedFact = await this.storeSemanticSummary(input.pending.newFact);
 
       return {
         status: "created",
-        fact: input.pending.newFact
+        fact: savedFact
       };
     }
 
     const updatedFact: FamilyFact = {
       ...input.pending.newFact,
       id: candidate.id,
+      ...(candidate.semanticMemoryEntryId
+        ? { semanticMemoryEntryId: candidate.semanticMemoryEntryId }
+        : {}),
       createdAt: candidate.createdAt,
       updatedAt: this.dependencies.now()
     };
 
     await this.dependencies.repository.saveFamilyFact(updatedFact);
-    await this.replaceSemanticSummary(updatedFact);
+    const savedFact = await this.replaceSemanticSummary(updatedFact);
 
     return {
       status: "updated",
-      fact: updatedFact
+      fact: savedFact
     };
   }
 
-  private async storeSemanticSummary(fact: FamilyFact): Promise<void> {
+  private async storeSemanticSummary(fact: FamilyFact): Promise<FamilyFact> {
     if (!this.dependencies.semanticMemory) {
-      return;
+      return fact;
     }
 
     try {
-      await this.dependencies.semanticMemory.store({
-        body: `Family fact: ${fact.body}`,
-        references: [`family_fact:${fact.id}`]
-      });
+      const entry = await this.dependencies.semanticMemory.store(
+        semanticSummaryInput(fact)
+      );
+      const savedFact = {
+        ...fact,
+        semanticMemoryEntryId: entry.id
+      };
+
+      await this.dependencies.repository.saveFamilyFact(savedFact);
+
+      return savedFact;
     } catch {
-      return;
+      return fact;
     }
   }
 
-  private async replaceSemanticSummary(fact: FamilyFact): Promise<void> {
+  private async replaceSemanticSummary(fact: FamilyFact): Promise<FamilyFact> {
     if (!this.dependencies.semanticMemory) {
-      return;
+      return fact;
     }
 
     try {
       const input = semanticSummaryInput(fact);
 
-      if (this.dependencies.semanticMemory.replace) {
-        await this.dependencies.semanticMemory.replace(input);
+      if (fact.semanticMemoryEntryId && this.dependencies.semanticMemory.update) {
+        await this.dependencies.semanticMemory.update(
+          fact.semanticMemoryEntryId,
+          input
+        );
 
-        return;
+        return fact;
       }
 
-      await this.dependencies.semanticMemory.store(input);
+      if (this.dependencies.semanticMemory.replace) {
+        const entry = await this.dependencies.semanticMemory.replace(input);
+        const savedFact = {
+          ...fact,
+          semanticMemoryEntryId: entry.id
+        };
+
+        await this.dependencies.repository.saveFamilyFact(savedFact);
+
+        return savedFact;
+      }
+
+      const entry = await this.dependencies.semanticMemory.store(input);
+      const savedFact = {
+        ...fact,
+        semanticMemoryEntryId: entry.id
+      };
+
+      await this.dependencies.repository.saveFamilyFact(savedFact);
+
+      return savedFact;
     } catch {
-      return;
+      return fact;
     }
   }
 }

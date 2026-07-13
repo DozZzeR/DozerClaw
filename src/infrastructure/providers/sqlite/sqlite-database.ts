@@ -190,6 +190,7 @@ function ensureFamilyFactsTable(database: SqliteDatabase): void {
       ),
       body text not null,
       subject_id text,
+      semantic_memory_entry_id text,
       source_actor_id text not null,
       source_chat_id text not null,
       source_message_text text not null,
@@ -198,6 +199,13 @@ function ensureFamilyFactsTable(database: SqliteDatabase): void {
       updated_at text not null
     );
   `);
+
+  ensureColumn(
+    database,
+    "family_facts",
+    "semantic_memory_entry_id",
+    "semantic_memory_entry_id text"
+  );
 }
 
 function ensurePendingClarificationsTable(database: SqliteDatabase): void {

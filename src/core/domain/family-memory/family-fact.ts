@@ -11,6 +11,7 @@ export interface FamilyFact {
   readonly category: FamilyFactCategory;
   readonly body: string;
   readonly subjectId?: string;
+  readonly semanticMemoryEntryId?: string;
   readonly sourceActorId: string;
   readonly sourceChatId: string;
   readonly sourceMessageText: string;

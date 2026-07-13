@@ -1,5 +1,6 @@
 export interface MemoryPort {
   store(entry: MemoryEntryInput): Promise<MemoryEntry>;
+  update?(entryId: string, entry: MemoryEntryInput): Promise<MemoryEntry>;
   replace?(entry: MemoryEntryInput): Promise<MemoryEntry>;
   search(query: MemorySearchQuery): Promise<readonly MemorySearchResult[]>;
 }

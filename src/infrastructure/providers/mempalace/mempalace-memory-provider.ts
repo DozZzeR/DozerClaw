@@ -74,6 +74,18 @@ export class MempalaceMemoryProvider implements MemoryPort {
       .filter((result): result is MemorySearchResult => Boolean(result));
   }
 
+  async update(entryId: string, input: MemoryEntryInput): Promise<MemoryEntry> {
+    await this.callTool("mempalace_update_drawer", {
+      drawer_id: entryId,
+      content: formatStoredContent(input)
+    });
+
+    return {
+      id: entryId,
+      body: input.body
+    };
+  }
+
   async replace(input: MemoryEntryInput): Promise<MemoryEntry> {
     await this.deleteEntriesMatchingReferences(input.references ?? []);
 
@@ -109,6 +121,7 @@ export class MempalaceMemoryProvider implements MemoryPort {
     name:
       | "mempalace_add_drawer"
       | "mempalace_delete_drawer"
+      | "mempalace_update_drawer"
       | "mempalace_search",
     args: Record<string, unknown>
   ): Promise<unknown> {

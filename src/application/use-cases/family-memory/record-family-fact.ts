@@ -55,11 +55,11 @@ export class RecordFamilyFactUseCase {
     }
 
     await this.dependencies.repository.saveFamilyFact(fact);
-    await this.storeSemanticSummary(fact);
+    const savedFact = await this.storeSemanticSummary(fact);
 
     return {
       status: "created",
-      fact
+      fact: savedFact
     };
   }
 
@@ -73,18 +73,26 @@ export class RecordFamilyFactUseCase {
     return facts.filter((candidate) => areRelatedFacts(fact, candidate));
   }
 
-  private async storeSemanticSummary(fact: FamilyFact): Promise<void> {
+  private async storeSemanticSummary(fact: FamilyFact): Promise<FamilyFact> {
     if (!this.dependencies.semanticMemory) {
-      return;
+      return fact;
     }
 
     try {
-      await this.dependencies.semanticMemory.store({
+      const entry = await this.dependencies.semanticMemory.store({
         body: `Family fact: ${fact.body}`,
         references: [`family_fact:${fact.id}`]
       });
+      const savedFact = {
+        ...fact,
+        semanticMemoryEntryId: entry.id
+      };
+
+      await this.dependencies.repository.saveFamilyFact(savedFact);
+
+      return savedFact;
     } catch {
-      return;
+      return fact;
     }
   }
 }

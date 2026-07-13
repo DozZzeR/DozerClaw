@@ -54,8 +54,9 @@ describe("RecordFamilyFactUseCase", () => {
 
   it("stores a semantic summary when memory is configured", async () => {
     const semanticMemory = new RecordingSemanticMemory();
+    const repository = new RecordingFamilyMemoryRepository();
     const useCase = new RecordFamilyFactUseCase({
-      repository: new RecordingFamilyMemoryRepository(),
+      repository,
       semanticMemory,
       generateId: () => "fact-1",
       now: () => new Date("2026-07-07T10:00:00.000Z")
@@ -72,6 +73,7 @@ describe("RecordFamilyFactUseCase", () => {
       body: "Family fact: Max prefers chamomile tea before sleep.",
       references: ["family_fact:fact-1"]
     });
+    expect(repository.saved?.semanticMemoryEntryId).toBe("drawer-1");
   });
 
   it("keeps the structured save when semantic memory fails", async () => {

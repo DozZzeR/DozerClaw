@@ -30,6 +30,7 @@ describe("ResolveFamilyFactDecisionUseCase", () => {
       fact: {
         ...pendingDecision().newFact,
         id: "fact-existing",
+        semanticMemoryEntryId: "drawer-existing",
         createdAt: new Date("2026-07-07T09:00:00.000Z"),
         updatedAt: new Date("2026-07-07T10:05:00.000Z")
       }
@@ -37,11 +38,13 @@ describe("ResolveFamilyFactDecisionUseCase", () => {
     expect(repository.saved).toEqual({
       ...pendingDecision().newFact,
       id: "fact-existing",
+      semanticMemoryEntryId: "drawer-existing",
       createdAt: new Date("2026-07-07T09:00:00.000Z"),
       updatedAt: new Date("2026-07-07T10:05:00.000Z")
     });
     expect(semanticMemory.stored).toEqual({
-      mode: "replace",
+      mode: "update",
+      entryId: "drawer-existing",
       body: "Family fact: Max prefers tea before bedtime.",
       references: ["family_fact:fact-existing"]
     });
@@ -172,7 +175,13 @@ class RecordingFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
 }
 
 class RecordingSemanticMemory implements MemoryPort {
-  stored: (MemoryEntryInput & { readonly mode: "store" | "replace" }) | undefined;
+  stored:
+    | (MemoryEntryInput & { readonly mode: "store" | "replace" })
+    | (MemoryEntryInput & {
+        readonly mode: "update";
+        readonly entryId: string;
+      })
+    | undefined;
 
   async store(input: MemoryEntryInput) {
     this.stored = {
@@ -194,6 +203,19 @@ class RecordingSemanticMemory implements MemoryPort {
 
     return {
       id: "drawer-1",
+      body: input.body
+    };
+  }
+
+  async update(entryId: string, input: MemoryEntryInput) {
+    this.stored = {
+      ...input,
+      mode: "update",
+      entryId
+    };
+
+    return {
+      id: entryId,
       body: input.body
     };
   }
@@ -226,7 +248,8 @@ function pendingDecision(
       familyFact({
         id: "fact-existing",
         body: "Max prefers chamomile tea before sleep.",
-        createdAt: new Date("2026-07-07T09:00:00.000Z")
+        createdAt: new Date("2026-07-07T09:00:00.000Z"),
+        semanticMemoryEntryId: "drawer-existing"
       })
     ],
     createdAt: new Date("2026-07-07T10:00:00.000Z"),
@@ -238,11 +261,15 @@ function familyFact(input: {
   readonly id: string;
   readonly body: string;
   readonly createdAt: Date;
+  readonly semanticMemoryEntryId?: string;
 }): FamilyFact {
   return {
     id: input.id,
     category: "preference",
     body: input.body,
+    ...(input.semanticMemoryEntryId
+      ? { semanticMemoryEntryId: input.semanticMemoryEntryId }
+      : {}),
     sourceActorId: "actor-owner",
     sourceChatId: "chat-family",
     sourceMessageText: input.body,
