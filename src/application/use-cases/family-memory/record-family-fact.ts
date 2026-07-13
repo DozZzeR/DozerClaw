@@ -1,5 +1,6 @@
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
+import { normalizeSubjectId } from "../../../core/domain/family-memory/subject-id.js";
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
 import type { MemoryPort } from "../../../ports/memory-port.js";
 import type { SubjectAliasRepositoryPort } from "../../../ports/subject-alias-repository-port.js";
@@ -116,21 +117,6 @@ export class RecordFamilyFactUseCase {
       normalizedSubjectId
     );
   }
-}
-
-function normalizeSubjectId(subjectId: string | undefined): string | undefined {
-  if (!subjectId) {
-    return undefined;
-  }
-
-  const normalized = subjectId
-    .trim()
-    .toLowerCase()
-    .replace(/^(subject|person|child|kid|family-member)\s*[:#/-]\s*/iu, "")
-    .replace(/[^a-z0-9а-яё]+/giu, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return normalized.length > 0 ? normalized : undefined;
 }
 
 function areRelatedFacts(left: FamilyFact, right: FamilyFact): boolean {
