@@ -36,11 +36,12 @@ export class RecordFamilyFactUseCase {
 
   async execute(input: RecordFamilyFactInput): Promise<RecordFamilyFactResult> {
     const now = this.dependencies.now();
+    const subjectId = normalizeSubjectId(input.subjectId);
     const fact: FamilyFact = {
       id: this.dependencies.generateId(),
       category: input.category ?? "preference",
       body: input.summary.trim(),
-      ...(input.subjectId?.trim() ? { subjectId: input.subjectId.trim() } : {}),
+      ...(subjectId ? { subjectId } : {}),
       sourceActorId: input.sourceActorId,
       sourceChatId: input.sourceChatId,
       sourceMessageText: input.sourceMessageText,
@@ -99,6 +100,21 @@ export class RecordFamilyFactUseCase {
       return fact;
     }
   }
+}
+
+function normalizeSubjectId(subjectId: string | undefined): string | undefined {
+  if (!subjectId) {
+    return undefined;
+  }
+
+  const normalized = subjectId
+    .trim()
+    .toLowerCase()
+    .replace(/^(subject|person|child|kid|family-member)\s*[:#/-]\s*/iu, "")
+    .replace(/[^a-z0-9а-яё]+/giu, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function areRelatedFacts(left: FamilyFact, right: FamilyFact): boolean {
