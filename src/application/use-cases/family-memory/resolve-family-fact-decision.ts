@@ -76,7 +76,7 @@ export class ResolveFamilyFactDecisionUseCase {
     };
 
     await this.dependencies.repository.saveFamilyFact(updatedFact);
-    await this.storeSemanticSummary(updatedFact);
+    await this.replaceSemanticSummary(updatedFact);
 
     return {
       status: "updated",
@@ -98,4 +98,31 @@ export class ResolveFamilyFactDecisionUseCase {
       return;
     }
   }
+
+  private async replaceSemanticSummary(fact: FamilyFact): Promise<void> {
+    if (!this.dependencies.semanticMemory) {
+      return;
+    }
+
+    try {
+      const input = semanticSummaryInput(fact);
+
+      if (this.dependencies.semanticMemory.replace) {
+        await this.dependencies.semanticMemory.replace(input);
+
+        return;
+      }
+
+      await this.dependencies.semanticMemory.store(input);
+    } catch {
+      return;
+    }
+  }
+}
+
+function semanticSummaryInput(fact: FamilyFact) {
+  return {
+    body: `Family fact: ${fact.body}`,
+    references: [`family_fact:${fact.id}`]
+  };
 }

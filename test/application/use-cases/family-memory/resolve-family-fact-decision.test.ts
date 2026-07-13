@@ -41,6 +41,7 @@ describe("ResolveFamilyFactDecisionUseCase", () => {
       updatedAt: new Date("2026-07-07T10:05:00.000Z")
     });
     expect(semanticMemory.stored).toEqual({
+      mode: "replace",
       body: "Family fact: Max prefers tea before bedtime.",
       references: ["family_fact:fact-existing"]
     });
@@ -171,10 +172,25 @@ class RecordingFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
 }
 
 class RecordingSemanticMemory implements MemoryPort {
-  stored: MemoryEntryInput | undefined;
+  stored: (MemoryEntryInput & { readonly mode: "store" | "replace" }) | undefined;
 
   async store(input: MemoryEntryInput) {
-    this.stored = input;
+    this.stored = {
+      ...input,
+      mode: "store"
+    };
+
+    return {
+      id: "drawer-1",
+      body: input.body
+    };
+  }
+
+  async replace(input: MemoryEntryInput) {
+    this.stored = {
+      ...input,
+      mode: "replace"
+    };
 
     return {
       id: "drawer-1",

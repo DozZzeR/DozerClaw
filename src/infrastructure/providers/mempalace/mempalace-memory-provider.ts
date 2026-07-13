@@ -74,8 +74,42 @@ export class MempalaceMemoryProvider implements MemoryPort {
       .filter((result): result is MemorySearchResult => Boolean(result));
   }
 
+  async replace(input: MemoryEntryInput): Promise<MemoryEntry> {
+    await this.deleteEntriesMatchingReferences(input.references ?? []);
+
+    return this.store(input);
+  }
+
+  private async deleteEntriesMatchingReferences(
+    references: readonly string[]
+  ): Promise<void> {
+    const drawerIds = new Set<string>();
+
+    for (const reference of references) {
+      const results = await this.search({
+        text: reference,
+        limit: 20
+      });
+
+      for (const result of results) {
+        if (result.entry.body.includes(reference)) {
+          drawerIds.add(result.entry.id);
+        }
+      }
+    }
+
+    for (const drawerId of drawerIds) {
+      await this.callTool("mempalace_delete_drawer", {
+        drawer_id: drawerId
+      });
+    }
+  }
+
   private async callTool(
-    name: "mempalace_add_drawer" | "mempalace_search",
+    name:
+      | "mempalace_add_drawer"
+      | "mempalace_delete_drawer"
+      | "mempalace_search",
     args: Record<string, unknown>
   ): Promise<unknown> {
     const response = await this.fetcher(this.options.endpointUrl, {

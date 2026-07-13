@@ -111,6 +111,66 @@ describe("MempalaceMemoryProvider", () => {
     });
   });
 
+  it("replaces entries by deleting drawers that match references before storing", async () => {
+    const fetcher = new RecordingFetch([
+      jsonRpcToolResult({
+        results: [
+          {
+            drawer_id: "drawer-old",
+            content: [
+              "Family fact: Max prefers chamomile tea before sleep.",
+              "",
+              "References:",
+              "- family_fact:fact-1"
+            ].join("\n")
+          },
+          {
+            drawer_id: "drawer-other",
+            content: "Family fact: Sofia likes pasta."
+          }
+        ]
+      }),
+      jsonRpcToolResult({
+        success: true,
+        drawer_id: "drawer-old"
+      }),
+      jsonRpcToolResult({
+        success: true,
+        drawer_id: "drawer-new"
+      })
+    ]);
+    const provider = new MempalaceMemoryProvider({
+      endpointUrl: "http://127.0.0.1:4118/mcp",
+      wing: "family",
+      room: "facts",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.replace({
+        body: "Family fact: Max prefers peppermint tea before sleep.",
+        references: ["family_fact:fact-1"]
+      })
+    ).resolves.toEqual({
+      id: "drawer-new",
+      body: "Family fact: Max prefers peppermint tea before sleep."
+    });
+    expect(fetcher.requests.map((request) => request.body.params.name)).toEqual([
+      "mempalace_search",
+      "mempalace_delete_drawer",
+      "mempalace_add_drawer"
+    ]);
+    expect(fetcher.requests[0]?.body.params.arguments).toEqual({
+      query: "family_fact:fact-1",
+      limit: 20,
+      wing: "family",
+      room: "facts"
+    });
+    expect(fetcher.requests[1]?.body.params.arguments).toEqual({
+      drawer_id: "drawer-old"
+    });
+  });
+
   it("throws when MemPalace returns a JSON-RPC error", async () => {
     const fetcher = new RecordingFetch([
       {
