@@ -76,6 +76,40 @@ describe("RecordFamilyFactUseCase", () => {
     expect(repository.saved?.semanticMemoryEntryId).toBe("drawer-1");
   });
 
+  it("stores supplied category and subject id", async () => {
+    const repository = new RecordingFamilyMemoryRepository();
+    const useCase = new RecordFamilyFactUseCase({
+      repository,
+      generateId: () => "fact-1",
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        summary: "Max started swimming lessons.",
+        category: "event",
+        subjectId: "max",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Max started swimming lessons"
+      })
+    ).resolves.toEqual({
+      status: "created",
+      fact: expect.objectContaining({
+        id: "fact-1",
+        category: "event",
+        subjectId: "max",
+        body: "Max started swimming lessons."
+      })
+    });
+    expect(repository.saved).toEqual(
+      expect.objectContaining({
+        category: "event",
+        subjectId: "max"
+      })
+    );
+  });
+
   it("keeps the structured save when semantic memory fails", async () => {
     const repository = new RecordingFamilyMemoryRepository();
     const useCase = new RecordFamilyFactUseCase({

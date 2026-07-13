@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import { buildApp } from "../../composition/build-app.js";
@@ -35,14 +36,16 @@ export async function runDevMempalaceSmoke(
     return 1;
   }
 
+  const smokeRunId = randomUUID();
   const provider = options.env.DOZERCLAW_DEV_PROVIDER ?? "dev";
   const providerUserId = options.env.DOZERCLAW_DEV_OWNER_USER_ID ?? "owner";
   const providerChatId =
-    options.env.DOZERCLAW_DEV_OWNER_CHAT_ID ?? "owner-private";
+    options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_CHAT_ID ??
+    `owner-private-smoke-${smokeRunId}`;
   const displayName = options.env.DOZERCLAW_DEV_OWNER_NAME ?? "Owner";
   const body =
     options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_BODY ??
-    `Smoke family fact ${new Date().toISOString()}: Max prefers kiwi before chess.`;
+    `Runtime probe ${smokeRunId} records marmalade orbit.`;
   const query =
     options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_QUERY ??
     "what does the smoke family fact say?";
@@ -138,6 +141,8 @@ class DevMempalaceSmokeModelProvider implements ModelPort {
             kind: "record_fact",
             question: null,
             summary: this.body,
+            category: "preference",
+            subjectId: "smoke",
             query: null,
             reason: null
           })
@@ -149,6 +154,8 @@ class DevMempalaceSmokeModelProvider implements ModelPort {
           kind: "answer_from_memory",
           question: null,
           summary: null,
+          category: null,
+          subjectId: null,
           query: request.input,
           reason: null
         })

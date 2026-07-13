@@ -44,7 +44,15 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.outputSchema).toMatchObject({
       name: "dozerclaw_inbound_intent",
       schema: {
-        required: ["kind", "question", "summary", "query", "reason"]
+        required: [
+          "kind",
+          "question",
+          "summary",
+          "category",
+          "subjectId",
+          "query",
+          "reason"
+        ]
       }
     });
     expect(model.request?.input).toContain("scan.jpg");
@@ -63,6 +71,41 @@ describe("parseInboundIntent", () => {
     ).toEqual({
       kind: "store_file",
       summary: "passport scan"
+    });
+  });
+
+  it("parses record_fact category and subject id", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "record_fact",
+          summary: "Max started swimming lessons.",
+          category: "event",
+          subjectId: "  max  "
+        })
+      )
+    ).toEqual({
+      kind: "record_fact",
+      summary: "Max started swimming lessons.",
+      category: "event",
+      subjectId: "max"
+    });
+  });
+
+  it("falls back to preference category and ignores blank subject ids", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "record_fact",
+          summary: "Max started swimming lessons.",
+          category: "unknown",
+          subjectId: "  "
+        })
+      )
+    ).toEqual({
+      kind: "record_fact",
+      summary: "Max started swimming lessons.",
+      category: "preference"
     });
   });
 

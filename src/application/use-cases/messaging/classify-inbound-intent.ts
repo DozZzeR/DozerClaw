@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
 import type { ModelPort } from "../../../ports/model-port.js";
 
 export type InboundIntent =
@@ -17,6 +18,8 @@ export type InboundIntent =
   | {
       readonly kind: "record_fact";
       readonly summary: string;
+      readonly category?: FamilyFactCategory;
+      readonly subjectId?: string;
     }
   | {
       readonly kind: "create_reminder";
@@ -119,7 +122,9 @@ export function parseInboundIntent(text: string): InboundIntent {
     if (parsed.kind === "record_fact" && typeof parsed.summary === "string") {
       return {
         kind: "record_fact",
-        summary: parsed.summary.trim()
+        summary: parsed.summary.trim(),
+        category: parseFamilyFactCategory(parsed.category),
+        ...optionalTrimmedText("subjectId", parsed.subjectId)
       };
     }
 
@@ -177,6 +182,13 @@ const inboundIntentSchema = {
     summary: {
       type: ["string", "null"]
     },
+    category: {
+      type: ["string", "null"],
+      enum: ["event", "preference", "place", "reference_link", null]
+    },
+    subjectId: {
+      type: ["string", "null"]
+    },
     query: {
       type: ["string", "null"]
     },
@@ -184,8 +196,44 @@ const inboundIntentSchema = {
       type: ["string", "null"]
     }
   },
-  required: ["kind", "question", "summary", "query", "reason"]
+  required: [
+    "kind",
+    "question",
+    "summary",
+    "category",
+    "subjectId",
+    "query",
+    "reason"
+  ]
 };
+
+function parseFamilyFactCategory(value: unknown): FamilyFactCategory {
+  return typeof value === "string" && isFamilyFactCategory(value)
+    ? value
+    : "preference";
+}
+
+function isFamilyFactCategory(value: string): value is FamilyFactCategory {
+  return (
+    value === "event" ||
+    value === "preference" ||
+    value === "place" ||
+    value === "reference_link"
+  );
+}
+
+function optionalTrimmedText(
+  key: "subjectId",
+  value: unknown
+): { readonly subjectId?: string } {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+
+  return {
+    [key]: value.trim()
+  };
+}
 
 function fallbackIntent(): InboundIntent {
   return {

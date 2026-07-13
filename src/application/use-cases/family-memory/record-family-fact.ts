@@ -1,4 +1,5 @@
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
+import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
 import type { MemoryPort } from "../../../ports/memory-port.js";
 
@@ -12,6 +13,8 @@ export interface RecordFamilyFactDependencies {
 
 export interface RecordFamilyFactInput {
   readonly summary: string;
+  readonly category?: FamilyFactCategory;
+  readonly subjectId?: string;
   readonly sourceActorId: string;
   readonly sourceChatId: string;
   readonly sourceMessageText: string;
@@ -35,8 +38,9 @@ export class RecordFamilyFactUseCase {
     const now = this.dependencies.now();
     const fact: FamilyFact = {
       id: this.dependencies.generateId(),
-      category: "preference",
+      category: input.category ?? "preference",
       body: input.summary.trim(),
+      ...(input.subjectId?.trim() ? { subjectId: input.subjectId.trim() } : {}),
       sourceActorId: input.sourceActorId,
       sourceChatId: input.sourceChatId,
       sourceMessageText: input.sourceMessageText,

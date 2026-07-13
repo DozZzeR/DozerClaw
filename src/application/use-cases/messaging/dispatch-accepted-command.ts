@@ -333,6 +333,8 @@ export class DispatchAcceptedCommandUseCase {
 
     const result = await this.dependencies.familyFactRecorder.execute({
       summary: intent.summary,
+      ...(intent.category ? { category: intent.category } : {}),
+      ...(intent.subjectId ? { subjectId: intent.subjectId } : {}),
       sourceActorId: context.actor.id,
       sourceChatId: context.chat.id,
       sourceMessageText: context.text

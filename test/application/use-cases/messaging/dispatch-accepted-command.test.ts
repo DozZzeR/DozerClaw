@@ -4,6 +4,7 @@ import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
+import type { FamilyFactCategory } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
@@ -247,7 +248,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
         kind: "record_fact",
-        summary: "Max prefers chamomile tea before sleep."
+        summary: "Max started swimming lessons.",
+        category: "event",
+        subjectId: "max"
       }),
       familyFactRecorder: factRecorder,
       now: () => new Date("2026-07-07T10:00:00.000Z")
@@ -258,18 +261,20 @@ describe("DispatchAcceptedCommandUseCase", () => {
         route: route("family_message"),
         context: {
           ...acceptedContext,
-          text: "remember that Max prefers chamomile tea before sleep"
+          text: "remember that Max started swimming lessons"
         }
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Saved family fact: Max prefers chamomile tea before sleep."
+      text: "Saved family fact: Max started swimming lessons."
     });
     expect(factRecorder.seenInput).toEqual({
-      summary: "Max prefers chamomile tea before sleep.",
+      summary: "Max started swimming lessons.",
+      category: "event",
+      subjectId: "max",
       sourceActorId: "actor-owner",
       sourceChatId: "chat-owner",
-      sourceMessageText: "remember that Max prefers chamomile tea before sleep"
+      sourceMessageText: "remember that Max started swimming lessons"
     });
   });
 
@@ -1019,7 +1024,12 @@ class FakeIntentClassifier {
     private readonly intent:
       | { readonly kind: "ask_clarification"; readonly question: string }
       | { readonly kind: "store_file"; readonly summary?: string }
-      | { readonly kind: "record_fact"; readonly summary: string }
+      | {
+          readonly kind: "record_fact";
+          readonly summary: string;
+          readonly category?: FamilyFactCategory;
+          readonly subjectId?: string;
+        }
       | { readonly kind: "answer_from_memory"; readonly query: string }
   ) {}
 
@@ -1044,6 +1054,8 @@ class FakeFamilyFactRecorder {
   seenInput:
     | {
         summary: string;
+        category?: FamilyFactCategory;
+        subjectId?: string;
         sourceActorId: string;
         sourceChatId: string;
         sourceMessageText: string;
