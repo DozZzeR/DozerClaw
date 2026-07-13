@@ -371,6 +371,115 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFamilyFactDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("uses model choice classification when memory decision reply is unclear", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("updated");
+    const pendingChoiceClassifier = new FakePendingChoiceClassifier("update");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver,
+      pendingChoiceClassifier,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "давай лучше так"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Готово: обновил семейный факт: Max prefers tea before bedtime."
+    });
+    expect(pendingChoiceClassifier.seenInput).toEqual({
+      prompt: [
+        "Нужно решить, что сделать с семейным фактом.",
+        "Новый факт: Max prefers tea before bedtime.",
+        "Похожие существующие факты:",
+        "1. Max prefers chamomile tea before sleep.",
+        "Что сделать?",
+        "- обновить существующий факт",
+        "- создать новый факт",
+        "- отменить изменение"
+      ].join("\n"),
+      userReply: "давай лучше так",
+      options: [
+        {
+          value: "update",
+          label: "обновить существующий факт",
+          description: "Update the existing family fact with the new wording."
+        },
+        {
+          value: "create",
+          label: "создать новый факт",
+          description: "Save the new memory as a separate family fact."
+        },
+        {
+          value: "cancel",
+          label: "отменить изменение",
+          description: "Leave family memory unchanged."
+        }
+      ]
+    });
+  });
+
+  it("does not classify deterministic memory decision replies", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const pendingChoiceClassifier = new FakePendingChoiceClassifier("create");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver: new FakeFamilyFactDecisionResolver("updated"),
+      pendingChoiceClassifier,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "обнови"
+      }
+    });
+
+    expect(pendingChoiceClassifier.seenInput).toBeUndefined();
+  });
+
+  it("keeps pending memory decision when model cannot classify reply", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver: new FakeFamilyFactDecisionResolver("updated"),
+      pendingChoiceClassifier: new FakePendingChoiceClassifier(undefined),
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "не уверен"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Я жду решение по семейному факту.",
+        "Можно написать: \"обнови существующий\", \"создай новый\" или \"отмена\"."
+      ].join("\n")
+    });
+    expect(pendingFamilyFactDecisions.deletedChatIds).toEqual([]);
+  });
+
   it("passes selected memory candidate index from an update reply", async () => {
     const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
     pendingFamilyFactDecisions.pending = pendingFamilyFactDecision({
@@ -1205,7 +1314,16 @@ class FakeDuplicateDecisionResolver {
 class FakePendingChoiceClassifier {
   seenInput: ClassifyPendingChoiceInput | undefined;
 
-  constructor(private readonly choice: "copy" | "overwrite" | "skip" | undefined) {}
+  constructor(
+    private readonly choice:
+      | "copy"
+      | "overwrite"
+      | "skip"
+      | "update"
+      | "create"
+      | "cancel"
+      | undefined
+  ) {}
 
   async execute(input: ClassifyPendingChoiceInput) {
     this.seenInput = input;

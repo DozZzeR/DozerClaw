@@ -115,7 +115,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly intentClassifier?: InboundIntentClassifier;
-  readonly pendingChoiceClassifier?: PendingChoiceClassifier<DuplicateDecision>;
+  readonly pendingChoiceClassifier?: PendingChoiceClassifier<PendingDecisionChoice>;
   readonly duplicateDecisionResolver?: FileDuplicateDecisionResolver;
   readonly pendingClarifications?: PendingClarificationStore;
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
@@ -574,7 +574,9 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFamilyFactDecision
   ): Promise<OutboundReply> {
-    const parsedDecision = parseFamilyFactDecision(context.text);
+    const parsedDecision =
+      parseFamilyFactDecision(context.text) ??
+      (await this.classifyPendingFamilyFactDecision(context.text, pending));
 
     if (!parsedDecision) {
       return {
@@ -655,7 +657,31 @@ export class DispatchAcceptedCommandUseCase {
         prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
         userReply,
         options: duplicateDecisionOptions
-      });
+      }) as DuplicateDecision | undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async classifyPendingFamilyFactDecision(
+    userReply: string,
+    pending: PendingFamilyFactDecision
+  ): Promise<
+    | { readonly decision: FamilyFactDecision; readonly candidateIndex?: number }
+    | undefined
+  > {
+    if (!this.dependencies.pendingChoiceClassifier) {
+      return undefined;
+    }
+
+    try {
+      const decision = (await this.dependencies.pendingChoiceClassifier.execute({
+        prompt: familyFactDecisionPrompt(pending),
+        userReply,
+        options: familyFactDecisionOptions
+      })) as FamilyFactDecision | undefined;
+
+      return decision ? { decision } : undefined;
     } catch {
       return undefined;
     }
@@ -732,6 +758,7 @@ function suggestCopyName(fileName: string): string {
 }
 
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
+type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision;
 
 const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[] = [
   {
@@ -789,6 +816,37 @@ function parseDuplicateDecision(text: string): DuplicateDecision | undefined {
   }
 
   return undefined;
+}
+
+const familyFactDecisionOptions: readonly PendingChoiceOption<FamilyFactDecision>[] = [
+  {
+    value: "update",
+    label: "обновить существующий факт",
+    description: "Update the existing family fact with the new wording."
+  },
+  {
+    value: "create",
+    label: "создать новый факт",
+    description: "Save the new memory as a separate family fact."
+  },
+  {
+    value: "cancel",
+    label: "отменить изменение",
+    description: "Leave family memory unchanged."
+  }
+];
+
+function familyFactDecisionPrompt(pending: PendingFamilyFactDecision): string {
+  return [
+    "Нужно решить, что сделать с семейным фактом.",
+    `Новый факт: ${pending.newFact.body}`,
+    "Похожие существующие факты:",
+    ...pending.candidates.map((fact, index) => `${index + 1}. ${fact.body}`),
+    "Что сделать?",
+    "- обновить существующий факт",
+    "- создать новый факт",
+    "- отменить изменение"
+  ].join("\n");
 }
 
 function parseFamilyFactDecision(
