@@ -91,6 +91,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensureMonitoredServicesTable(database);
   ensureFileInboxRecordsTable(database);
   ensureFamilyFactsTable(database);
+  ensureFamilySubjectAliasesTable(database);
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
   ensurePendingFamilyFactDecisionsTable(database);
@@ -206,6 +207,15 @@ function ensureFamilyFactsTable(database: SqliteDatabase): void {
     "semantic_memory_entry_id",
     "semantic_memory_entry_id text"
   );
+}
+
+function ensureFamilySubjectAliasesTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists family_subject_aliases (
+      alias_subject_id text primary key,
+      canonical_subject_id text not null
+    );
+  `);
 }
 
 function ensurePendingClarificationsTable(database: SqliteDatabase): void {

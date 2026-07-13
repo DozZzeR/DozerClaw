@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RecordFamilyFactUseCase } from "../../../../src/application/use-cases/family-memory/record-family-fact.js";
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../../src/ports/family-memory-repository-port.js";
+import type { SubjectAliasRepositoryPort } from "../../../../src/ports/subject-alias-repository-port.js";
 import type {
   MemoryEntryInput,
   MemoryPort,
@@ -332,6 +333,78 @@ describe("RecordFamilyFactUseCase", () => {
     });
     expect(repository.saved).toBeUndefined();
   });
+
+  it("resolves subject aliases before storing a fact", async () => {
+    const repository = new RecordingFamilyMemoryRepository();
+    const subjectAliases = new RecordingSubjectAliasRepository({
+      maksim: "max"
+    });
+    const useCase = new RecordFamilyFactUseCase({
+      repository,
+      subjectAliases,
+      generateId: () => "fact-1",
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        summary: "Maksim started swimming lessons.",
+        category: "event",
+        subjectId: "Maksim",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Maksim started swimming lessons"
+      })
+    ).resolves.toEqual({
+      status: "created",
+      fact: expect.objectContaining({
+        id: "fact-1",
+        subjectId: "max"
+      })
+    });
+    expect(subjectAliases.resolvedIds).toEqual(["maksim"]);
+    expect(repository.saved).toEqual(
+      expect.objectContaining({
+        subjectId: "max"
+      })
+    );
+  });
+
+  it("uses subject alias resolution for ambiguity detection", async () => {
+    const existingFact = familyFact({
+      id: "fact-existing",
+      body: "Max likes pasta.",
+      subjectId: "max"
+    });
+    const repository = new RecordingFamilyMemoryRepository([existingFact]);
+    const subjectAliases = new RecordingSubjectAliasRepository({
+      maksim: "max"
+    });
+    const useCase = new RecordFamilyFactUseCase({
+      repository,
+      subjectAliases,
+      generateId: () => "fact-new",
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        summary: "Maksim likes soup.",
+        subjectId: "Maksim",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-family",
+        sourceMessageText: "remember Maksim likes soup"
+      })
+    ).resolves.toEqual({
+      status: "needs_confirmation",
+      newFact: expect.objectContaining({
+        id: "fact-new",
+        subjectId: "max"
+      }),
+      candidates: [existingFact]
+    });
+    expect(repository.saved).toBeUndefined();
+  });
 });
 
 class RecordingFamilyMemoryRepository implements FamilyMemoryRepositoryPort {
@@ -369,6 +442,20 @@ class ThrowingSemanticMemory extends RecordingSemanticMemory {
   async store(): Promise<never> {
     throw new Error("semantic memory unavailable");
   }
+}
+
+class RecordingSubjectAliasRepository implements SubjectAliasRepositoryPort {
+  readonly resolvedIds: string[] = [];
+
+  constructor(private readonly aliases: Readonly<Record<string, string>>) {}
+
+  async resolveCanonicalSubjectId(subjectId: string): Promise<string> {
+    this.resolvedIds.push(subjectId);
+
+    return this.aliases[subjectId] ?? subjectId;
+  }
+
+  async saveSubjectAlias(): Promise<void> {}
 }
 
 function familyFact(

@@ -2,10 +2,12 @@ import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.
 import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
 import type { MemoryPort } from "../../../ports/memory-port.js";
+import type { SubjectAliasRepositoryPort } from "../../../ports/subject-alias-repository-port.js";
 
 export interface RecordFamilyFactDependencies {
   readonly repository: FamilyMemoryRepositoryPort;
   readonly semanticMemory?: MemoryPort;
+  readonly subjectAliases?: SubjectAliasRepositoryPort;
   readonly generateId: () => string;
   readonly now: () => Date;
   readonly confirmationCandidateLimit?: number;
@@ -36,7 +38,7 @@ export class RecordFamilyFactUseCase {
 
   async execute(input: RecordFamilyFactInput): Promise<RecordFamilyFactResult> {
     const now = this.dependencies.now();
-    const subjectId = normalizeSubjectId(input.subjectId);
+    const subjectId = await this.resolveSubjectId(input.subjectId);
     const fact: FamilyFact = {
       id: this.dependencies.generateId(),
       category: input.category ?? "preference",
@@ -99,6 +101,20 @@ export class RecordFamilyFactUseCase {
     } catch {
       return fact;
     }
+  }
+
+  private async resolveSubjectId(
+    subjectId: string | undefined
+  ): Promise<string | undefined> {
+    const normalizedSubjectId = normalizeSubjectId(subjectId);
+
+    if (!normalizedSubjectId || !this.dependencies.subjectAliases) {
+      return normalizedSubjectId;
+    }
+
+    return this.dependencies.subjectAliases.resolveCanonicalSubjectId(
+      normalizedSubjectId
+    );
   }
 }
 

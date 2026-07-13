@@ -34,6 +34,7 @@ import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sq
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
+import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
 import type { AttachmentDownloadPort } from "../ports/attachment-download-port.js";
 import type { ModelPort } from "../ports/model-port.js";
 
@@ -52,6 +53,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const serviceRegistryRepository = new SqliteServiceRegistryRepository(database);
   const fileInboxRepository = new SqliteFileInboxRepository(database);
   const familyMemoryRepository = new SqliteFamilyMemoryRepository(database);
+  const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
   const generateId = () => randomUUID();
   const bootstrapOwnerIdentity = new BootstrapOwnerIdentityUseCase({
     repository: identityAccessRepository,
@@ -89,6 +91,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const familyFactRecorder = new RecordFamilyFactUseCase({
     repository: familyMemoryRepository,
     ...(semanticMemory ? { semanticMemory } : {}),
+    subjectAliases: subjectAliasRepository,
     generateId,
     now: () => new Date()
   });
