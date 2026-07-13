@@ -10,6 +10,7 @@
     "dev": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "dev:health": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-health.ts",
     "dev:codex-smoke": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-codex-smoke.ts",
+    "dev:delete-subject-alias": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-delete-subject-alias.ts",
     "dev:mempalace-smoke": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-mempalace-smoke.ts",
     "dev:list-subject-aliases": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-list-subject-aliases.ts",
     "dev:register-services": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-register-services.ts",

@@ -61,4 +61,24 @@ describe("SqliteSubjectAliasRepository", () => {
       database.close();
     }
   });
+
+  it("deletes subject aliases", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteSubjectAliasRepository(database);
+
+    try {
+      await repository.saveSubjectAlias({
+        aliasSubjectId: "maksim",
+        canonicalSubjectId: "max"
+      });
+
+      await expect(repository.deleteSubjectAlias("maksim")).resolves.toBe(true);
+      await expect(repository.resolveCanonicalSubjectId("maksim")).resolves.toBe(
+        "maksim"
+      );
+      await expect(repository.deleteSubjectAlias("missing")).resolves.toBe(false);
+    } finally {
+      database.close();
+    }
+  });
 });

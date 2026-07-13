@@ -66,4 +66,17 @@ export class SqliteSubjectAliasRepository
       canonicalSubjectId: row.canonical_subject_id
     }));
   }
+
+  async deleteSubjectAlias(aliasSubjectId: string): Promise<boolean> {
+    const result = this.database
+      .prepare(
+        `
+          delete from family_subject_aliases
+          where alias_subject_id = ?
+        `
+      )
+      .run(aliasSubjectId);
+
+    return result.changes > 0;
+  }
 }

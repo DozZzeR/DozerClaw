@@ -465,6 +465,10 @@ class RecordingSubjectAliasRepository implements SubjectAliasRepositoryPort {
       })
     );
   }
+
+  async deleteSubjectAlias(): Promise<boolean> {
+    return false;
+  }
 }
 
 function familyFact(
