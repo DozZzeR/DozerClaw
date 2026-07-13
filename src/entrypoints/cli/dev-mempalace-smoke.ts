@@ -162,17 +162,20 @@ class DevMempalaceSmokeModelProvider implements ModelPort {
       };
     }
 
-    if (request.purpose === "Select relevant DozerClaw family facts") {
+    if (request.purpose === "Select relevant DozerClaw family memories") {
       return {
         text: JSON.stringify({
-          factIds: factIdsFromPrompt(request.input)
+          memoryItemIds: memoryItemIdsFromPrompt(request.input)
         })
       };
     }
 
     if (request.purpose === "Synthesize DozerClaw family memory answer") {
       return {
-        text: this.body
+        text: JSON.stringify({
+          answer: this.body,
+          usedMemoryItemIds: memoryItemIdsFromPrompt(request.input)
+        })
       };
     }
 
@@ -198,7 +201,7 @@ async function findSmokeFact(
   }
 }
 
-function factIdsFromPrompt(prompt: string): readonly string[] {
+function memoryItemIdsFromPrompt(prompt: string): readonly string[] {
   const ids = new Set<string>();
   const pattern = /"id":\s*"([^"]+)"/g;
   let match: RegExpExecArray | null;

@@ -109,7 +109,10 @@ describe("RecallFamilyFactsUseCase", () => {
       JSON.stringify({
         factIds: ["fact-match", "fact-missing"]
       }),
-      "Max prefers chamomile tea before sleep."
+      JSON.stringify({
+        answer: "Max prefers chamomile tea before sleep.",
+        usedMemoryItemIds: ["fact-match"]
+      })
     ]);
     const useCase = new RecallFamilyFactsUseCase({
       repository,
@@ -135,12 +138,50 @@ describe("RecallFamilyFactsUseCase", () => {
     expect(model.requests[1]?.input).not.toContain("Sofia started piano lessons.");
   });
 
+  it("rejects synthesized answers that cite memories outside selected context", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-match",
+        category: "preference",
+        body: "Max prefers chamomile tea before sleep."
+      })
+    ]);
+    const model = new QueueModel([
+      JSON.stringify({
+        memoryItemIds: ["fact-match"]
+      }),
+      JSON.stringify({
+        answer: "Max prefers chamomile tea and also likes mint.",
+        usedMemoryItemIds: ["fact-match", "fact-missing"]
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      recentLimit: 10,
+      model
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what helps Max sleep?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+    expect(model.requests[1]?.outputSchema).toMatchObject({
+      name: "dozerclaw_family_memory_synthesis"
+    });
+  });
+
   it("lets model selection choose semantic memory results for synthesis", async () => {
     const model = new QueueModel([
       JSON.stringify({
         memoryItemIds: ["drawer-tea"]
       }),
-      "Max prefers chamomile tea before sleep."
+      JSON.stringify({
+        answer: "Max prefers chamomile tea before sleep.",
+        usedMemoryItemIds: ["drawer-tea"]
+      })
     ]);
     const useCase = new RecallFamilyFactsUseCase({
       repository: new StubFamilyMemoryRepository([]),

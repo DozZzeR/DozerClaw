@@ -131,11 +131,19 @@ export class RecallFamilyFactsUseCase {
     try {
       const response = await this.dependencies.model.runTextRequest({
         purpose: "Synthesize DozerClaw family memory answer",
-        input: buildSynthesisPrompt(query, items)
+        input: buildSynthesisPrompt(query, items),
+        outputSchema: {
+          name: "dozerclaw_family_memory_synthesis",
+          schema: synthesisSchema
+        }
       });
-      const text = response.text.trim();
+      const parsed = parseSynthesizedAnswer(response.text);
 
-      return text ? text : undefined;
+      if (!parsed || !isGroundedSynthesis(parsed, items)) {
+        return undefined;
+      }
+
+      return parsed.answer;
     } catch {
       return undefined;
     }
@@ -379,6 +387,54 @@ function parseSelectedMemoryItemIds(text: string): readonly string[] {
   }
 }
 
+interface ParsedSynthesizedAnswer {
+  readonly answer: string;
+  readonly usedMemoryItemIds: readonly string[];
+}
+
+function parseSynthesizedAnswer(text: string): ParsedSynthesizedAnswer | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.answer !== "string" ||
+      !Array.isArray(parsed.usedMemoryItemIds)
+    ) {
+      return undefined;
+    }
+
+    const answer = parsed.answer.trim();
+    const usedMemoryItemIds = parsed.usedMemoryItemIds.filter(
+      (id): id is string => typeof id === "string"
+    );
+
+    if (!answer) {
+      return undefined;
+    }
+
+    return {
+      answer,
+      usedMemoryItemIds
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isGroundedSynthesis(
+  parsed: ParsedSynthesizedAnswer,
+  items: readonly RecallMemoryItem[]
+): boolean {
+  if (parsed.usedMemoryItemIds.length === 0) {
+    return false;
+  }
+
+  const itemIds = new Set(items.map((item) => item.id));
+
+  return parsed.usedMemoryItemIds.every((id) => itemIds.has(id));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -395,6 +451,24 @@ const memorySelectionSchema = {
     }
   },
   required: ["memoryItemIds"]
+};
+
+const synthesisSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    answer: {
+      type: "string"
+    },
+    usedMemoryItemIds: {
+      type: "array",
+      items: {
+        type: "string"
+      },
+      minItems: 1
+    }
+  },
+  required: ["answer", "usedMemoryItemIds"]
 };
 
 const stopWords = new Set([

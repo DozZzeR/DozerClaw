@@ -10,7 +10,10 @@ import { buildApp } from "../../src/composition/build-app.js";
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteFamilyMemoryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteServiceRegistryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
-import type { ModelPort } from "../../src/ports/model-port.js";
+import type {
+  ModelPort,
+  ModelTextRequest
+} from "../../src/ports/model-port.js";
 
 describe("buildApp", () => {
   it("composes the application and exposes startup diagnostics", async () => {
@@ -266,10 +269,8 @@ describe("buildApp", () => {
         query: "what do you remember about Max?",
         reason: null
       }),
-      JSON.stringify({
-        factIds: ["fact-1"]
-      }),
-      "Max prefers chamomile tea before sleep."
+      selectFirstMemoryItem,
+      synthesizeFromFirstMemoryItem
     ]);
 
     try {
@@ -352,10 +353,8 @@ describe("buildApp", () => {
         query: "what helps Max sleep?",
         reason: null
       }),
-      JSON.stringify({
-        factIds: ["fact-1"]
-      }),
-      "Max prefers chamomile tea before sleep."
+      selectFirstMemoryItem,
+      synthesizeFromFirstMemoryItem
     ]);
 
     try {
@@ -605,18 +604,52 @@ class FakeModelProvider implements ModelPort {
   }
 }
 
+type QueuedModelResponse = string | ((request: ModelTextRequest) => string);
+
 class QueueModelProvider implements ModelPort {
-  constructor(private readonly texts: string[]) {}
+  constructor(private readonly texts: QueuedModelResponse[]) {}
 
-  async runTextRequest() {
-    const text = this.texts.shift();
+  async runTextRequest(request: ModelTextRequest) {
+    const queued = this.texts.shift();
 
-    if (!text) {
+    if (!queued) {
       throw new Error("no queued model response");
     }
 
-    return { text };
+    return {
+      text: typeof queued === "function" ? queued(request) : queued
+    };
   }
+}
+
+function selectFirstMemoryItem(request: ModelTextRequest): string {
+  return JSON.stringify({
+    memoryItemIds: [firstCandidateId(request.input)]
+  });
+}
+
+function synthesizeFromFirstMemoryItem(request: ModelTextRequest): string {
+  return JSON.stringify({
+    answer: "Max prefers chamomile tea before sleep.",
+    usedMemoryItemIds: [firstCandidateId(request.input)]
+  });
+}
+
+function firstCandidateId(input: string): string {
+  const match = input.match(/\[\{[\s\S]*\}\]/);
+
+  if (!match) {
+    throw new Error("missing memory candidate JSON");
+  }
+
+  const candidates = JSON.parse(match[0]) as Array<{ readonly id: string }>;
+  const id = candidates[0]?.id;
+
+  if (!id) {
+    throw new Error("missing first memory candidate id");
+  }
+
+  return id;
 }
 
 interface MempalaceStubRequest {
