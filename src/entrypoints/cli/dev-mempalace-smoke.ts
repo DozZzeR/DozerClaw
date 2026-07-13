@@ -45,7 +45,7 @@ export async function runDevMempalaceSmoke(
   const displayName = options.env.DOZERCLAW_DEV_OWNER_NAME ?? "Owner";
   const body =
     options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_BODY ??
-    `Runtime probe ${smokeRunId} records marmalade orbit.`;
+    `Mempalace ${smokeRunId}.`;
   const query =
     options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_QUERY ??
     "what does the smoke family fact say?";

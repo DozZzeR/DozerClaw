@@ -41,6 +41,10 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain(
       "Every field declared in `properties` must be listed in `required`."
     );
+    expect(model.request?.input).toContain("record_fact field rules");
+    expect(model.request?.input).toContain("subjectId");
+    expect(model.request?.input).toContain("Use category `event`");
+    expect(model.request?.input).toContain("Use category `reference_link`");
     expect(model.request?.outputSchema).toMatchObject({
       name: "dozerclaw_inbound_intent",
       schema: {

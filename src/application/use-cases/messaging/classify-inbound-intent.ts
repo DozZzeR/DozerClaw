@@ -67,6 +67,26 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "# Task",
     "Classify the inbound family message into one intent.",
     "",
+    "# record_fact field rules",
+    [
+      "- Use `record_fact` only for durable family memory.",
+      "- `summary`: one concise canonical fact sentence.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
+      "- `category`: choose one of `preference`, `event`, `place`, or `reference_link`.",
+      "- Use category `preference` for likes, dislikes, habits, routines, needs, and personal defaults.",
+      "- Use category `event` for dated/observable happenings, milestones, appointments, lessons, trips, and completed actions.",
+      "- Use category `place` for addresses, schools, venues, favorite locations, and where something belongs.",
+      "- Use category `reference_link` for URLs, document links, external references, and pointers to saved resources.",
+      "- If category is unclear, use `preference`; if subject is unclear, set `subjectId` to `null`."
+    ].join("\n"),
+    "",
+    "# record_fact examples",
+    [
+      '{"kind":"record_fact","summary":"Max started swimming lessons.","category":"event","subjectId":"max"}',
+      '{"kind":"record_fact","summary":"Sofia likes pasta for lunch.","category":"preference","subjectId":"sofia"}',
+      '{"kind":"record_fact","summary":"The family dentist is near Central Park.","category":"place","subjectId":"family"}'
+    ].join("\n"),
+    "",
     "# Input",
     JSON.stringify({
       text: input.text,
