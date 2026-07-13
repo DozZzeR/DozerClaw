@@ -13,6 +13,7 @@
     "dev:mempalace-smoke": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-mempalace-smoke.ts",
     "dev:register-services": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-register-services.ts",
     "dev:store-file": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-store-file.ts",
+    "dev:subject-alias": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-subject-alias.ts",
     "start": "node --env-file-if-exists=.env dist/main.js",
     "dev:telegram": "node --env-file-if-exists=.env --import tsx src/main.ts"
   },
