@@ -8,8 +8,13 @@ import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../../src/composition/build-app.js";
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
+import { SqliteDocumentRepository } from "../../src/infrastructure/providers/sqlite/sqlite-document-repository.js";
 import { SqliteFamilyMemoryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteServiceRegistryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
+import type {
+  DocumentStoragePort,
+  ResolveDocumentInput
+} from "../../src/ports/document-storage-port.js";
 import type {
   ModelPort,
   ModelTextRequest
@@ -528,6 +533,73 @@ describe("buildApp", () => {
     }
   });
 
+  it("registers an external document through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const documentStorage = new FakeDocumentStorage();
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider: new QueueModelProvider([
+          JSON.stringify({
+            kind: "register_document",
+            question: null,
+            summary: null,
+            externalIdOrUrl: "https://drive.google.com/file/d/abc",
+            query: null,
+            reason: null
+          })
+        ]),
+        documentStorage
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "register this document https://drive.google.com/file/d/abc",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:00:00.000Z"),
+        now: new Date("2026-07-14T08:00:00.000Z")
+      });
+
+      expect(reply.text).toBe("Registered document: Passport.pdf");
+      expect(documentStorage.seenInput).toEqual({
+        externalIdOrUrl: "https://drive.google.com/file/d/abc"
+      });
+
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteDocumentRepository(database);
+      await expect(
+        repository.findDocumentByExternalId("google_drive", "drive-abc")
+      ).resolves.toEqual(
+        expect.objectContaining({
+          provider: "google_drive",
+          externalId: "drive-abc",
+          name: "Passport.pdf",
+          url: "https://drive.google.com/file/d/abc",
+          status: "registered"
+        })
+      );
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses chat-managed subject aliases during recall", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");
@@ -931,6 +1003,20 @@ class QueueModelProvider implements ModelPort {
 
     return {
       text: typeof queued === "function" ? queued(request) : queued
+    };
+  }
+}
+
+class FakeDocumentStorage implements DocumentStoragePort {
+  seenInput: ResolveDocumentInput | undefined;
+
+  async resolveDocument(input: ResolveDocumentInput) {
+    this.seenInput = input;
+
+    return {
+      externalId: "drive-abc",
+      name: "Passport.pdf",
+      url: "https://drive.google.com/file/d/abc"
     };
   }
 }

@@ -922,6 +922,57 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("registers an external document from a model intent", async () => {
+    const documentRegistrar = new FakeDocumentRegistrar();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "register_document",
+        externalIdOrUrl: "https://drive.google.com/file/d/abc"
+      }),
+      documentRegistrar
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "register this document https://drive.google.com/file/d/abc"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Registered document: Passport.pdf"
+    });
+    expect(documentRegistrar.seenInput).toEqual({
+      externalIdOrUrl: "https://drive.google.com/file/d/abc"
+    });
+  });
+
+  it("reports when document registration is not configured", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "register_document",
+        externalIdOrUrl: "https://drive.google.com/file/d/abc"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "register this document https://drive.google.com/file/d/abc"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "I understood this as register_document, but that action is not connected yet."
+    });
+  });
+
   it("falls back to attachment storage when model intent classification fails", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -1333,6 +1384,7 @@ class FakeIntentClassifier {
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
       | { readonly kind: "archive_fact"; readonly query: string }
+      | { readonly kind: "register_document"; readonly externalIdOrUrl: string }
       | {
           readonly kind: "save_subject_alias";
           readonly aliasSubjectId: string;
@@ -1412,6 +1464,28 @@ class FakeFamilyFactRecall {
 
     return {
       text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    };
+  }
+}
+
+class FakeDocumentRegistrar {
+  seenInput: { externalIdOrUrl: string } | undefined;
+
+  async execute(input: { externalIdOrUrl: string }) {
+    this.seenInput = input;
+
+    return {
+      status: "registered" as const,
+      document: {
+        id: "document-1",
+        provider: "google_drive" as const,
+        externalId: "drive-abc",
+        name: "Passport.pdf",
+        url: "https://drive.google.com/file/d/abc",
+        status: "registered" as const,
+        createdAt: new Date("2026-07-14T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:00:00.000Z")
+      }
     };
   }
 }

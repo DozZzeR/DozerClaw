@@ -1,4 +1,8 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type {
+  RegisterDocumentInput,
+  RegisterDocumentResult
+} from "../documents/register-document.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
@@ -66,6 +70,10 @@ export interface FamilyFactRecall {
 
 export interface FamilyFactArchiver {
   execute(input: ArchiveFamilyFactInput): Promise<ArchiveFamilyFactResult>;
+}
+
+export interface DocumentRegistrar {
+  execute(input: RegisterDocumentInput): Promise<RegisterDocumentResult>;
 }
 
 export interface SubjectAliasManager {
@@ -139,6 +147,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
   readonly familyFactArchiver?: FamilyFactArchiver;
+  readonly documentRegistrar?: DocumentRegistrar;
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
@@ -308,6 +317,10 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "archive_fact") {
       return this.archiveFamilyFact(context, intent);
+    }
+
+    if (intent.kind === "register_document") {
+      return this.registerDocument(context, intent);
     }
 
     if (
@@ -715,6 +728,27 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: `Не могу применить решение по файлу ${pending.fileName}: не сохранились данные исходного вложения. Пришли файл еще раз.`
+    };
+  }
+
+  private async registerDocument(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "register_document" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.documentRegistrar) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.documentRegistrar.execute({
+      externalIdOrUrl: intent.externalIdOrUrl
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: `Registered document: ${result.document.name}`
     };
   }
 

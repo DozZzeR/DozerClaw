@@ -11,6 +11,7 @@ import { ModelPendingChoiceClassifier } from "../application/use-cases/messaging
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
 import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/file-inbox/resolve-file-duplicate-decision.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
+import { RegisterDocumentUseCase } from "../application/use-cases/documents/register-document.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -31,6 +32,7 @@ import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-c
 import { MempalaceMemoryProvider } from "../infrastructure/providers/mempalace/mempalace-memory-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
+import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sqlite-document-repository.js";
 import { SqliteFamilyMemoryRepository } from "../infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sqlite-file-inbox-repository.js";
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
@@ -38,11 +40,13 @@ import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sql
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
 import type { AttachmentDownloadPort } from "../ports/attachment-download-port.js";
+import type { DocumentStoragePort } from "../ports/document-storage-port.js";
 import type { ModelPort } from "../ports/model-port.js";
 
 export interface BuildAppOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly attachmentDownloader?: AttachmentDownloadPort;
+  readonly documentStorage?: DocumentStoragePort;
   readonly modelProvider?: ModelPort;
 }
 
@@ -53,6 +57,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const eventLog = new SqliteEventLog(database);
   const identityAccessRepository = new SqliteIdentityAccessRepository(database);
   const serviceRegistryRepository = new SqliteServiceRegistryRepository(database);
+  const documentRepository = new SqliteDocumentRepository(database);
   const fileInboxRepository = new SqliteFileInboxRepository(database);
   const familyMemoryRepository = new SqliteFamilyMemoryRepository(database);
   const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
@@ -127,6 +132,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         now: () => new Date()
       })
     : undefined;
+  const documentRegistrar = options.documentStorage
+    ? new RegisterDocumentUseCase({
+        repository: documentRepository,
+        storage: options.documentStorage,
+        generateId,
+        now: () => new Date()
+      })
+    : undefined;
   const modelProvider = options.modelProvider
     ? options.modelProvider
     : config.codex.modelRoutingEnabled
@@ -172,6 +185,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     familyFactRecorder,
     familyFactRecall,
     familyFactArchiver,
+    ...(documentRegistrar ? { documentRegistrar } : {}),
     subjectAliasManager,
     factDecisionResolver,
     pendingAccessRequests: {

@@ -34,6 +34,10 @@ export type InboundIntent =
       readonly query: string;
     }
   | {
+      readonly kind: "register_document";
+      readonly externalIdOrUrl: string;
+    }
+  | {
       readonly kind: "save_subject_alias";
       readonly aliasSubjectId: string;
       readonly canonicalSubjectId: string;
@@ -106,6 +110,13 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Do not use `archive_fact` for subject alias deletion; use `delete_subject_alias` for aliases."
     ].join("\n"),
     "",
+    "# register_document field rules",
+    [
+      "- Use `register_document` when the user asks to register, save, catalog, or remember an existing Drive document link or file id as a document record.",
+      "- `externalIdOrUrl`: the Google Drive URL or external file id from the message.",
+      "- Do not use `register_document` for generic Telegram attachments without a Drive link; use `store_file` for uploaded files."
+    ].join("\n"),
+    "",
     "# subject_alias field rules",
     [
       "- Use `save_subject_alias` when the user says one subject name is another subject, for example `Maksim is Max`.",
@@ -135,6 +146,12 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       '{"kind":"archive_fact","query":"Max chamomile tea"}',
       '{"kind":"archive_fact","query":"Sofia blue backpack"}'
+    ].join("\n"),
+    "",
+    "# register_document examples",
+    [
+      '{"kind":"register_document","externalIdOrUrl":"https://drive.google.com/file/d/abc"}',
+      '{"kind":"register_document","externalIdOrUrl":"drive-file-id-abc"}'
     ].join("\n"),
     "",
     "# Input",
@@ -230,6 +247,20 @@ export function parseInboundIntent(text: string): InboundIntent {
     }
 
     if (
+      parsed.kind === "register_document" &&
+      typeof parsed.externalIdOrUrl === "string"
+    ) {
+      const externalIdOrUrl = parsed.externalIdOrUrl.trim();
+
+      if (externalIdOrUrl) {
+        return {
+          kind: "register_document",
+          externalIdOrUrl
+        };
+      }
+    }
+
+    if (
       parsed.kind === "save_subject_alias" &&
       typeof parsed.aliasSubjectId === "string" &&
       typeof parsed.canonicalSubjectId === "string"
@@ -298,6 +329,7 @@ const inboundIntentSchema = {
         "create_reminder",
         "answer_from_memory",
         "archive_fact",
+        "register_document",
         "save_subject_alias",
         "list_subject_aliases",
         "delete_subject_alias",
@@ -324,6 +356,9 @@ const inboundIntentSchema = {
     canonicalSubjectId: {
       type: ["string", "null"]
     },
+    externalIdOrUrl: {
+      type: ["string", "null"]
+    },
     query: {
       type: ["string", "null"]
     },
@@ -339,6 +374,7 @@ const inboundIntentSchema = {
     "subjectId",
     "aliasSubjectId",
     "canonicalSubjectId",
+    "externalIdOrUrl",
     "query",
     "reason"
   ]

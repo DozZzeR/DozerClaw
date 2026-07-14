@@ -57,6 +57,7 @@ describe("ModelInboundIntentClassifier", () => {
           "subjectId",
           "aliasSubjectId",
           "canonicalSubjectId",
+          "externalIdOrUrl",
           "query",
           "reason"
         ]
@@ -155,6 +156,20 @@ describe("parseInboundIntent", () => {
     ).toEqual({
       kind: "archive_fact",
       query: "Max tea"
+    });
+  });
+
+  it("parses register document intent", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "register_document",
+          externalIdOrUrl: " https://drive.google.com/file/d/abc "
+        })
+      )
+    ).toEqual({
+      kind: "register_document",
+      externalIdOrUrl: "https://drive.google.com/file/d/abc"
     });
   });
 
