@@ -600,6 +600,63 @@ describe("buildApp", () => {
     }
   });
 
+  it("registers an external document through configured Google Drive storage", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const drive = await startGoogleDriveStub();
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
+          DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: drive.url,
+          NODE_ENV: "test"
+        },
+        modelProvider: new QueueModelProvider([
+          JSON.stringify({
+            kind: "register_document",
+            question: null,
+            summary: null,
+            externalIdOrUrl: "https://drive.google.com/file/d/drive-abc/view",
+            query: null,
+            reason: null
+          })
+        ])
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "register https://drive.google.com/file/d/drive-abc/view",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:00:00.000Z"),
+        now: new Date("2026-07-14T08:00:00.000Z")
+      });
+
+      expect(reply.text).toBe("Registered document: Passport.pdf");
+      expect(drive.requests).toEqual([
+        {
+          path: "/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink",
+          authorization: "Bearer drive-token"
+        }
+      ]);
+    } finally {
+      await drive.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses chat-managed subject aliases during recall", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");
@@ -1101,6 +1158,36 @@ async function startMempalaceStub(responses: readonly unknown[]) {
     url: `http://127.0.0.1:${address.port}/mcp`,
     requests,
     authorizationHeaders,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve()))
+  };
+}
+
+async function startGoogleDriveStub() {
+  const requests: Array<{ readonly path: string; readonly authorization: string }> =
+    [];
+  const server = createServer((request, response) => {
+    requests.push({
+      path: request.url ?? "",
+      authorization: String(request.headers.authorization ?? "")
+    });
+    response.writeHead(200, {
+      "Content-Type": "application/json"
+    });
+    response.end(
+      JSON.stringify({
+        id: "drive-abc",
+        name: "Passport.pdf",
+        webViewLink: "https://drive.google.com/file/d/drive-abc/view"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
     close: () => new Promise<void>((resolve) => server.close(() => resolve()))
   };
 }

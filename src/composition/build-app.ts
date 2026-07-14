@@ -30,6 +30,7 @@ import { LocalServerMonitor } from "../infrastructure/providers/local-monitor/lo
 import { RegistryServiceMonitor } from "../infrastructure/providers/local-monitor/registry-service-monitor.js";
 import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-cli-model-provider.js";
 import { MempalaceMemoryProvider } from "../infrastructure/providers/mempalace/mempalace-memory-provider.js";
+import { GoogleDriveDocumentStorageProvider } from "../infrastructure/providers/google-drive/google-drive-document-storage.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sqlite-document-repository.js";
@@ -132,10 +133,15 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         now: () => new Date()
       })
     : undefined;
-  const documentRegistrar = options.documentStorage
+  const documentStorage =
+    options.documentStorage ??
+    (config.googleDrive
+      ? new GoogleDriveDocumentStorageProvider(config.googleDrive)
+      : undefined);
+  const documentRegistrar = documentStorage
     ? new RegisterDocumentUseCase({
         repository: documentRepository,
-        storage: options.documentStorage,
+        storage: documentStorage,
         generateId,
         now: () => new Date()
       })

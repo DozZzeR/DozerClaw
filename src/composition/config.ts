@@ -7,6 +7,7 @@ export interface AppConfig {
   readonly telegram: TelegramConfig;
   readonly codex: CodexConfig;
   readonly memory?: MemoryConfig;
+  readonly googleDrive?: GoogleDriveConfig;
 }
 
 export interface SqliteConfig {
@@ -34,6 +35,11 @@ export interface CodexConfig {
 
 export interface MemoryConfig {
   readonly mempalace?: MempalaceMemoryConfig;
+}
+
+export interface GoogleDriveConfig {
+  readonly accessToken: string;
+  readonly apiBaseUrl: string;
 }
 
 export interface MempalaceMemoryConfig {
@@ -77,7 +83,27 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       tmpDirectory: env.DOZERCLAW_CODEX_TMP_DIR ?? "data/tmp/codex",
       ...(env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {})
     },
-    ...memoryConfig(env)
+    ...memoryConfig(env),
+    ...googleDriveConfig(env)
+  };
+}
+
+function googleDriveConfig(
+  env: NodeJS.ProcessEnv
+): { readonly googleDrive?: GoogleDriveConfig } {
+  const accessToken = env.DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN?.trim();
+
+  if (!accessToken) {
+    return {};
+  }
+
+  return {
+    googleDrive: {
+      accessToken,
+      apiBaseUrl:
+        env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
+        "https://www.googleapis.com"
+    }
   };
 }
 

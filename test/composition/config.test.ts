@@ -56,4 +56,16 @@ describe("loadConfig", () => {
       }
     });
   });
+
+  it("loads Google Drive document storage config from environment", () => {
+    expect(
+      loadConfig({
+        DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
+        DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "http://127.0.0.1:9999"
+      }).googleDrive
+    ).toEqual({
+      accessToken: "drive-token",
+      apiBaseUrl: "http://127.0.0.1:9999"
+    });
+  });
 });
