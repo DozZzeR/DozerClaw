@@ -90,11 +90,28 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
 
   ensureMonitoredServicesTable(database);
   ensureFileInboxRecordsTable(database);
+  ensureDocumentsTable(database);
   ensureFamilyFactsTable(database);
   ensureFamilySubjectAliasesTable(database);
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
   ensurePendingFamilyFactDecisionsTable(database);
+}
+
+function ensureDocumentsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists documents (
+      id text primary key,
+      provider text not null check (provider in ('google_drive')),
+      external_id text not null,
+      name text not null,
+      url text not null,
+      status text not null check (status in ('registered', 'archived')),
+      created_at text not null,
+      updated_at text not null,
+      unique (provider, external_id)
+    );
+  `);
 }
 
 function ensureFileInboxRecordsTable(database: SqliteDatabase): void {

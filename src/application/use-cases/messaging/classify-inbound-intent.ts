@@ -30,6 +30,10 @@ export type InboundIntent =
       readonly query: string;
     }
   | {
+      readonly kind: "archive_fact";
+      readonly query: string;
+    }
+  | {
       readonly kind: "save_subject_alias";
       readonly aliasSubjectId: string;
       readonly canonicalSubjectId: string;
@@ -95,6 +99,13 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- If category is unclear, use `preference`; if subject is unclear, set `subjectId` to `null`."
     ].join("\n"),
     "",
+    "# archive_fact field rules",
+    [
+      "- Use `archive_fact` when the user asks to forget, remove, archive, or stop remembering a saved family fact.",
+      "- `query`: the shortest specific phrase that identifies the fact to archive.",
+      "- Do not use `archive_fact` for subject alias deletion; use `delete_subject_alias` for aliases."
+    ].join("\n"),
+    "",
     "# subject_alias field rules",
     [
       "- Use `save_subject_alias` when the user says one subject name is another subject, for example `Maksim is Max`.",
@@ -118,6 +129,12 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       '{"kind":"record_fact","summary":"Max started swimming lessons.","category":"event","subjectId":"max"}',
       '{"kind":"record_fact","summary":"Sofia likes pasta for lunch.","category":"preference","subjectId":"sofia"}',
       '{"kind":"record_fact","summary":"The family dentist is near Central Park.","category":"place","subjectId":"family"}'
+    ].join("\n"),
+    "",
+    "# archive_fact examples",
+    [
+      '{"kind":"archive_fact","query":"Max chamomile tea"}',
+      '{"kind":"archive_fact","query":"Sofia blue backpack"}'
     ].join("\n"),
     "",
     "# Input",
@@ -201,6 +218,17 @@ export function parseInboundIntent(text: string): InboundIntent {
       };
     }
 
+    if (parsed.kind === "archive_fact" && typeof parsed.query === "string") {
+      const query = parsed.query.trim();
+
+      if (query) {
+        return {
+          kind: "archive_fact",
+          query
+        };
+      }
+    }
+
     if (
       parsed.kind === "save_subject_alias" &&
       typeof parsed.aliasSubjectId === "string" &&
@@ -269,6 +297,7 @@ const inboundIntentSchema = {
         "record_fact",
         "create_reminder",
         "answer_from_memory",
+        "archive_fact",
         "save_subject_alias",
         "list_subject_aliases",
         "delete_subject_alias",

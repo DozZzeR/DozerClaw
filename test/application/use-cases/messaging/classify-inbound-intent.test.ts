@@ -144,6 +144,20 @@ describe("parseInboundIntent", () => {
     });
   });
 
+  it("parses archive family fact intent", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "archive_fact",
+          query: "Max tea"
+        })
+      )
+    ).toEqual({
+      kind: "archive_fact",
+      query: "Max tea"
+    });
+  });
+
   it("falls back to preference category and ignores blank subject ids", () => {
     expect(
       parseInboundIntent(

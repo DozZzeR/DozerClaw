@@ -320,6 +320,104 @@ describe("buildApp", () => {
     }
   });
 
+  it("archives a stored family fact through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "record_fact",
+        question: null,
+        summary: "Max prefers chamomile tea before sleep.",
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "archive_fact",
+        question: null,
+        summary: null,
+        query: "Max chamomile tea",
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "answer_from_memory",
+        question: null,
+        summary: null,
+        query: "what helps Max sleep?",
+        reason: null
+      })
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-fact",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "remember Max prefers chamomile tea before sleep",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:00:00.000Z"),
+        now: new Date("2026-07-07T10:00:00.000Z")
+      });
+
+      const archiveReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-archive",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "forget Max chamomile tea",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:01:00.000Z"),
+        now: new Date("2026-07-07T10:01:00.000Z")
+      });
+
+      expect(archiveReply.text).toBe(
+        "Archived family fact: Max prefers chamomile tea before sleep."
+      );
+
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteFamilyMemoryRepository(database);
+      await expect(repository.listRecentActiveFamilyFacts(10)).resolves.toEqual(
+        []
+      );
+      database.close();
+
+      const recallReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-recall",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "what helps Max sleep?",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:02:00.000Z"),
+        now: new Date("2026-07-07T10:02:00.000Z")
+      });
+
+      expect(recallReply.text).toBe("I do not have any saved family facts yet.");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses chat-managed subject aliases during recall", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");

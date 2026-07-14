@@ -7,6 +7,10 @@ import type { PendingFileDuplicateDecision } from "../../../ports/state-reposito
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
 import type {
+  ArchiveFamilyFactInput,
+  ArchiveFamilyFactResult
+} from "../family-memory/archive-family-fact.js";
+import type {
   ManageSubjectAliasesInput,
   ManageSubjectAliasesResult
 } from "../family-memory/manage-subject-aliases.js";
@@ -57,6 +61,10 @@ export interface FamilyFactRecorder {
 
 export interface FamilyFactRecall {
   execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
+}
+
+export interface FamilyFactArchiver {
+  execute(input: ArchiveFamilyFactInput): Promise<ArchiveFamilyFactResult>;
 }
 
 export interface SubjectAliasManager {
@@ -120,6 +128,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly attachmentStore?: MessageAttachmentStore;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
+  readonly familyFactArchiver?: FamilyFactArchiver;
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
@@ -271,6 +280,10 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "answer_from_memory") {
       return this.recallFamilyFacts(context, intent);
+    }
+
+    if (intent.kind === "archive_fact") {
+      return this.archiveFamilyFact(context, intent);
     }
 
     if (
@@ -429,6 +442,45 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: result.text
+    };
+  }
+
+  private async archiveFamilyFact(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "archive_fact" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.familyFactArchiver) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.familyFactArchiver.execute({
+      query: intent.query
+    });
+
+    if (result.status === "archived") {
+      return {
+        chatId: context.chat.id,
+        text: `Archived family fact: ${result.fact.body}`
+      };
+    }
+
+    if (result.status === "ambiguous") {
+      return {
+        chatId: context.chat.id,
+        text: [
+          "I found multiple active family facts that could match.",
+          ...result.candidates.map((fact, index) => `${index + 1}. ${fact.body}`),
+          "Please ask again with more specific wording."
+        ].join("\n")
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: "I could not find an active family fact matching that request."
     };
   }
 

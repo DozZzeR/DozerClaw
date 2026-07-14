@@ -621,6 +621,87 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("archives a family fact from model archive_fact intent", async () => {
+    const factArchiver = new FakeFamilyFactArchiver("archived");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "archive_fact",
+        query: "Max tea"
+      }),
+      familyFactArchiver: factArchiver
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "forget Max tea"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Archived family fact: Max prefers chamomile tea before sleep."
+    });
+    expect(factArchiver.seenInput).toEqual({
+      query: "Max tea"
+    });
+  });
+
+  it("reports when an archive_fact intent has no matching family fact", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "archive_fact",
+        query: "Max tea"
+      }),
+      familyFactArchiver: new FakeFamilyFactArchiver("not_found")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "forget Max tea"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "I could not find an active family fact matching that request."
+    });
+  });
+
+  it("asks for a narrower request when archive_fact is ambiguous", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "archive_fact",
+        query: "Max tea"
+      }),
+      familyFactArchiver: new FakeFamilyFactArchiver("ambiguous")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "forget Max tea"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "I found multiple active family facts that could match.",
+        "1. Max prefers chamomile tea before sleep.",
+        "2. Max likes peppermint tea.",
+        "Please ask again with more specific wording."
+      ].join("\n")
+    });
+  });
+
   it("saves a subject alias from a model intent", async () => {
     const subjectAliasManager = new FakeSubjectAliasManager();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -1140,6 +1221,7 @@ class FakeIntentClassifier {
           readonly subjectId?: string;
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
+      | { readonly kind: "archive_fact"; readonly query: string }
       | {
           readonly kind: "save_subject_alias";
           readonly aliasSubjectId: string;
@@ -1219,6 +1301,48 @@ class FakeFamilyFactRecall {
 
     return {
       text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    };
+  }
+}
+
+class FakeFamilyFactArchiver {
+  seenInput: { query: string } | undefined;
+
+  constructor(
+    private readonly status: "archived" | "not_found" | "ambiguous"
+  ) {}
+
+  async execute(input: { query: string }) {
+    this.seenInput = input;
+
+    if (this.status === "archived") {
+      return {
+        status: "archived" as const,
+        fact: familyFact({
+          id: "fact-1",
+          body: "Max prefers chamomile tea before sleep."
+        })
+      };
+    }
+
+    if (this.status === "ambiguous") {
+      return {
+        status: "ambiguous" as const,
+        candidates: [
+          familyFact({
+            id: "fact-1",
+            body: "Max prefers chamomile tea before sleep."
+          }),
+          familyFact({
+            id: "fact-2",
+            body: "Max likes peppermint tea."
+          })
+        ]
+      };
+    }
+
+    return {
+      status: "not_found" as const
     };
   }
 }

@@ -125,6 +125,38 @@ describe("RecallFamilyFactsUseCase", () => {
     });
   });
 
+  it("matches structured facts when the query uses a multi-token subject alias", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-unrelated",
+        category: "preference",
+        body: "Sofia has a blue backpack.",
+        subjectId: "sofia"
+      }),
+      familyFact({
+        id: "fact-match",
+        category: "preference",
+        body: "Favorite hoodie is green.",
+        subjectId: "max"
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      subjectAliases: new StubSubjectAliasRepository({
+        "mister-smith": "max"
+      }),
+      recentLimit: 10
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what about Mister Smith?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Favorite hoodie is green."
+    });
+  });
+
   it("uses model semantic selection and synthesis when configured", async () => {
     const repository = new StubFamilyMemoryRepository([
       familyFact({

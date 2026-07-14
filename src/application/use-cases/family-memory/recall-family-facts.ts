@@ -1,4 +1,5 @@
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
+import { normalizeSubjectId } from "../../../core/domain/family-memory/subject-id.js";
 import type { FamilyMemoryRepositoryPort } from "../../../ports/family-memory-repository-port.js";
 import type { MemoryPort, MemorySearchResult } from "../../../ports/memory-port.js";
 import type { ModelPort } from "../../../ports/model-port.js";
@@ -206,8 +207,10 @@ export class RecallFamilyFactsUseCase {
 
     const expandedTokens = new Set(tokens);
 
+    const aliasCandidates = [...tokens, ...subjectAliasPhraseCandidates(tokens)];
+
     await Promise.all(
-      tokens.map(async (token) => {
+      aliasCandidates.map(async (token) => {
         try {
           expandedTokens.add(
             await this.dependencies.subjectAliases!.resolveCanonicalSubjectId(
@@ -339,6 +342,25 @@ function queryTokens(query: string): readonly string[] {
 
       return true;
     });
+}
+
+function subjectAliasPhraseCandidates(tokens: readonly string[]): readonly string[] {
+  const candidates = new Set<string>();
+  const maxPhraseLength = Math.min(tokens.length, 5);
+
+  for (let phraseLength = 2; phraseLength <= maxPhraseLength; phraseLength += 1) {
+    for (let start = 0; start <= tokens.length - phraseLength; start += 1) {
+      const normalized = normalizeSubjectId(
+        tokens.slice(start, start + phraseLength).join(" ")
+      );
+
+      if (normalized) {
+        candidates.add(normalized);
+      }
+    }
+  }
+
+  return [...candidates];
 }
 
 function normalizeText(text: string): string {

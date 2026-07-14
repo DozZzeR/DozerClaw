@@ -182,7 +182,9 @@ class DevMempalaceSmokeModelProvider implements ModelPort {
     request: ModelTextRequest
   ): Promise<ModelTextResponse> {
     if (request.purpose === "Classify DozerClaw inbound family message intent") {
-      if (request.input.includes("remember")) {
+      const inboundText = inboundTextFromClassifierPrompt(request.input);
+
+      if (inboundText.includes("remember")) {
         return {
           text: JSON.stringify({
             kind: "record_fact",
@@ -229,6 +231,25 @@ class DevMempalaceSmokeModelProvider implements ModelPort {
     return {
       text: this.body
     };
+  }
+}
+
+function inboundTextFromClassifierPrompt(prompt: string): string {
+  const inputMarker = "# Input";
+  const inputStart = prompt.lastIndexOf(inputMarker);
+
+  if (inputStart === -1) {
+    return prompt;
+  }
+
+  const inputText = prompt.slice(inputStart + inputMarker.length).trim();
+
+  try {
+    const parsed = JSON.parse(inputText) as { readonly text?: unknown };
+
+    return typeof parsed.text === "string" ? parsed.text : inputText;
+  } catch {
+    return inputText;
   }
 }
 
