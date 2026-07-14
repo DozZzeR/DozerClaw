@@ -2,6 +2,7 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type {
   PendingClarification,
+  PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
   PendingFileDuplicateDecision,
   StateRepositoryPort
@@ -278,6 +279,80 @@ export class SqliteStateRepository implements StateRepositoryPort {
       .prepare("delete from pending_family_fact_decisions where chat_id = ?")
       .run(chatId);
   }
+
+  async findActivePendingFamilyFactArchiveDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFamilyFactArchiveDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            candidates_json as candidatesJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_family_fact_archive_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as
+      | PendingFamilyFactArchiveDecisionRow
+      | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      candidates: parseFamilyFacts(row.candidatesJson),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingFamilyFactArchiveDecision(
+    input: PendingFamilyFactArchiveDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_family_fact_archive_decisions (
+            chat_id,
+            actor_id,
+            candidates_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            candidates_json = excluded.candidates_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        JSON.stringify(input.candidates.map(familyFactToJson)),
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingFamilyFactArchiveDecisionByChatId(
+    chatId: string
+  ): Promise<void> {
+    this.database
+      .prepare(
+        "delete from pending_family_fact_archive_decisions where chat_id = ?"
+      )
+      .run(chatId);
+  }
 }
 
 interface PendingClarificationRow {
@@ -307,6 +382,14 @@ interface PendingFamilyFactDecisionRow {
   readonly chatId: string;
   readonly actorId: string;
   readonly newFactJson: string;
+  readonly candidatesJson: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+interface PendingFamilyFactArchiveDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
   readonly candidatesJson: string;
   readonly createdAt: string;
   readonly expiresAt: string;

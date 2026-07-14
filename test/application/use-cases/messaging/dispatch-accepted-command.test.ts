@@ -9,7 +9,10 @@ import type { AcceptedMessageContext } from "../../../../src/application/use-cas
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
 import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
-import type { PendingFamilyFactDecision } from "../../../../src/ports/state-repository-port.js";
+import type {
+  PendingFamilyFactArchiveDecision,
+  PendingFamilyFactDecision
+} from "../../../../src/ports/state-repository-port.js";
 
 describe("DispatchAcceptedCommandUseCase", () => {
   it("dispatches system health command to handler", async () => {
@@ -673,14 +676,17 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
-  it("asks for a narrower request when archive_fact is ambiguous", async () => {
+  it("stores pending archive candidates when archive_fact is ambiguous", async () => {
+    const pendingArchiveDecisions = new FakePendingFamilyFactArchiveDecisions();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
         kind: "archive_fact",
         query: "Max tea"
       }),
-      familyFactArchiver: new FakeFamilyFactArchiver("ambiguous")
+      familyFactArchiver: new FakeFamilyFactArchiver("ambiguous"),
+      pendingFamilyFactArchiveDecisions: pendingArchiveDecisions,
+      now: () => new Date("2026-07-14T07:00:00.000Z")
     });
 
     await expect(
@@ -697,9 +703,114 @@ describe("DispatchAcceptedCommandUseCase", () => {
         "I found multiple active family facts that could match.",
         "1. Max prefers chamomile tea before sleep.",
         "2. Max likes peppermint tea.",
-        "Please ask again with more specific wording."
+        "Reply with the number to archive, or cancel."
       ].join("\n")
     });
+    expect(pendingArchiveDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      candidates: [
+        familyFact({
+          id: "fact-1",
+          body: "Max prefers chamomile tea before sleep."
+        }),
+        familyFact({
+          id: "fact-2",
+          body: "Max likes peppermint tea."
+        })
+      ],
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+  });
+
+  it("archives a selected pending archive candidate by number", async () => {
+    const pendingArchiveDecisions = new FakePendingFamilyFactArchiveDecisions();
+    pendingArchiveDecisions.pending = pendingFamilyFactArchiveDecision();
+    const factArchiver = new FakeFamilyFactArchiver("archived");
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      familyFactArchiver: factArchiver,
+      pendingFamilyFactArchiveDecisions: pendingArchiveDecisions,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "2"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Archived family fact: Max prefers chamomile tea before sleep."
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(factArchiver.seenInput).toEqual({
+      query: "Max likes peppermint tea.",
+      factId: "fact-2"
+    });
+    expect(pendingArchiveDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("cancels a pending archive decision", async () => {
+    const pendingArchiveDecisions = new FakePendingFamilyFactArchiveDecisions();
+    pendingArchiveDecisions.pending = pendingFamilyFactArchiveDecision();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      familyFactArchiver: new FakeFamilyFactArchiver("archived"),
+      pendingFamilyFactArchiveDecisions: pendingArchiveDecisions,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "cancel"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Ок, не архивирую семейный факт."
+    });
+    expect(pendingArchiveDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("keeps pending archive decision when reply is unclear", async () => {
+    const pendingArchiveDecisions = new FakePendingFamilyFactArchiveDecisions();
+    pendingArchiveDecisions.pending = pendingFamilyFactArchiveDecision();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      familyFactArchiver: new FakeFamilyFactArchiver("archived"),
+      pendingFamilyFactArchiveDecisions: pendingArchiveDecisions,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "not sure"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Я жду выбор семейного факта для архивации.",
+        "Можно написать номер факта или \"отмена\"."
+      ].join("\n")
+    });
+    expect(pendingArchiveDecisions.deletedChatIds).toEqual([]);
   });
 
   it("saves a subject alias from a model intent", async () => {
@@ -1306,13 +1417,13 @@ class FakeFamilyFactRecall {
 }
 
 class FakeFamilyFactArchiver {
-  seenInput: { query: string } | undefined;
+  seenInput: { query: string; factId?: string } | undefined;
 
   constructor(
     private readonly status: "archived" | "not_found" | "ambiguous"
   ) {}
 
-  async execute(input: { query: string }) {
+  async execute(input: { query: string; factId?: string }) {
     this.seenInput = input;
 
     if (this.status === "archived") {
@@ -1439,6 +1550,25 @@ function pendingFamilyFactDecision(
   };
 }
 
+function pendingFamilyFactArchiveDecision(): PendingFamilyFactArchiveDecision {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    candidates: [
+      familyFact({
+        id: "fact-1",
+        body: "Max prefers chamomile tea before sleep."
+      }),
+      familyFact({
+        id: "fact-2",
+        body: "Max likes peppermint tea."
+      })
+    ],
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    expiresAt: new Date("2026-07-14T07:30:00.000Z")
+  };
+}
+
 class FakeFamilyFactDecisionResolver {
   seenInput:
     | {
@@ -1514,6 +1644,32 @@ class FakePendingClarifications {
   }
 
   async clearByChatId(chatId: string) {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
+class FakePendingFamilyFactArchiveDecisions {
+  pending: PendingFamilyFactArchiveDecision | undefined;
+  saved: PendingFamilyFactArchiveDecision | undefined;
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: PendingFamilyFactArchiveDecision): Promise<void> {
+    this.saved = input;
+  }
+
+  async clearByChatId(chatId: string): Promise<void> {
     this.deletedChatIds.push(chatId);
     this.pending = undefined;
   }

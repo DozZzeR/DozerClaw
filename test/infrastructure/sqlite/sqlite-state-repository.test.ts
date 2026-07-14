@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { FamilyFact } from "../../../src/core/domain/family-memory/family-fact.js";
 import { createSqliteDatabase } from "../../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteStateRepository } from "../../../src/infrastructure/providers/sqlite/sqlite-state-repository.js";
 
@@ -232,4 +233,79 @@ describe("SqliteStateRepository", () => {
 
     database.close();
   });
+
+  it("stores and clears active pending family fact archive decisions by chat", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.savePendingFamilyFactArchiveDecision({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      candidates: [
+        familyFact({
+          id: "fact-1",
+          body: "Max prefers chamomile tea before sleep."
+        }),
+        familyFact({
+          id: "fact-2",
+          body: "Max likes peppermint tea."
+        })
+      ],
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingFamilyFactArchiveDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      candidates: [
+        familyFact({
+          id: "fact-1",
+          body: "Max prefers chamomile tea before sleep."
+        }),
+        familyFact({
+          id: "fact-2",
+          body: "Max likes peppermint tea."
+        })
+      ],
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingFamilyFactArchiveDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.clearPendingFamilyFactArchiveDecisionByChatId("chat-1");
+    await expect(
+      repository.findActivePendingFamilyFactArchiveDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
 });
+
+function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
+  return {
+    id: input.id,
+    category: "preference",
+    body: input.body,
+    sourceActorId: "actor-1",
+    sourceChatId: "chat-1",
+    sourceMessageText: input.body,
+    status: "active",
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    updatedAt: new Date("2026-07-14T07:00:00.000Z")
+  };
+}

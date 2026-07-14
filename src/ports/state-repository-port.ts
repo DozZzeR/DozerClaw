@@ -25,6 +25,14 @@ export interface StateRepositoryPort {
     input: PendingFamilyFactDecision
   ): Promise<void>;
   clearPendingFamilyFactDecisionByChatId(chatId: string): Promise<void>;
+  findActivePendingFamilyFactArchiveDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFamilyFactArchiveDecision | undefined>;
+  savePendingFamilyFactArchiveDecision(
+    input: PendingFamilyFactArchiveDecision
+  ): Promise<void>;
+  clearPendingFamilyFactArchiveDecisionByChatId(chatId: string): Promise<void>;
 }
 
 export interface StateRepositoryHealth {
@@ -59,6 +67,14 @@ export interface PendingFamilyFactDecision {
   readonly chatId: string;
   readonly actorId: string;
   readonly newFact: FamilyFact;
+  readonly candidates: readonly FamilyFact[];
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+export interface PendingFamilyFactArchiveDecision {
+  readonly chatId: string;
+  readonly actorId: string;
   readonly candidates: readonly FamilyFact[];
   readonly createdAt: Date;
   readonly expiresAt: Date;

@@ -418,6 +418,116 @@ describe("buildApp", () => {
     }
   });
 
+  it("resolves an ambiguous archive request through pending selection", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "archive_fact",
+        question: null,
+        summary: null,
+        query: "Max tea",
+        reason: null
+      })
+    ]);
+
+    try {
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteFamilyMemoryRepository(database);
+      await repository.saveFamilyFact({
+        id: "fact-first",
+        category: "preference",
+        body: "Max prefers chamomile tea.",
+        subjectId: "max",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-owner",
+        sourceMessageText: "remember Max prefers chamomile tea",
+        status: "active",
+        createdAt: new Date("2026-07-07T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:00:00.000Z")
+      });
+      await repository.saveFamilyFact({
+        id: "fact-second",
+        category: "preference",
+        body: "Max likes peppermint tea.",
+        subjectId: "max",
+        sourceActorId: "actor-owner",
+        sourceChatId: "chat-owner",
+        sourceMessageText: "remember Max likes peppermint tea",
+        status: "active",
+        createdAt: new Date("2026-07-07T10:01:00.000Z"),
+        updatedAt: new Date("2026-07-07T10:01:00.000Z")
+      });
+      database.close();
+
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const ambiguousReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-archive",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "forget Max tea",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:02:00.000Z"),
+        now: new Date("2026-07-07T10:02:00.000Z")
+      });
+
+      expect(ambiguousReply.text).toBe(
+        [
+          "I found multiple active family facts that could match.",
+          "1. Max likes peppermint tea.",
+          "2. Max prefers chamomile tea.",
+          "Reply with the number to archive, or cancel."
+        ].join("\n")
+      );
+
+      const selectedReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-archive-selection",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "1",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:03:00.000Z"),
+        now: new Date("2026-07-07T10:03:00.000Z")
+      });
+
+      expect(selectedReply.text).toBe(
+        "Archived family fact: Max likes peppermint tea."
+      );
+
+      const verifyDatabase = createSqliteDatabase({ path: databasePath });
+      const verifyRepository = new SqliteFamilyMemoryRepository(verifyDatabase);
+      await expect(verifyRepository.listRecentActiveFamilyFacts(10)).resolves.toEqual([
+        expect.objectContaining({
+          id: "fact-first",
+          body: "Max prefers chamomile tea.",
+          status: "active"
+        })
+      ]);
+      verifyDatabase.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses chat-managed subject aliases during recall", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");

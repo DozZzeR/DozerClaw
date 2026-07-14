@@ -9,6 +9,7 @@ export interface ArchiveFamilyFactDependencies {
 
 export interface ArchiveFamilyFactInput {
   readonly query: string;
+  readonly factId?: string;
 }
 
 export type ArchiveFamilyFactResult =
@@ -41,6 +42,19 @@ export class ArchiveFamilyFactUseCase {
     const facts = await this.dependencies.repository.listRecentActiveFamilyFacts(
       this.dependencies.recentLimit
     );
+
+    if (input.factId) {
+      const fact = facts.find((candidate) => candidate.id === input.factId);
+
+      if (!fact) {
+        return {
+          status: "not_found"
+        };
+      }
+
+      return this.archiveFact(fact);
+    }
+
     const rankedFacts = facts
       .map((fact, index) => ({
         fact,
@@ -67,9 +81,12 @@ export class ArchiveFamilyFactUseCase {
       };
     }
 
-    const candidate = candidates[0]!;
+    return this.archiveFact(candidates[0]!);
+  }
+
+  private async archiveFact(fact: FamilyFact): Promise<ArchiveFamilyFactResult> {
     const archivedFact: FamilyFact = {
-      ...candidate,
+      ...fact,
       status: "archived",
       updatedAt: this.dependencies.now()
     };

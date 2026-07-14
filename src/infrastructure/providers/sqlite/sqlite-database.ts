@@ -96,6 +96,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
   ensurePendingFamilyFactDecisionsTable(database);
+  ensurePendingFamilyFactArchiveDecisionsTable(database);
 }
 
 function ensureDocumentsTable(database: SqliteDatabase): void {
@@ -276,6 +277,20 @@ function ensurePendingFamilyFactDecisionsTable(database: SqliteDatabase): void {
       chat_id text primary key,
       actor_id text not null,
       new_fact_json text not null,
+      candidates_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+  `);
+}
+
+function ensurePendingFamilyFactArchiveDecisionsTable(
+  database: SqliteDatabase
+): void {
+  database.exec(`
+    create table if not exists pending_family_fact_archive_decisions (
+      chat_id text primary key,
+      actor_id text not null,
       candidates_json text not null,
       created_at text not null,
       expires_at text not null

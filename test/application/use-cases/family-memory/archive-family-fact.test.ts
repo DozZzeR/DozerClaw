@@ -52,6 +52,41 @@ describe("ArchiveFamilyFactUseCase", () => {
     expect(repository.seenLimit).toBe(20);
   });
 
+  it("archives a specific active fact by id", async () => {
+    const repository = new RecordingFamilyMemoryRepository([
+      familyFact({
+        id: "fact-first",
+        body: "Max prefers chamomile tea.",
+        subjectId: "max"
+      }),
+      familyFact({
+        id: "fact-second",
+        body: "Max prefers peppermint tea.",
+        subjectId: "max"
+      })
+    ]);
+    const useCase = new ArchiveFamilyFactUseCase({
+      repository,
+      now: () => new Date("2026-07-14T07:00:00.000Z"),
+      recentLimit: 20
+    });
+
+    await expect(
+      useCase.execute({
+        query: "ignored",
+        factId: "fact-second"
+      })
+    ).resolves.toMatchObject({
+      status: "archived",
+      fact: {
+        id: "fact-second",
+        status: "archived",
+        updatedAt: new Date("2026-07-14T07:00:00.000Z")
+      }
+    });
+    expect(repository.saved?.id).toBe("fact-second");
+  });
+
   it("does not archive when no active fact matches", async () => {
     const repository = new RecordingFamilyMemoryRepository([
       familyFact({

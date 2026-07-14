@@ -2,6 +2,7 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
+import type { PendingFamilyFactArchiveDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
@@ -118,6 +119,15 @@ export interface PendingFamilyFactDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingFamilyFactArchiveDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFamilyFactArchiveDecision | undefined>;
+  save(input: PendingFamilyFactArchiveDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -138,6 +148,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingClarifications?: PendingClarificationStore;
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
   readonly pendingFamilyFactDecisions?: PendingFamilyFactDecisionStore;
+  readonly pendingFamilyFactArchiveDecisions?: PendingFamilyFactArchiveDecisionStore;
   readonly now?: () => Date;
 }
 
@@ -210,6 +221,19 @@ export class DispatchAcceptedCommandUseCase {
 
     if (pendingFamilyFact && context.attachments.length === 0) {
       return this.dispatchPendingFamilyFactDecision(context, pendingFamilyFact);
+    }
+
+    const pendingFamilyFactArchive =
+      await this.dependencies.pendingFamilyFactArchiveDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingFamilyFactArchive && context.attachments.length === 0) {
+      return this.dispatchPendingFamilyFactArchiveDecision(
+        context,
+        pendingFamilyFactArchive
+      );
     }
 
     const pending =
@@ -313,6 +337,19 @@ export class DispatchAcceptedCommandUseCase {
 
     if (pendingFamilyFact && context.attachments.length === 0) {
       return this.dispatchPendingFamilyFactDecision(context, pendingFamilyFact);
+    }
+
+    const pendingFamilyFactArchive =
+      await this.dependencies.pendingFamilyFactArchiveDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingFamilyFactArchive && context.attachments.length === 0) {
+      return this.dispatchPendingFamilyFactArchiveDecision(
+        context,
+        pendingFamilyFactArchive
+      );
     }
 
     if (context.attachments.length > 0 && this.dependencies.attachmentStore) {
@@ -468,12 +505,21 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (result.status === "ambiguous") {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingFamilyFactArchiveDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        candidates: result.candidates,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
       return {
         chatId: context.chat.id,
         text: [
           "I found multiple active family facts that could match.",
           ...result.candidates.map((fact, index) => `${index + 1}. ${fact.body}`),
-          "Please ask again with more specific wording."
+          "Reply with the number to archive, or cancel."
         ].join("\n")
       };
     }
@@ -629,7 +675,7 @@ export class DispatchAcceptedCommandUseCase {
       parseDuplicateDecision(context.text) ??
       (await this.classifyPendingDuplicateDecision(context.text, pending));
 
-    if (!decision) {
+    if (decision === undefined) {
       return {
         chatId: context.chat.id,
         text: [
@@ -726,6 +772,67 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: `Готово: сохранил новый семейный факт: ${result.fact.body}`
+    };
+  }
+
+  private async dispatchPendingFamilyFactArchiveDecision(
+    context: AcceptedMessageContext,
+    pending: PendingFamilyFactArchiveDecision
+  ): Promise<OutboundReply> {
+    const decision = parseFamilyFactArchiveDecision(context.text);
+
+    if (decision === undefined) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          "Я жду выбор семейного факта для архивации.",
+          "Можно написать номер факта или \"отмена\"."
+        ].join("\n")
+      };
+    }
+
+    await this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    if (decision === "cancel") {
+      return {
+        chatId: context.chat.id,
+        text: "Ок, не архивирую семейный факт."
+      };
+    }
+
+    if (!this.dependencies.familyFactArchiver) {
+      return {
+        chatId: context.chat.id,
+        text: "Memory archive resolver is not configured."
+      };
+    }
+
+    const candidate = pending.candidates[decision];
+
+    if (!candidate) {
+      return {
+        chatId: context.chat.id,
+        text: "I could not find that archive candidate anymore."
+      };
+    }
+
+    const result = await this.dependencies.familyFactArchiver.execute({
+      query: candidate.body,
+      factId: candidate.id
+    });
+
+    if (result.status === "archived") {
+      return {
+        chatId: context.chat.id,
+        text: `Archived family fact: ${result.fact.body}`
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: "I could not find an active family fact matching that request."
     };
   }
 
@@ -986,6 +1093,21 @@ function parseFamilyFactDecision(
   }
 
   return undefined;
+}
+
+function parseFamilyFactArchiveDecision(
+  text: string
+): number | "cancel" | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (
+    /\b(cancel|skip|nothing)\b/.test(normalized) ||
+    /отмен|ничего|не надо|забей/.test(normalized)
+  ) {
+    return "cancel";
+  }
+
+  return parseCandidateIndex(normalized);
 }
 
 function parseCandidateIndex(normalizedText: string): number | undefined {
