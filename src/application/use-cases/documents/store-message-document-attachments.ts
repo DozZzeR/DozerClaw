@@ -1,0 +1,87 @@
+import type { DocumentRecord } from "../../../core/domain/documents/document-record.js";
+import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { AttachmentDownloadPort } from "../../../ports/attachment-download-port.js";
+import type { DocumentRepositoryPort } from "../../../ports/document-repository-port.js";
+import type { DocumentStoragePort } from "../../../ports/document-storage-port.js";
+
+export interface StoreMessageDocumentAttachmentsDependencies {
+  readonly attachmentDownloader: AttachmentDownloadPort;
+  readonly documentStorage: DocumentStoragePort;
+  readonly repository: DocumentRepositoryPort;
+  readonly generateId: () => string;
+  readonly now: () => Date;
+}
+
+export interface StoreMessageDocumentAttachmentsInput {
+  readonly provider: string;
+  readonly receivedAt: Date;
+  readonly attachments: readonly MessageAttachment[];
+}
+
+export type StoreMessageDocumentAttachmentResult =
+  | {
+      readonly status: "uploaded";
+      readonly document: DocumentRecord;
+    }
+  | {
+      readonly status: "skipped";
+      readonly reason: "missing_provider_file_id";
+      readonly attachment: MessageAttachment;
+    };
+
+export class StoreMessageDocumentAttachmentsUseCase {
+  constructor(
+    private readonly dependencies: StoreMessageDocumentAttachmentsDependencies
+  ) {}
+
+  async execute(
+    input: StoreMessageDocumentAttachmentsInput
+  ): Promise<readonly StoreMessageDocumentAttachmentResult[]> {
+    const results: StoreMessageDocumentAttachmentResult[] = [];
+
+    for (const attachment of input.attachments) {
+      if (!attachment.providerFileId) {
+        results.push({
+          status: "skipped",
+          reason: "missing_provider_file_id",
+          attachment
+        });
+        continue;
+      }
+
+      const downloaded =
+        await this.dependencies.attachmentDownloader.downloadAttachment({
+          provider: input.provider,
+          providerFileId: attachment.providerFileId,
+          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+          ...(attachment.sizeBytes ? { sizeBytes: attachment.sizeBytes } : {})
+        });
+      const uploaded = await this.dependencies.documentStorage.uploadDocument({
+        fileName: downloaded.fileName,
+        ...(downloaded.mimeType ? { mimeType: downloaded.mimeType } : {}),
+        bytes: downloaded.bytes
+      });
+      const now = this.dependencies.now();
+      const document: DocumentRecord = {
+        id: this.dependencies.generateId(),
+        provider: "google_drive",
+        externalId: uploaded.externalId,
+        name: uploaded.name,
+        url: uploaded.url,
+        status: "registered",
+        createdAt: now,
+        updatedAt: now
+      };
+
+      await this.dependencies.repository.saveDocument(document);
+
+      results.push({
+        status: "uploaded",
+        document
+      });
+    }
+
+    return results;
+  }
+}

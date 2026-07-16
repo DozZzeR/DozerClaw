@@ -19,6 +19,14 @@ export interface StateRepositoryPort {
     input: PendingFileDuplicateDecision
   ): Promise<void>;
   clearPendingFileDuplicateDecisionByChatId(chatId: string): Promise<void>;
+  findActivePendingFileDestinationDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFileDestinationDecision | undefined>;
+  savePendingFileDestinationDecision(
+    input: PendingFileDestinationDecision
+  ): Promise<void>;
+  clearPendingFileDestinationDecisionByChatId(chatId: string): Promise<void>;
   findActivePendingFamilyFactDecisionByChatId(
     chatId: string,
     now: Date
@@ -67,6 +75,16 @@ export interface PendingFileDuplicateDecision {
   readonly provider?: string;
   readonly receivedAt?: Date;
   readonly sourceAttachment?: MessageAttachment;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+export interface PendingFileDestinationDecision {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly provider: string;
+  readonly receivedAt: Date;
+  readonly attachments: readonly MessageAttachment[];
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }

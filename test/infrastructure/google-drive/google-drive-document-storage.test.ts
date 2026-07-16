@@ -21,10 +21,10 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       url: "https://drive.google.com/file/d/drive-abc/view"
     });
     expect(fetch.requests).toEqual([
-      {
+      expect.objectContaining({
         url: "https://www.googleapis.com/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink",
         authorization: "Bearer drive-token"
-      }
+      })
     ]);
   });
 
@@ -61,16 +61,55 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       })
     ).rejects.toThrow("Google Drive metadata request failed: HTTP 404");
   });
+
+  it("uploads files through Drive multipart upload", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      accessToken: "drive-token",
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com"
+    });
+
+    await expect(
+      provider.uploadDocument({
+        fileName: "Passport.pdf",
+        mimeType: "application/pdf",
+        bytes: new Uint8Array([1, 2, 3])
+      })
+    ).resolves.toEqual({
+      externalId: "drive-abc",
+      name: "Passport.pdf",
+      url: "https://drive.google.com/file/d/drive-abc/view"
+    });
+    expect(fetch.requests[0]).toMatchObject({
+      url: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2Cname%2CwebViewLink",
+      authorization: "Bearer drive-token",
+      method: "POST"
+    });
+    expect(fetch.requests[0]?.contentType).toContain("multipart/related");
+    await expect(fetch.requests[0]?.body?.text()).resolves.toContain(
+      '"name":"Passport.pdf"'
+    );
+  });
 });
 
 class RecordingFetch {
-  readonly requests: Array<{ readonly url: string; readonly authorization: string }> =
-    [];
+  readonly requests: Array<{
+    readonly url: string;
+    readonly authorization: string;
+    readonly method: string;
+    readonly contentType: string;
+    readonly body?: Blob;
+  }> = [];
 
   async fetch(input: Parameters<typeof fetch>[0], init?: RequestInit) {
+    const headers = new Headers(init?.headers);
     this.requests.push({
       url: String(input),
-      authorization: String(new Headers(init?.headers).get("authorization") ?? "")
+      authorization: String(headers.get("authorization") ?? ""),
+      method: init?.method ?? "GET",
+      contentType: String(headers.get("content-type") ?? ""),
+      ...(init?.body instanceof Blob ? { body: init.body } : {})
     });
 
     return new Response(

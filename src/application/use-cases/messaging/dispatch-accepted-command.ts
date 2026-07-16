@@ -11,12 +11,17 @@ import type {
   ManageDocumentRecordInput,
   ManageDocumentRecordResult
 } from "../documents/manage-document-record.js";
+import type {
+  StoreMessageDocumentAttachmentResult,
+  StoreMessageDocumentAttachmentsInput
+} from "../documents/store-message-document-attachments.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type { PendingDocumentDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactArchiveDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
+import type { PendingFileDestinationDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
@@ -67,6 +72,12 @@ export interface MessageAttachmentStore {
   execute(
     input: StoreMessageAttachmentsInput
   ): Promise<readonly StoreInboundFileResult[]>;
+}
+
+export interface MessageDocumentAttachmentStore {
+  execute(
+    input: StoreMessageDocumentAttachmentsInput
+  ): Promise<readonly StoreMessageDocumentAttachmentResult[]>;
 }
 
 export interface FamilyFactRecorder {
@@ -135,6 +146,15 @@ export interface PendingFileDuplicateDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingFileDestinationDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFileDestinationDecision | undefined>;
+  save(input: PendingFileDestinationDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface PendingFamilyFactDecisionStore {
   findActiveByChatId(
     chatId: string,
@@ -170,6 +190,7 @@ export interface DispatchAcceptedCommandInput {
 export interface DispatchAcceptedCommandDependencies {
   readonly systemHealthHandler: SystemHealthCommandHandler;
   readonly attachmentStore?: MessageAttachmentStore;
+  readonly documentAttachmentStore?: MessageDocumentAttachmentStore;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
   readonly familyFactArchiver?: FamilyFactArchiver;
@@ -184,6 +205,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly duplicateDecisionResolver?: FileDuplicateDecisionResolver;
   readonly pendingClarifications?: PendingClarificationStore;
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
+  readonly pendingFileDestinationDecisions?: PendingFileDestinationDecisionStore;
   readonly pendingFamilyFactDecisions?: PendingFamilyFactDecisionStore;
   readonly pendingFamilyFactArchiveDecisions?: PendingFamilyFactArchiveDecisionStore;
   readonly pendingDocumentDecisions?: PendingDocumentDecisionStore;
@@ -241,6 +263,19 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
     const now = this.dependencies.now?.() ?? new Date();
+    const pendingDestination =
+      await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingDestination && context.attachments.length === 0) {
+      return this.dispatchPendingFileDestinationDecision(
+        context,
+        pendingDestination
+      );
+    }
+
     const pendingDuplicate =
       await this.dependencies.pendingFileDuplicateDecisions?.findActiveByChatId(
         context.chat.id,
@@ -389,6 +424,19 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
     const now = this.dependencies.now?.() ?? new Date();
+    const pendingDestination =
+      await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingDestination && context.attachments.length === 0) {
+      return this.dispatchPendingFileDestinationDecision(
+        context,
+        pendingDestination
+      );
+    }
+
     const pendingFamilyFact =
       await this.dependencies.pendingFamilyFactDecisions?.findActiveByChatId(
         context.chat.id,
@@ -674,13 +722,42 @@ export class DispatchAcceptedCommandUseCase {
 
   private async storeFamilyMessageAttachments(
     context: AcceptedMessageContext,
-    intent?: Extract<InboundIntent, { readonly kind: "store_file" }>
+    intent?: Extract<InboundIntent, { readonly kind: "store_file" }>,
+    destination: FileUploadDestination | undefined = parseFileUploadDestination(
+      context.text
+    )
   ): Promise<OutboundReply> {
     if (context.attachments.length === 0) {
       return {
         chatId: context.chat.id,
         text: "I can store a file after you attach one."
       };
+    }
+
+    if (!destination) {
+      if (!this.dependencies.pendingFileDestinationDecisions) {
+        destination = "local_inbox";
+      } else {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingFileDestinationDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        provider: context.provider,
+        receivedAt: context.receivedAt,
+        attachments: context.attachments,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: fileDestinationPrompt(context.attachments)
+      };
+      }
+    }
+
+    if (destination === "google_drive") {
+      return this.storeFamilyMessageDocumentAttachments(context);
     }
 
     const results = await this.dependencies.attachmentStore?.execute({
@@ -735,6 +812,70 @@ export class DispatchAcceptedCommandUseCase {
         ? `Saved ${storedRecords.length} attachment(s): ${intent.summary}.`
         : `Saved ${storedRecords.length} attachment(s).`
     };
+  }
+
+  private async storeFamilyMessageDocumentAttachments(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.documentAttachmentStore) {
+      return {
+        chatId: context.chat.id,
+        text: "Google Drive upload is not configured yet. File was not saved."
+      };
+    }
+
+    const results = await this.dependencies.documentAttachmentStore.execute({
+      provider: context.provider,
+      receivedAt: context.receivedAt,
+      attachments: context.attachments
+    });
+    const uploadedDocuments = results.flatMap((result) =>
+      result.status === "uploaded" ? [result.document] : []
+    );
+
+    if (uploadedDocuments.length === 0) {
+      return {
+        chatId: context.chat.id,
+        text: "No downloadable attachments found."
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: [
+        `Uploaded ${uploadedDocuments.length} document(s) to Google Drive:`,
+        ...uploadedDocuments.map((document) => `- ${document.name}\n  ${document.url}`)
+      ].join("\n")
+    };
+  }
+
+  private async dispatchPendingFileDestinationDecision(
+    context: AcceptedMessageContext,
+    pending: PendingFileDestinationDecision
+  ): Promise<OutboundReply> {
+    const destination = parseFileUploadDestination(context.text);
+
+    if (!destination) {
+      return {
+        chatId: context.chat.id,
+        text: fileDestinationPrompt(pending.attachments)
+      };
+    }
+
+    await this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    return this.storeFamilyMessageAttachments(
+      {
+        ...context,
+        provider: pending.provider,
+        receivedAt: pending.receivedAt,
+        attachments: pending.attachments
+      },
+      undefined,
+      destination
+    );
   }
 
   private async dispatchPendingDuplicateDecision(
@@ -1209,6 +1350,7 @@ function suggestCopyName(fileName: string): string {
 }
 
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
+type FileUploadDestination = "local_inbox" | "google_drive";
 type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision;
 
 const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[] = [
@@ -1239,6 +1381,43 @@ function duplicateDecisionPrompt(
     `- сохранить копию как ${suggestedCopyName}`,
     "- перезаписать существующий файл",
     "- ничего не делать"
+  ].join("\n");
+}
+
+function parseFileUploadDestination(
+  text: string
+): FileUploadDestination | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (
+    /\b(google\s*drive|drive)\b/.test(normalized) ||
+    /гугл\s*диск|google\s*диск|диск/.test(normalized)
+  ) {
+    return "google_drive";
+  }
+
+  if (
+    /\b(local|inbox|locally)\b/.test(normalized) ||
+    /локаль|инбокс|входящ|на сервер/.test(normalized)
+  ) {
+    return "local_inbox";
+  }
+
+  return undefined;
+}
+
+function fileDestinationPrompt(attachments: readonly MessageAttachment[]): string {
+  const names = attachments
+    .map((attachment) => attachment.fileName)
+    .filter((value): value is string => Boolean(value));
+
+  return [
+    names.length > 0
+      ? `Куда сохранить файл: ${names.join(", ")}?`
+      : "Куда сохранить вложение?",
+    "Можно ответить:",
+    "- local inbox",
+    "- Google Drive"
   ].join("\n");
 }
 

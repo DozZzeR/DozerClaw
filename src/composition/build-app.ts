@@ -14,6 +14,7 @@ import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-in
 import { RegisterDocumentUseCase } from "../application/use-cases/documents/register-document.js";
 import { FindDocumentsUseCase } from "../application/use-cases/documents/find-documents.js";
 import { ManageDocumentRecordUseCase } from "../application/use-cases/documents/manage-document-record.js";
+import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases/documents/store-message-document-attachments.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -148,6 +149,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         now: () => new Date()
       })
     : undefined;
+  const documentAttachmentStore =
+    options.attachmentDownloader && documentStorage
+      ? new StoreMessageDocumentAttachmentsUseCase({
+          attachmentDownloader: options.attachmentDownloader,
+          documentStorage,
+          repository: documentRepository,
+          generateId,
+          now: () => new Date()
+        })
+      : undefined;
   const documentLookup = new FindDocumentsUseCase({
     repository: documentRepository,
     limit: 10
@@ -197,6 +208,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
     ...(attachmentStore ? { attachmentStore } : {}),
+    ...(documentAttachmentStore ? { documentAttachmentStore } : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,
@@ -226,6 +238,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       save: (input) => stateRepository.savePendingFileDuplicateDecision(input),
       clearByChatId: (chatId) =>
         stateRepository.clearPendingFileDuplicateDecisionByChatId(chatId)
+    },
+    pendingFileDestinationDecisions: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingFileDestinationDecisionByChatId(
+          chatId,
+          now
+        ),
+      save: (input) => stateRepository.savePendingFileDestinationDecision(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingFileDestinationDecisionByChatId(chatId)
     },
     pendingFamilyFactDecisions: {
       findActiveByChatId: (chatId, now) =>

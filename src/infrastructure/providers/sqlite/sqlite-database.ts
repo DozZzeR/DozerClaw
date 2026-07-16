@@ -95,6 +95,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensureFamilySubjectAliasesTable(database);
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
+  ensurePendingFileDestinationDecisionsTable(database);
   ensurePendingFamilyFactDecisionsTable(database);
   ensurePendingFamilyFactArchiveDecisionsTable(database);
   ensurePendingDocumentDecisionsTable(database);
@@ -292,6 +293,22 @@ function ensurePendingFileDuplicateDecisionsTable(database: SqliteDatabase): voi
   ensureColumn(database, "pending_file_duplicate_decisions", "provider", "provider text");
   ensureColumn(database, "pending_file_duplicate_decisions", "received_at", "received_at text");
   ensureColumn(database, "pending_file_duplicate_decisions", "source_attachment_json", "source_attachment_json text");
+}
+
+function ensurePendingFileDestinationDecisionsTable(
+  database: SqliteDatabase
+): void {
+  database.exec(`
+    create table if not exists pending_file_destination_decisions (
+      chat_id text primary key,
+      actor_id text not null,
+      provider text not null,
+      received_at text not null,
+      attachments_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+  `);
 }
 
 function ensurePendingFamilyFactDecisionsTable(database: SqliteDatabase): void {

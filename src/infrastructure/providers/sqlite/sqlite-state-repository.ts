@@ -6,6 +6,7 @@ import type {
   PendingDocumentDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
+  PendingFileDestinationDecision,
   PendingFileDuplicateDecision,
   StateRepositoryPort
 } from "../../../ports/state-repository-port.js";
@@ -204,6 +205,88 @@ export class SqliteStateRepository implements StateRepositoryPort {
   ): Promise<void> {
     this.database
       .prepare("delete from pending_file_duplicate_decisions where chat_id = ?")
+      .run(chatId);
+  }
+
+  async findActivePendingFileDestinationDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingFileDestinationDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            provider,
+            received_at as receivedAt,
+            attachments_json as attachmentsJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_file_destination_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as
+      | PendingFileDestinationDecisionRow
+      | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      provider: row.provider,
+      receivedAt: new Date(row.receivedAt),
+      attachments: parseAttachments(row.attachmentsJson),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingFileDestinationDecision(
+    input: PendingFileDestinationDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_file_destination_decisions (
+            chat_id,
+            actor_id,
+            provider,
+            received_at,
+            attachments_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            provider = excluded.provider,
+            received_at = excluded.received_at,
+            attachments_json = excluded.attachments_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        input.provider,
+        input.receivedAt.toISOString(),
+        JSON.stringify(input.attachments),
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingFileDestinationDecisionByChatId(
+    chatId: string
+  ): Promise<void> {
+    this.database
+      .prepare("delete from pending_file_destination_decisions where chat_id = ?")
       .run(chatId);
   }
 
@@ -449,6 +532,16 @@ interface PendingFileDuplicateDecisionRow {
   readonly provider: string | null;
   readonly receivedAt: string | null;
   readonly sourceAttachmentJson: string | null;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+interface PendingFileDestinationDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly provider: string;
+  readonly receivedAt: string;
+  readonly attachmentsJson: string;
   readonly createdAt: string;
   readonly expiresAt: string;
 }

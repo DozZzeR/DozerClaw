@@ -5,7 +5,9 @@ import type { DocumentRecord } from "../../../../src/core/domain/documents/docum
 import type { DocumentRepositoryPort } from "../../../../src/ports/document-repository-port.js";
 import type {
   DocumentStoragePort,
-  ResolveDocumentInput
+  ResolveDocumentInput,
+  ResolvedDocument,
+  UploadDocumentInput
 } from "../../../../src/ports/document-storage-port.js";
 
 describe("RegisterDocumentUseCase", () => {
@@ -153,6 +155,10 @@ class StubDocumentStorage implements DocumentStoragePort {
       name: this.resolved.name ?? "Passport.pdf",
       url: this.resolved.url ?? "https://drive.google.com/file/d/abc"
     };
+  }
+
+  async uploadDocument(_input: UploadDocumentInput): Promise<ResolvedDocument> {
+    throw new Error("should not upload document");
   }
 }
 

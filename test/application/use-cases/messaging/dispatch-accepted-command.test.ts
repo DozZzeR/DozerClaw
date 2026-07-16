@@ -14,7 +14,8 @@ import type { ClassifyPendingChoiceInput } from "../../../../src/application/use
 import type {
   PendingDocumentDecision,
   PendingFamilyFactArchiveDecision,
-  PendingFamilyFactDecision
+  PendingFamilyFactDecision,
+  PendingFileDestinationDecision
 } from "../../../../src/ports/state-repository-port.js";
 
 describe("DispatchAcceptedCommandUseCase", () => {
@@ -109,6 +110,176 @@ describe("DispatchAcceptedCommandUseCase", () => {
         }
       ]
     });
+  });
+
+  it("asks for a file destination when attachments do not specify one", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    const attachmentStore = new FakeAttachmentStore(1);
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "save this",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "passport.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Куда сохранить файл: passport.pdf?",
+        "Можно ответить:",
+        "- local inbox",
+        "- Google Drive"
+      ].join("\n")
+    });
+    expect(attachmentStore.seenInput).toBeUndefined();
+    expect(pendingFileDestinationDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "passport.pdf"
+        }
+      ],
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+  });
+
+  it("stores a pending attachment locally when the user chooses local inbox", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const attachmentStore = new FakeAttachmentStore(1);
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      intentClassifier,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "local inbox"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved 1 attachment(s)."
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(attachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "passport.pdf"
+        }
+      ]
+    });
+    expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("uploads a pending attachment to Drive when the user chooses Google Drive", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "в google drive"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf",
+        "  https://drive.google.com/file/d/drive-passport"
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "passport.pdf"
+        }
+      ]
+    });
+    expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("reports unavailable Drive upload without silently storing locally", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const attachmentStore = new FakeAttachmentStore(1);
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "drive"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Google Drive upload is not configured yet. File was not saved."
+    });
+    expect(attachmentStore.seenInput).toBeUndefined();
   });
 
   it("uses model intent classifier for family clarification", async () => {
@@ -2025,6 +2196,24 @@ function pendingDocumentDecision(): PendingDocumentDecision {
   };
 }
 
+function pendingFileDestinationDecision(): PendingFileDestinationDecision {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    provider: "telegram",
+    receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+    attachments: [
+      {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "passport.pdf"
+      }
+    ],
+    createdAt: new Date("2026-07-02T20:00:00.000Z"),
+    expiresAt: new Date("2026-07-02T20:30:00.000Z")
+  };
+}
+
 class FakeFamilyFactDecisionResolver {
   seenInput:
     | {
@@ -2225,6 +2414,33 @@ class FakePendingFileDuplicateDecisions {
   }
 }
 
+class FakePendingFileDestinationDecisions {
+  pending: PendingFileDestinationDecision | undefined;
+  saved: PendingFileDestinationDecision | undefined;
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: PendingFileDestinationDecision) {
+    this.saved = input;
+    this.pending = input;
+  }
+
+  async clearByChatId(chatId: string) {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
 class FakeDuplicateDecisionResolver {
   seenInput:
     | {
@@ -2336,5 +2552,23 @@ class FakeAttachmentStore {
         createdAt: new Date("2026-07-02T20:00:00.000Z")
       }
     }));
+  }
+}
+
+class FakeDocumentAttachmentStore {
+  seenInput: StoreMessageAttachmentsInput | undefined;
+
+  async execute(input: StoreMessageAttachmentsInput) {
+    this.seenInput = input;
+
+    return [
+      {
+        status: "uploaded" as const,
+        document: documentRecord({
+          id: "drive-passport",
+          name: "passport.pdf"
+        })
+      }
+    ];
   }
 }
