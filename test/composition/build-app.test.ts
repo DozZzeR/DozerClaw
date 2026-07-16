@@ -838,6 +838,121 @@ describe("buildApp", () => {
     }
   });
 
+  it("resolves an ambiguous document archive through pending selection", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "archive_document",
+        question: null,
+        summary: null,
+        externalIdOrUrl: null,
+        documentType: null,
+        subjectId: null,
+        query: "passport",
+        reason: null
+      })
+    ]);
+
+    try {
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteDocumentRepository(database);
+      await repository.saveDocument({
+        id: "document-max",
+        provider: "google_drive",
+        externalId: "drive-max",
+        name: "Max Passport.pdf",
+        url: "https://drive.google.com/file/d/max",
+        documentType: "identity",
+        subjectId: "max",
+        status: "registered",
+        createdAt: new Date("2026-07-14T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:00:00.000Z")
+      });
+      await repository.saveDocument({
+        id: "document-sofia",
+        provider: "google_drive",
+        externalId: "drive-sofia",
+        name: "Sofia Passport.pdf",
+        url: "https://drive.google.com/file/d/sofia",
+        documentType: "identity",
+        subjectId: "sofia",
+        status: "registered",
+        createdAt: new Date("2026-07-14T08:01:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:01:00.000Z")
+      });
+      database.close();
+
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const ambiguousReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document-archive",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "archive passport",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:30:00.000Z"),
+        now: new Date("2026-07-14T08:30:00.000Z")
+      });
+
+      expect(ambiguousReply.text).toBe(
+        [
+          "I found multiple registered documents that could match.",
+          "1. Sofia Passport.pdf",
+          "2. Max Passport.pdf",
+          "Reply with the number to choose, or cancel."
+        ].join("\n")
+      );
+
+      const selectedReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document-selection",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "2",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:31:00.000Z"),
+        now: new Date("2026-07-14T08:31:00.000Z")
+      });
+
+      expect(selectedReply.text).toBe("Archived document: Max Passport.pdf");
+
+      const verifyDatabase = createSqliteDatabase({ path: databasePath });
+      const verifyRepository = new SqliteDocumentRepository(verifyDatabase);
+      await expect(
+        verifyRepository.searchDocuments({
+          query: "passport",
+          limit: 10
+        })
+      ).resolves.toEqual([
+        expect.objectContaining({
+          id: "document-sofia",
+          status: "registered"
+        })
+      ]);
+      verifyDatabase.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses chat-managed subject aliases during recall", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");

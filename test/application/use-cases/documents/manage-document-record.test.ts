@@ -114,8 +114,18 @@ describe("ManageDocumentRecordUseCase", () => {
         "I found multiple registered documents that could match.",
         "1. Max Passport.pdf",
         "2. Sofia Passport.pdf",
-        "Please ask again with a more specific document name."
-      ].join("\n")
+        "Reply with the number to choose, or cancel."
+      ].join("\n"),
+      pending: {
+        action: {
+          action: "archive",
+          query: "passport"
+        },
+        candidates: [
+          documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+          documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
+        ]
+      }
     });
     expect(ambiguousRepository.saved).toBeUndefined();
   });

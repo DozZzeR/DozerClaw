@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { DocumentRecord } from "../../../src/core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../src/core/domain/family-memory/family-fact.js";
 import { createSqliteDatabase } from "../../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteStateRepository } from "../../../src/infrastructure/providers/sqlite/sqlite-state-repository.js";
@@ -294,7 +295,83 @@ describe("SqliteStateRepository", () => {
 
     database.close();
   });
+
+  it("stores and clears active pending document decisions by chat", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.savePendingDocumentDecision({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      action: {
+        kind: "update_metadata",
+        documentType: "identity",
+        subjectId: "max"
+      },
+      candidates: [
+        documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+        documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
+      ],
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingDocumentDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      action: {
+        kind: "update_metadata",
+        documentType: "identity",
+        subjectId: "max"
+      },
+      candidates: [
+        documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+        documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
+      ],
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingDocumentDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.clearPendingDocumentDecisionByChatId("chat-1");
+    await expect(
+      repository.findActivePendingDocumentDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
 });
+
+function documentRecord(
+  input: Pick<DocumentRecord, "id" | "name">
+): DocumentRecord {
+  return {
+    id: input.id,
+    provider: "google_drive",
+    externalId: input.id,
+    name: input.name,
+    url: `https://drive.google.com/file/d/${input.id}`,
+    documentType: "identity",
+    subjectId: "max",
+    status: "registered",
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    updatedAt: new Date("2026-07-14T07:00:00.000Z")
+  };
+}
 
 function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
   return {

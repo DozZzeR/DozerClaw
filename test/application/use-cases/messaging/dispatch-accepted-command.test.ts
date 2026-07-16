@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-cases/messaging/dispatch-accepted-command.js";
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
+import type { DocumentRecord } from "../../../../src/core/domain/documents/document-record.js";
 import type { DocumentType } from "../../../../src/core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyFactCategory } from "../../../../src/core/domain/family-memory/family-fact.js";
@@ -11,6 +12,7 @@ import type { CommandRoute } from "../../../../src/application/use-cases/messagi
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
 import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
 import type {
+  PendingDocumentDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision
 } from "../../../../src/ports/state-repository-port.js";
@@ -1049,6 +1051,146 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("stores pending document candidates when update_document is ambiguous", async () => {
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const documentManager = new FakeDocumentManager("ambiguous");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_document",
+        query: "passport",
+        documentType: "identity",
+        subjectId: "max"
+      }),
+      documentManager,
+      pendingDocumentDecisions,
+      now: () => new Date("2026-07-14T07:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "set passport as Max identity"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "I found multiple registered documents that could match.",
+        "1. Max Passport.pdf",
+        "2. Sofia Passport.pdf",
+        "Reply with the number to choose, or cancel."
+      ].join("\n")
+    });
+    expect(pendingDocumentDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: {
+        kind: "update_metadata",
+        documentType: "identity",
+        subjectId: "max"
+      },
+      candidates: [
+        documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+        documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
+      ],
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+  });
+
+  it("updates a selected pending document candidate by number", async () => {
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    pendingDocumentDecisions.pending = pendingDocumentDecision();
+    const documentManager = new FakeDocumentManager();
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      documentManager,
+      pendingDocumentDecisions,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "2"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated document: Max Passport.pdf (identity, subject: max)"
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(documentManager.seenInput).toEqual({
+      action: "update_metadata",
+      query: "Sofia Passport.pdf",
+      document: documentRecord({ id: "document-2", name: "Sofia Passport.pdf" }),
+      documentType: "identity",
+      subjectId: "max"
+    });
+    expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("cancels and keeps pending document decisions", async () => {
+    const cancelStore = new FakePendingDocumentDecisions();
+    cancelStore.pending = pendingDocumentDecision();
+    const cancelUseCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentManager: new FakeDocumentManager(),
+      pendingDocumentDecisions: cancelStore,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      cancelUseCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "cancel"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Ок, не меняю документ."
+    });
+    expect(cancelStore.deletedChatIds).toEqual(["chat-owner"]);
+
+    const unclearStore = new FakePendingDocumentDecisions();
+    unclearStore.pending = pendingDocumentDecision();
+    const unclearUseCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentManager: new FakeDocumentManager(),
+      pendingDocumentDecisions: unclearStore,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      unclearUseCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "not sure"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Я жду выбор документа.",
+        "Можно написать номер документа или \"отмена\"."
+      ].join("\n")
+    });
+    expect(unclearStore.deletedChatIds).toEqual([]);
+  });
+
   it("reports when document registration is not configured", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
@@ -1648,9 +1790,12 @@ class FakeDocumentManager {
         query: string;
         documentType?: DocumentType;
         subjectId?: string;
+        document?: DocumentRecord;
       }
-    | { action: "archive"; query: string }
+    | { action: "archive"; query: string; document?: DocumentRecord }
     | undefined;
+
+  constructor(private readonly status: "ok" | "ambiguous" = "ok") {}
 
   async execute(
     input:
@@ -1659,10 +1804,29 @@ class FakeDocumentManager {
           query: string;
           documentType?: DocumentType;
           subjectId?: string;
+          document?: DocumentRecord;
         }
-      | { action: "archive"; query: string }
+      | { action: "archive"; query: string; document?: DocumentRecord }
   ) {
     this.seenInput = input;
+
+    if (this.status === "ambiguous") {
+      return {
+        text: [
+          "I found multiple registered documents that could match.",
+          "1. Max Passport.pdf",
+          "2. Sofia Passport.pdf",
+          "Reply with the number to choose, or cancel."
+        ].join("\n"),
+        pending: {
+          action: input,
+          candidates: [
+            documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+            documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
+          ]
+        }
+      };
+    }
 
     return {
       text:
@@ -1766,6 +1930,23 @@ class FakeFamilyFactRecorder {
   }
 }
 
+function documentRecord(
+  input: Pick<DocumentRecord, "id" | "name">
+): DocumentRecord {
+  return {
+    id: input.id,
+    provider: "google_drive",
+    externalId: input.id,
+    name: input.name,
+    url: `https://drive.google.com/file/d/${input.id}`,
+    documentType: "identity",
+    subjectId: "max",
+    status: "registered",
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    updatedAt: new Date("2026-07-14T07:00:00.000Z")
+  };
+}
+
 function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
   return {
     id: input.id,
@@ -1820,6 +2001,24 @@ function pendingFamilyFactArchiveDecision(): PendingFamilyFactArchiveDecision {
         id: "fact-2",
         body: "Max likes peppermint tea."
       })
+    ],
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    expiresAt: new Date("2026-07-14T07:30:00.000Z")
+  };
+}
+
+function pendingDocumentDecision(): PendingDocumentDecision {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    action: {
+      kind: "update_metadata",
+      documentType: "identity",
+      subjectId: "max"
+    },
+    candidates: [
+      documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+      documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
     ],
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     expiresAt: new Date("2026-07-14T07:30:00.000Z")
@@ -1924,6 +2123,33 @@ class FakePendingFamilyFactArchiveDecisions {
 
   async save(input: PendingFamilyFactArchiveDecision): Promise<void> {
     this.saved = input;
+  }
+
+  async clearByChatId(chatId: string): Promise<void> {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
+class FakePendingDocumentDecisions {
+  pending: PendingDocumentDecision | undefined;
+  saved: PendingDocumentDecision | undefined;
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: PendingDocumentDecision): Promise<void> {
+    this.saved = input;
+    this.pending = input;
   }
 
   async clearByChatId(chatId: string): Promise<void> {

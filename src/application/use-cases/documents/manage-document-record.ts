@@ -13,14 +13,23 @@ export type ManageDocumentRecordInput =
       readonly query: string;
       readonly documentType?: DocumentType;
       readonly subjectId?: string;
+      readonly document?: DocumentRecord;
     }
   | {
       readonly action: "archive";
       readonly query: string;
+      readonly document?: DocumentRecord;
     };
 
 export interface ManageDocumentRecordResult {
   readonly text: string;
+  readonly pending?: {
+    readonly action: Extract<
+      ManageDocumentRecordInput,
+      { readonly action: "update_metadata" | "archive" }
+    >;
+    readonly candidates: readonly DocumentRecord[];
+  };
 }
 
 export class ManageDocumentRecordUseCase {
@@ -37,10 +46,12 @@ export class ManageDocumentRecordUseCase {
       };
     }
 
-    const candidates = await this.dependencies.repository.searchDocuments({
-      query: input.query,
-      limit: 2
-    });
+    const candidates = input.document
+      ? [input.document]
+      : await this.dependencies.repository.searchDocuments({
+          query: input.query,
+          limit: 2
+        });
 
     if (candidates.length === 0) {
       return {
@@ -53,12 +64,16 @@ export class ManageDocumentRecordUseCase {
         text: [
           "I found multiple registered documents that could match.",
           ...candidates.map((document, index) => `${index + 1}. ${document.name}`),
-          "Please ask again with a more specific document name."
-        ].join("\n")
+          "Reply with the number to choose, or cancel."
+        ].join("\n"),
+        pending: {
+          action: input,
+          candidates
+        }
       };
     }
 
-    const document = candidates[0]!;
+    const document = input.document ?? candidates[0]!;
 
     if (input.action === "archive") {
       await this.dependencies.repository.saveDocument({

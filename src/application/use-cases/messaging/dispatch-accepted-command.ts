@@ -14,6 +14,7 @@ import type {
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
+import type { PendingDocumentDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactArchiveDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
@@ -152,6 +153,15 @@ export interface PendingFamilyFactArchiveDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingDocumentDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingDocumentDecision | undefined>;
+  save(input: PendingDocumentDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -176,6 +186,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingFileDuplicateDecisions?: PendingFileDuplicateDecisionStore;
   readonly pendingFamilyFactDecisions?: PendingFamilyFactDecisionStore;
   readonly pendingFamilyFactArchiveDecisions?: PendingFamilyFactArchiveDecisionStore;
+  readonly pendingDocumentDecisions?: PendingDocumentDecisionStore;
   readonly now?: () => Date;
 }
 
@@ -261,6 +272,16 @@ export class DispatchAcceptedCommandUseCase {
         context,
         pendingFamilyFactArchive
       );
+    }
+
+    const pendingDocument =
+      await this.dependencies.pendingDocumentDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingDocument && context.attachments.length === 0) {
+      return this.dispatchPendingDocumentDecision(context, pendingDocument);
     }
 
     const pending =
@@ -389,6 +410,16 @@ export class DispatchAcceptedCommandUseCase {
         context,
         pendingFamilyFactArchive
       );
+    }
+
+    const pendingDocument =
+      await this.dependencies.pendingDocumentDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingDocument && context.attachments.length === 0) {
+      return this.dispatchPendingDocumentDecision(context, pendingDocument);
     }
 
     if (context.attachments.length > 0 && this.dependencies.attachmentStore) {
@@ -828,6 +859,98 @@ export class DispatchAcceptedCommandUseCase {
             query: intent.query,
             ...(intent.documentType ? { documentType: intent.documentType } : {}),
             ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
+          }
+    );
+
+    if (result.pending) {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingDocumentDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        action:
+          result.pending.action.action === "archive"
+            ? { kind: "archive" }
+            : {
+                kind: "update_metadata",
+                ...(result.pending.action.documentType
+                  ? { documentType: result.pending.action.documentType }
+                  : {}),
+                ...(result.pending.action.subjectId
+                  ? { subjectId: result.pending.action.subjectId }
+                  : {})
+              },
+        candidates: result.pending.candidates,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async dispatchPendingDocumentDecision(
+    context: AcceptedMessageContext,
+    pending: PendingDocumentDecision
+  ): Promise<OutboundReply> {
+    const decision = parseFamilyFactArchiveDecision(context.text);
+
+    if (decision === undefined) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          "Я жду выбор документа.",
+          "Можно написать номер документа или \"отмена\"."
+        ].join("\n")
+      };
+    }
+
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    if (decision === "cancel") {
+      return {
+        chatId: context.chat.id,
+        text: "Ок, не меняю документ."
+      };
+    }
+
+    if (!this.dependencies.documentManager) {
+      return {
+        chatId: context.chat.id,
+        text: "Document manager is not configured."
+      };
+    }
+
+    const document = pending.candidates[decision];
+
+    if (!document) {
+      return {
+        chatId: context.chat.id,
+        text: "I could not find that document candidate anymore."
+      };
+    }
+
+    const result = await this.dependencies.documentManager.execute(
+      pending.action.kind === "archive"
+        ? {
+            action: "archive",
+            query: document.name,
+            document
+          }
+        : {
+            action: "update_metadata",
+            query: document.name,
+            document,
+            ...(pending.action.documentType
+              ? { documentType: pending.action.documentType }
+              : {}),
+            ...(pending.action.subjectId
+              ? { subjectId: pending.action.subjectId }
+              : {})
           }
     );
 

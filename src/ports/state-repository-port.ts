@@ -1,4 +1,6 @@
 import type { MessageAttachment } from "../core/domain/messaging/message.js";
+import type { DocumentRecord } from "../core/domain/documents/document-record.js";
+import type { DocumentType } from "../core/domain/documents/document-record.js";
 import type { FamilyFact } from "../core/domain/family-memory/family-fact.js";
 
 export interface StateRepositoryPort {
@@ -33,6 +35,12 @@ export interface StateRepositoryPort {
     input: PendingFamilyFactArchiveDecision
   ): Promise<void>;
   clearPendingFamilyFactArchiveDecisionByChatId(chatId: string): Promise<void>;
+  findActivePendingDocumentDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingDocumentDecision | undefined>;
+  savePendingDocumentDecision(input: PendingDocumentDecision): Promise<void>;
+  clearPendingDocumentDecisionByChatId(chatId: string): Promise<void>;
 }
 
 export interface StateRepositoryHealth {
@@ -76,6 +84,25 @@ export interface PendingFamilyFactArchiveDecision {
   readonly chatId: string;
   readonly actorId: string;
   readonly candidates: readonly FamilyFact[];
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+export type PendingDocumentDecisionAction =
+  | {
+      readonly kind: "update_metadata";
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
+    }
+  | {
+      readonly kind: "archive";
+    };
+
+export interface PendingDocumentDecision {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly action: PendingDocumentDecisionAction;
+  readonly candidates: readonly DocumentRecord[];
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }

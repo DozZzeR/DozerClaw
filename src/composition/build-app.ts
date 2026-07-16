@@ -245,6 +245,13 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       clearByChatId: (chatId) =>
         stateRepository.clearPendingFamilyFactArchiveDecisionByChatId(chatId)
     },
+    pendingDocumentDecisions: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingDocumentDecisionByChatId(chatId, now),
+      save: (input) => stateRepository.savePendingDocumentDecision(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingDocumentDecisionByChatId(chatId)
+    },
     ...(intentClassifier ? { intentClassifier } : {}),
     ...(pendingChoiceClassifier ? { pendingChoiceClassifier } : {})
   });

@@ -1,7 +1,9 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { DocumentRecord } from "../../../core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type {
   PendingClarification,
+  PendingDocumentDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
   PendingFileDuplicateDecision,
@@ -353,6 +355,79 @@ export class SqliteStateRepository implements StateRepositoryPort {
       )
       .run(chatId);
   }
+
+  async findActivePendingDocumentDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingDocumentDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            action_json as actionJson,
+            candidates_json as candidatesJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_document_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as PendingDocumentDecisionRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      action: JSON.parse(row.actionJson) as PendingDocumentDecision["action"],
+      candidates: parseDocumentRecords(row.candidatesJson),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingDocumentDecision(
+    input: PendingDocumentDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_document_decisions (
+            chat_id,
+            actor_id,
+            action_json,
+            candidates_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            action_json = excluded.action_json,
+            candidates_json = excluded.candidates_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        JSON.stringify(input.action),
+        JSON.stringify(input.candidates.map(documentRecordToJson)),
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingDocumentDecisionByChatId(chatId: string): Promise<void> {
+    this.database
+      .prepare("delete from pending_document_decisions where chat_id = ?")
+      .run(chatId);
+  }
 }
 
 interface PendingClarificationRow {
@@ -390,6 +465,15 @@ interface PendingFamilyFactDecisionRow {
 interface PendingFamilyFactArchiveDecisionRow {
   readonly chatId: string;
   readonly actorId: string;
+  readonly candidatesJson: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+interface PendingDocumentDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly actionJson: string;
   readonly candidatesJson: string;
   readonly createdAt: string;
   readonly expiresAt: string;
@@ -451,6 +535,82 @@ function parseFamilyFacts(json: string): readonly FamilyFact[] {
 
     return fact ? [fact] : [];
   });
+}
+
+function parseDocumentRecords(json: string): readonly DocumentRecord[] {
+  const parsed = JSON.parse(json) as unknown;
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed.flatMap((value) => {
+    if (
+      !isRecord(value) ||
+      typeof value.id !== "string" ||
+      typeof value.provider !== "string" ||
+      typeof value.externalId !== "string" ||
+      typeof value.name !== "string" ||
+      typeof value.url !== "string" ||
+      typeof value.status !== "string" ||
+      typeof value.createdAt !== "string" ||
+      typeof value.updatedAt !== "string"
+    ) {
+      return [];
+    }
+
+    const baseDocument = {
+      id: value.id,
+      provider: value.provider as DocumentRecord["provider"],
+      externalId: value.externalId,
+      name: value.name,
+      url: value.url,
+      status: value.status as DocumentRecord["status"],
+      createdAt: new Date(value.createdAt),
+      updatedAt: new Date(value.updatedAt)
+    };
+
+    if (
+      typeof value.documentType === "string" &&
+      typeof value.subjectId === "string"
+    ) {
+      return [
+        {
+          ...baseDocument,
+          documentType: value.documentType as DocumentRecord["documentType"],
+          subjectId: value.subjectId
+        }
+      ];
+    }
+
+    if (typeof value.documentType === "string") {
+      return [
+        {
+          ...baseDocument,
+          documentType: value.documentType as DocumentRecord["documentType"]
+        }
+      ];
+    }
+
+    if (typeof value.subjectId === "string") {
+      return [
+        {
+          ...baseDocument,
+          subjectId: value.subjectId
+        }
+      ];
+    }
+
+    return [baseDocument];
+  });
+}
+
+function documentRecordToJson(document: DocumentRecord): Record<string, unknown> {
+  return {
+    ...document,
+    createdAt: document.createdAt.toISOString(),
+    updatedAt: document.updatedAt.toISOString()
+  };
 }
 
 function parseFamilyFact(json: string): FamilyFact {
