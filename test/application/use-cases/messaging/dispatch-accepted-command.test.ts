@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-cases/messaging/dispatch-accepted-command.js";
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
+import type { StoreMessageDocumentAttachmentsInput } from "../../../../src/application/use-cases/documents/store-message-document-attachments.js";
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
 import type { DocumentRecord } from "../../../../src/core/domain/documents/document-record.js";
 import type { DocumentType } from "../../../../src/core/domain/documents/document-record.js";
@@ -215,10 +216,12 @@ describe("DispatchAcceptedCommandUseCase", () => {
     const pendingFileDestinationDecisions =
       new FakePendingFileDestinationDecisions();
     pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       documentAttachmentStore,
+      pendingDocumentDecisions,
       pendingFileDestinationDecisions,
       now: () => new Date("2026-07-02T20:05:00.000Z")
     });
@@ -236,7 +239,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
       text: [
         "Uploaded 1 document(s) to Google Drive:",
         "- passport.pdf",
-        "  https://drive.google.com/file/d/drive-passport"
+        "  https://drive.google.com/file/d/drive-passport",
+        "Какой это документ?",
+        "Можно ответить тип и subject, например: identity max, или skip."
       ].join("\n")
     });
     expect(documentAttachmentStore.seenInput).toEqual({
@@ -250,9 +255,116 @@ describe("DispatchAcceptedCommandUseCase", () => {
         }
       ]
     });
+    expect(pendingDocumentDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: { kind: "update_metadata" },
+      candidates: [
+        uploadedDocumentRecord()
+      ],
+      createdAt: new Date("2026-07-02T20:05:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+    });
     expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([
       "chat-owner"
     ]);
+  });
+
+  it("updates pending uploaded document metadata from a follow-up reply", async () => {
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    pendingDocumentDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: { kind: "update_metadata" },
+      candidates: [
+        uploadedDocumentRecord()
+      ],
+      createdAt: new Date("2026-07-02T20:05:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+    };
+    const documentManager = new FakeDocumentManager();
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentManager,
+      intentClassifier,
+      pendingDocumentDecisions,
+      now: () => new Date("2026-07-02T20:10:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "identity max"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated document: passport.pdf (identity, subject: max)"
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(documentManager.seenInput).toEqual({
+      action: "update_metadata",
+      query: "passport.pdf",
+      document: uploadedDocumentRecord(),
+      documentType: "identity",
+      subjectId: "max"
+    });
+    expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("stores explicit metadata on Drive uploads without asking again", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      pendingDocumentDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "upload passport for max to Google Drive",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "passport.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf (identity, subject: max)",
+        "  https://drive.google.com/file/d/drive-passport"
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "passport.pdf"
+        }
+      ],
+      documentType: "identity",
+      subjectId: "max"
+    });
+    expect(pendingDocumentDecisions.saved).toBeUndefined();
   });
 
   it("reports unavailable Drive upload without silently storing locally", async () => {
@@ -1298,7 +1410,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Updated document: Max Passport.pdf (identity, subject: max)"
+      text: "Updated document: Sofia Passport.pdf (identity, subject: max)"
     });
     expect(intentClassifier.seenInput).toBeUndefined();
     expect(documentManager.seenInput).toEqual({
@@ -2002,8 +2114,8 @@ class FakeDocumentManager {
     return {
       text:
         input.action === "archive"
-          ? "Archived document: Max Passport.pdf"
-          : "Updated document: Max Passport.pdf (identity, subject: max)"
+          ? `Archived document: ${input.document?.name ?? "Max Passport.pdf"}`
+          : `Updated document: ${input.document?.name ?? "Max Passport.pdf"} (identity, subject: max)`
     };
   }
 }
@@ -2112,6 +2224,19 @@ function documentRecord(
     url: `https://drive.google.com/file/d/${input.id}`,
     documentType: "identity",
     subjectId: "max",
+    status: "registered",
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    updatedAt: new Date("2026-07-14T07:00:00.000Z")
+  };
+}
+
+function uploadedDocumentRecord(): DocumentRecord {
+  return {
+    id: "drive-passport",
+    provider: "google_drive",
+    externalId: "drive-passport",
+    name: "passport.pdf",
+    url: "https://drive.google.com/file/d/drive-passport",
     status: "registered",
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     updatedAt: new Date("2026-07-14T07:00:00.000Z")
@@ -2556,18 +2681,19 @@ class FakeAttachmentStore {
 }
 
 class FakeDocumentAttachmentStore {
-  seenInput: StoreMessageAttachmentsInput | undefined;
+  seenInput: StoreMessageDocumentAttachmentsInput | undefined;
 
-  async execute(input: StoreMessageAttachmentsInput) {
+  async execute(input: StoreMessageDocumentAttachmentsInput) {
     this.seenInput = input;
 
     return [
       {
         status: "uploaded" as const,
-        document: documentRecord({
-          id: "drive-passport",
-          name: "passport.pdf"
-        })
+        document: {
+          ...uploadedDocumentRecord(),
+          ...(input.documentType ? { documentType: input.documentType } : {}),
+          ...(input.subjectId ? { subjectId: input.subjectId } : {})
+        }
       }
     ];
   }

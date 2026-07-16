@@ -1,4 +1,5 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { DocumentType } from "../../../core/domain/documents/document-record.js";
 import type {
   RegisterDocumentInput,
   RegisterDocumentResult
@@ -470,7 +471,11 @@ export class DispatchAcceptedCommandUseCase {
       return this.dispatchPendingDocumentDecision(context, pendingDocument);
     }
 
-    if (context.attachments.length > 0 && this.dependencies.attachmentStore) {
+    if (
+      context.attachments.length > 0 &&
+      (this.dependencies.attachmentStore ||
+        this.dependencies.documentAttachmentStore)
+    ) {
       return this.storeFamilyMessageAttachments(context);
     }
 
@@ -738,21 +743,21 @@ export class DispatchAcceptedCommandUseCase {
       if (!this.dependencies.pendingFileDestinationDecisions) {
         destination = "local_inbox";
       } else {
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingFileDestinationDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        provider: context.provider,
-        receivedAt: context.receivedAt,
-        attachments: context.attachments,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
+        const now = this.dependencies.now?.() ?? new Date();
+        await this.dependencies.pendingFileDestinationDecisions?.save({
+          chatId: context.chat.id,
+          actorId: context.actor.id,
+          provider: context.provider,
+          receivedAt: context.receivedAt,
+          attachments: context.attachments,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+        });
 
-      return {
-        chatId: context.chat.id,
-        text: fileDestinationPrompt(context.attachments)
-      };
+        return {
+          chatId: context.chat.id,
+          text: fileDestinationPrompt(context.attachments)
+        };
       }
     }
 
@@ -824,10 +829,12 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    const metadata = parseDocumentMetadata(context.text);
     const results = await this.dependencies.documentAttachmentStore.execute({
       provider: context.provider,
       receivedAt: context.receivedAt,
-      attachments: context.attachments
+      attachments: context.attachments,
+      ...metadata
     });
     const uploadedDocuments = results.flatMap((result) =>
       result.status === "uploaded" ? [result.document] : []
@@ -840,12 +847,30 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    if (!metadata.documentType && !metadata.subjectId) {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingDocumentDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        action: { kind: "update_metadata" },
+        candidates: uploadedDocuments,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: [
+          formatUploadedDocumentsReply(uploadedDocuments),
+          "Какой это документ?",
+          "Можно ответить тип и subject, например: identity max, или skip."
+        ].join("\n")
+      };
+    }
+
     return {
       chatId: context.chat.id,
-      text: [
-        `Uploaded ${uploadedDocuments.length} document(s) to Google Drive:`,
-        ...uploadedDocuments.map((document) => `- ${document.name}\n  ${document.url}`)
-      ].join("\n")
+      text: formatUploadedDocumentsReply(uploadedDocuments)
     };
   }
 
@@ -1036,6 +1061,10 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
+    if (isUploadedDocumentMetadataDecision(pending)) {
+      return this.dispatchPendingUploadedDocumentMetadata(context, pending);
+    }
+
     const decision = parseFamilyFactArchiveDecision(context.text);
 
     if (decision === undefined) {
@@ -1098,6 +1127,62 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: result.text
+    };
+  }
+
+  private async dispatchPendingUploadedDocumentMetadata(
+    context: AcceptedMessageContext,
+    pending: PendingDocumentDecision
+  ): Promise<OutboundReply> {
+    if (parseSkipDocumentMetadata(context.text)) {
+      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+        context.chat.id
+      );
+
+      return {
+        chatId: context.chat.id,
+        text: "Ок, оставляю документ без metadata."
+      };
+    }
+
+    const metadata = parseDocumentMetadata(context.text);
+
+    if (!metadata.documentType && !metadata.subjectId) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          "Я жду metadata для загруженного документа.",
+          "Можно написать тип и subject, например: identity max, или skip."
+        ].join("\n")
+      };
+    }
+
+    if (!this.dependencies.documentManager) {
+      return {
+        chatId: context.chat.id,
+        text: "Document manager is not configured."
+      };
+    }
+
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    const updated: string[] = [];
+
+    for (const document of pending.candidates) {
+      const result = await this.dependencies.documentManager.execute({
+        action: "update_metadata",
+        query: document.name,
+        document,
+        ...metadata
+      });
+      updated.push(result.text);
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: updated.join("\n")
     };
   }
 
@@ -1419,6 +1504,135 @@ function fileDestinationPrompt(attachments: readonly MessageAttachment[]): strin
     "- local inbox",
     "- Google Drive"
   ].join("\n");
+}
+
+const documentTypes = [
+  "identity",
+  "legal",
+  "health",
+  "finance",
+  "education",
+  "travel",
+  "home",
+  "reference",
+  "other"
+] as const satisfies readonly DocumentType[];
+
+function parseDocumentMetadata(text: string): {
+  readonly documentType?: DocumentType;
+  readonly subjectId?: string;
+} {
+  const normalized = text.trim().toLowerCase();
+  const tokens = normalized
+    .split(/[^a-zа-яё0-9_-]+/u)
+    .filter((token) => token.length > 0);
+  const documentType = parseDocumentType(tokens);
+  const subjectId = parseDocumentSubject(tokens);
+
+  return {
+    ...(documentType ? { documentType } : {}),
+    ...(subjectId ? { subjectId } : {})
+  };
+}
+
+function parseDocumentType(tokens: readonly string[]): DocumentType | undefined {
+  for (const token of tokens) {
+    if ((documentTypes as readonly string[]).includes(token)) {
+      return token as DocumentType;
+    }
+
+    if (token === "passport" || token === "id") {
+      return "identity";
+    }
+
+    if (token === "visa" || token === "ticket") {
+      return "travel";
+    }
+  }
+
+  return undefined;
+}
+
+function parseDocumentSubject(tokens: readonly string[]): string | undefined {
+  const ignored = new Set([
+    ...documentTypes,
+    "google",
+    "drive",
+    "local",
+    "inbox",
+    "save",
+    "store",
+    "upload",
+    "uploaded",
+    "file",
+    "document",
+    "this",
+    "to",
+    "in",
+    "as",
+    "for",
+    "passport",
+    "id",
+    "visa",
+    "ticket",
+    "гугл",
+    "диск",
+    "файл",
+    "документ",
+    "сохрани",
+    "загрузи",
+    "для",
+    "как"
+  ]);
+
+  return tokens.find(
+    (token) =>
+      !ignored.has(token) &&
+      /^[a-zа-яё][a-zа-яё0-9_-]{1,31}$/u.test(token)
+  );
+}
+
+function parseSkipDocumentMetadata(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+
+  return (
+    /\b(skip|cancel|nothing|later)\b/.test(normalized) ||
+    /пропусти|отмена|ничего|потом|не надо/.test(normalized)
+  );
+}
+
+function isUploadedDocumentMetadataDecision(
+  pending: PendingDocumentDecision
+): boolean {
+  return (
+    pending.action.kind === "update_metadata" &&
+    !pending.action.documentType &&
+    !pending.action.subjectId &&
+    pending.candidates.length > 0
+  );
+}
+
+function formatUploadedDocumentsReply(
+  documents: readonly RegisterDocumentResult["document"][]
+): string {
+  return [
+    `Uploaded ${documents.length} document(s) to Google Drive:`,
+    ...documents.map(formatUploadedDocumentLine)
+  ].join("\n");
+}
+
+function formatUploadedDocumentLine(
+  document: RegisterDocumentResult["document"]
+): string {
+  const metadata = [
+    document.documentType,
+    document.subjectId ? `subject: ${document.subjectId}` : undefined
+  ].filter((value): value is string => Boolean(value));
+  const name = metadata.length > 0
+    ? `${document.name} (${metadata.join(", ")})`
+    : document.name;
+
+  return `- ${name}\n  ${document.url}`;
 }
 
 function formatRegisteredDocumentReply(

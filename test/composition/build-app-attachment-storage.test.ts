@@ -174,7 +174,9 @@ describe("buildApp attachment storage", () => {
         [
           "Uploaded 1 document(s) to Google Drive:",
           "- passport.pdf",
-          "  https://drive.google.com/file/d/drive-passport"
+          "  https://drive.google.com/file/d/drive-passport",
+          "Какой это документ?",
+          "Можно ответить тип и subject, например: identity max, или skip."
         ].join("\n")
       );
       expect(documentStorage.uploads).toEqual([
@@ -185,6 +187,23 @@ describe("buildApp attachment storage", () => {
         }
       ]);
 
+      const metadataReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-3",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "identity max",
+        attachments: [],
+        receivedAt: new Date("2026-07-04T12:02:00.000Z"),
+        now: new Date("2026-07-04T12:02:00.000Z")
+      });
+
+      expect(metadataReply.text).toBe(
+        "Updated document: passport.pdf (identity, subject: max)"
+      );
+
       const database = createSqliteDatabase({ path: databasePath });
       const documents = database
         .prepare(
@@ -194,6 +213,8 @@ describe("buildApp attachment storage", () => {
               external_id as externalId,
               name,
               url,
+              document_type as documentType,
+              subject_id as subjectId,
               status
             from documents
           `
@@ -207,6 +228,8 @@ describe("buildApp attachment storage", () => {
           externalId: "drive-passport",
           name: "passport.pdf",
           url: "https://drive.google.com/file/d/drive-passport",
+          documentType: "identity",
+          subjectId: "max",
           status: "registered"
         }
       ]);

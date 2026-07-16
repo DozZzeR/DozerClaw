@@ -64,6 +64,8 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
       useCase.execute({
         provider: "telegram",
         receivedAt: new Date("2026-07-16T09:59:00.000Z"),
+        documentType: "identity",
+        subjectId: "max",
         attachments: [
           {
             id: "attachment-1",
@@ -83,6 +85,8 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
           externalId: "drive-passport",
           name: "passport.pdf",
           url: "https://drive.google.com/file/d/drive-passport",
+          documentType: "identity",
+          subjectId: "max",
           status: "registered",
           createdAt: new Date("2026-07-16T10:00:00.000Z"),
           updatedAt: new Date("2026-07-16T10:00:00.000Z")
@@ -96,6 +100,8 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
         externalId: "drive-passport",
         name: "passport.pdf",
         url: "https://drive.google.com/file/d/drive-passport",
+        documentType: "identity",
+        subjectId: "max",
         status: "registered",
         createdAt: new Date("2026-07-16T10:00:00.000Z"),
         updatedAt: new Date("2026-07-16T10:00:00.000Z")

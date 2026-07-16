@@ -1,4 +1,7 @@
-import type { DocumentRecord } from "../../../core/domain/documents/document-record.js";
+import type {
+  DocumentRecord,
+  DocumentType
+} from "../../../core/domain/documents/document-record.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { AttachmentDownloadPort } from "../../../ports/attachment-download-port.js";
 import type { DocumentRepositoryPort } from "../../../ports/document-repository-port.js";
@@ -16,6 +19,8 @@ export interface StoreMessageDocumentAttachmentsInput {
   readonly provider: string;
   readonly receivedAt: Date;
   readonly attachments: readonly MessageAttachment[];
+  readonly documentType?: DocumentType;
+  readonly subjectId?: string;
 }
 
 export type StoreMessageDocumentAttachmentResult =
@@ -69,6 +74,8 @@ export class StoreMessageDocumentAttachmentsUseCase {
         externalId: uploaded.externalId,
         name: uploaded.name,
         url: uploaded.url,
+        ...(input.documentType ? { documentType: input.documentType } : {}),
+        ...(input.subjectId ? { subjectId: input.subjectId } : {}),
         status: "registered",
         createdAt: now,
         updatedAt: now
