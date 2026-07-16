@@ -3,6 +3,14 @@ import type {
   RegisterDocumentInput,
   RegisterDocumentResult
 } from "../documents/register-document.js";
+import type {
+  FindDocumentsInput,
+  FindDocumentsResult
+} from "../documents/find-documents.js";
+import type {
+  ManageDocumentRecordInput,
+  ManageDocumentRecordResult
+} from "../documents/manage-document-record.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
@@ -74,6 +82,14 @@ export interface FamilyFactArchiver {
 
 export interface DocumentRegistrar {
   execute(input: RegisterDocumentInput): Promise<RegisterDocumentResult>;
+}
+
+export interface DocumentLookup {
+  execute(input: FindDocumentsInput): Promise<FindDocumentsResult>;
+}
+
+export interface DocumentManager {
+  execute(input: ManageDocumentRecordInput): Promise<ManageDocumentRecordResult>;
 }
 
 export interface SubjectAliasManager {
@@ -148,6 +164,8 @@ export interface DispatchAcceptedCommandDependencies {
   readonly familyFactRecall?: FamilyFactRecall;
   readonly familyFactArchiver?: FamilyFactArchiver;
   readonly documentRegistrar?: DocumentRegistrar;
+  readonly documentLookup?: DocumentLookup;
+  readonly documentManager?: DocumentManager;
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
@@ -321,6 +339,14 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "register_document") {
       return this.registerDocument(context, intent);
+    }
+
+    if (intent.kind === "find_document") {
+      return this.findDocuments(context, intent);
+    }
+
+    if (intent.kind === "update_document" || intent.kind === "archive_document") {
+      return this.manageDocument(context, intent);
     }
 
     if (
@@ -743,12 +769,71 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const result = await this.dependencies.documentRegistrar.execute({
-      externalIdOrUrl: intent.externalIdOrUrl
+      externalIdOrUrl: intent.externalIdOrUrl,
+      ...(intent.documentType ? { documentType: intent.documentType } : {}),
+      ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
     });
 
     return {
       chatId: context.chat.id,
-      text: `Registered document: ${result.document.name}`
+      text: formatRegisteredDocumentReply(result.document)
+    };
+  }
+
+  private async findDocuments(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "find_document" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.documentLookup) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.documentLookup.execute({
+      ...(intent.query ? { query: intent.query } : {}),
+      ...(intent.documentType ? { documentType: intent.documentType } : {}),
+      ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async manageDocument(
+    context: AcceptedMessageContext,
+    intent: Extract<
+      InboundIntent,
+      { readonly kind: "update_document" | "archive_document" }
+    >
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.documentManager) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.documentManager.execute(
+      intent.kind === "archive_document"
+        ? {
+            action: "archive",
+            query: intent.query
+          }
+        : {
+            action: "update_metadata",
+            query: intent.query,
+            ...(intent.documentType ? { documentType: intent.documentType } : {}),
+            ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
+          }
+    );
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
     };
   }
 
@@ -1032,6 +1117,21 @@ function duplicateDecisionPrompt(
     "- перезаписать существующий файл",
     "- ничего не делать"
   ].join("\n");
+}
+
+function formatRegisteredDocumentReply(
+  document: RegisterDocumentResult["document"]
+): string {
+  const metadata = [
+    document.documentType,
+    document.subjectId ? `subject: ${document.subjectId}` : undefined
+  ].filter((value): value is string => Boolean(value));
+
+  if (metadata.length === 0) {
+    return `Registered document: ${document.name}`;
+  }
+
+  return `Registered document: ${document.name} (${metadata.join(", ")})`;
 }
 
 function parseDuplicateDecision(text: string): DuplicateDecision | undefined {

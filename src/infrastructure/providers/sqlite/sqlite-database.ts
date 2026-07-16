@@ -107,12 +107,34 @@ function ensureDocumentsTable(database: SqliteDatabase): void {
       external_id text not null,
       name text not null,
       url text not null,
+      document_type text check (
+        document_type in (
+          'identity',
+          'legal',
+          'health',
+          'finance',
+          'education',
+          'travel',
+          'home',
+          'reference',
+          'other'
+        )
+      ),
+      subject_id text,
       status text not null check (status in ('registered', 'archived')),
       created_at text not null,
       updated_at text not null,
       unique (provider, external_id)
     );
   `);
+
+  ensureColumn(
+    database,
+    "documents",
+    "document_type",
+    "document_type text"
+  );
+  ensureColumn(database, "documents", "subject_id", "subject_id text");
 }
 
 function ensureFileInboxRecordsTable(database: SqliteDatabase): void {

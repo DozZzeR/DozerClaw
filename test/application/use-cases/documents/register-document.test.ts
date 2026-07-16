@@ -21,7 +21,9 @@ describe("RegisterDocumentUseCase", () => {
 
     await expect(
       useCase.execute({
-        externalIdOrUrl: "https://drive.google.com/file/d/abc"
+        externalIdOrUrl: "https://drive.google.com/file/d/abc",
+        documentType: "identity",
+        subjectId: "max"
       })
     ).resolves.toEqual({
       status: "registered",
@@ -31,6 +33,8 @@ describe("RegisterDocumentUseCase", () => {
         externalId: "drive-abc",
         name: "Passport.pdf",
         url: "https://drive.google.com/file/d/abc",
+        documentType: "identity",
+        subjectId: "max",
         status: "registered",
         createdAt: new Date("2026-07-14T08:00:00.000Z"),
         updatedAt: new Date("2026-07-14T08:00:00.000Z")
@@ -45,6 +49,8 @@ describe("RegisterDocumentUseCase", () => {
       externalId: "drive-abc",
       name: "Passport.pdf",
       url: "https://drive.google.com/file/d/abc",
+      documentType: "identity",
+      subjectId: "max",
       status: "registered",
       createdAt: new Date("2026-07-14T08:00:00.000Z"),
       updatedAt: new Date("2026-07-14T08:00:00.000Z")
@@ -71,7 +77,9 @@ describe("RegisterDocumentUseCase", () => {
 
     await expect(
       useCase.execute({
-        externalIdOrUrl: "drive-abc"
+        externalIdOrUrl: "drive-abc",
+        documentType: "travel",
+        subjectId: "family"
       })
     ).resolves.toEqual({
       status: "registered",
@@ -81,6 +89,8 @@ describe("RegisterDocumentUseCase", () => {
         externalId: "drive-abc",
         name: "New name.pdf",
         url: "https://drive.google.com/file/d/new",
+        documentType: "travel",
+        subjectId: "family",
         status: "registered",
         createdAt: new Date("2026-07-14T07:00:00.000Z"),
         updatedAt: new Date("2026-07-14T08:30:00.000Z")
@@ -90,6 +100,38 @@ describe("RegisterDocumentUseCase", () => {
     expect(repository.saved?.createdAt).toEqual(
       new Date("2026-07-14T07:00:00.000Z")
     );
+  });
+
+  it("preserves existing metadata when re-registering without new metadata", async () => {
+    const repository = new RecordingDocumentRepository(
+      documentRecord({
+        id: "document-existing",
+        name: "Old name.pdf",
+        url: "https://drive.google.com/file/d/old"
+      })
+    );
+    const useCase = new RegisterDocumentUseCase({
+      repository,
+      storage: new StubDocumentStorage({
+        name: "New name.pdf",
+        url: "https://drive.google.com/file/d/new"
+      }),
+      generateId: () => "document-new",
+      now: () => new Date("2026-07-14T08:30:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        externalIdOrUrl: "drive-abc"
+      })
+    ).resolves.toEqual({
+      status: "registered",
+      document: expect.objectContaining({
+        id: "document-existing",
+        documentType: "identity",
+        subjectId: "max"
+      })
+    });
   });
 });
 
@@ -136,6 +178,10 @@ class RecordingDocumentRepository implements DocumentRepositoryPort {
 
     return undefined;
   }
+
+  async searchDocuments(): Promise<readonly DocumentRecord[]> {
+    throw new Error("should not search documents");
+  }
 }
 
 function documentRecord(
@@ -147,6 +193,8 @@ function documentRecord(
     externalId: "drive-abc",
     name: overrides.name,
     url: overrides.url,
+    documentType: "identity",
+    subjectId: "max",
     status: "registered",
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     updatedAt: new Date("2026-07-14T07:00:00.000Z")

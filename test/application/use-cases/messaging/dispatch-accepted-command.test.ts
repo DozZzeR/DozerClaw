@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-cases/messaging/dispatch-accepted-command.js";
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
+import type { DocumentType } from "../../../../src/core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyFactCategory } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
@@ -928,7 +929,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
         kind: "register_document",
-        externalIdOrUrl: "https://drive.google.com/file/d/abc"
+        externalIdOrUrl: "https://drive.google.com/file/d/abc",
+        documentType: "identity",
+        subjectId: "max"
       }),
       documentRegistrar
     });
@@ -943,10 +946,106 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Registered document: Passport.pdf"
+      text: "Registered document: Passport.pdf (identity, subject: max)"
     });
     expect(documentRegistrar.seenInput).toEqual({
-      externalIdOrUrl: "https://drive.google.com/file/d/abc"
+      externalIdOrUrl: "https://drive.google.com/file/d/abc",
+      documentType: "identity",
+      subjectId: "max"
+    });
+  });
+
+  it("finds registered documents from a model intent", async () => {
+    const documentLookup = new FakeDocumentLookup();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "find_document",
+        query: "passport",
+        documentType: "identity",
+        subjectId: "max"
+      }),
+      documentLookup
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "show Max passport"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Registered documents:\n- Max Passport.pdf (identity, subject: max)\n  https://drive.google.com/file/d/passport"
+    });
+    expect(documentLookup.seenInput).toEqual({
+      query: "passport",
+      documentType: "identity",
+      subjectId: "max"
+    });
+  });
+
+  it("updates document metadata from a model intent", async () => {
+    const documentManager = new FakeDocumentManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_document",
+        query: "passport",
+        documentType: "identity",
+        subjectId: "max"
+      }),
+      documentManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "set Max passport as identity"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated document: Max Passport.pdf (identity, subject: max)"
+    });
+    expect(documentManager.seenInput).toEqual({
+      action: "update_metadata",
+      query: "passport",
+      documentType: "identity",
+      subjectId: "max"
+    });
+  });
+
+  it("archives a document from a model intent", async () => {
+    const documentManager = new FakeDocumentManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "archive_document",
+        query: "passport"
+      }),
+      documentManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "archive old passport"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Archived document: Max Passport.pdf"
+    });
+    expect(documentManager.seenInput).toEqual({
+      action: "archive",
+      query: "passport"
     });
   });
 
@@ -1384,7 +1483,25 @@ class FakeIntentClassifier {
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
       | { readonly kind: "archive_fact"; readonly query: string }
-      | { readonly kind: "register_document"; readonly externalIdOrUrl: string }
+      | {
+          readonly kind: "register_document";
+          readonly externalIdOrUrl: string;
+          readonly documentType?: DocumentType;
+          readonly subjectId?: string;
+        }
+      | {
+          readonly kind: "find_document";
+          readonly query?: string;
+          readonly documentType?: DocumentType;
+          readonly subjectId?: string;
+        }
+      | {
+          readonly kind: "update_document";
+          readonly query: string;
+          readonly documentType?: DocumentType;
+          readonly subjectId?: string;
+        }
+      | { readonly kind: "archive_document"; readonly query: string }
       | {
           readonly kind: "save_subject_alias";
           readonly aliasSubjectId: string;
@@ -1469,9 +1586,19 @@ class FakeFamilyFactRecall {
 }
 
 class FakeDocumentRegistrar {
-  seenInput: { externalIdOrUrl: string } | undefined;
+  seenInput:
+    | {
+        externalIdOrUrl: string;
+        documentType?: DocumentType;
+        subjectId?: string;
+      }
+    | undefined;
 
-  async execute(input: { externalIdOrUrl: string }) {
+  async execute(input: {
+    externalIdOrUrl: string;
+    documentType?: DocumentType;
+    subjectId?: string;
+  }) {
     this.seenInput = input;
 
     return {
@@ -1482,10 +1609,66 @@ class FakeDocumentRegistrar {
         externalId: "drive-abc",
         name: "Passport.pdf",
         url: "https://drive.google.com/file/d/abc",
+        ...(input.documentType ? { documentType: input.documentType } : {}),
+        ...(input.subjectId ? { subjectId: input.subjectId } : {}),
         status: "registered" as const,
         createdAt: new Date("2026-07-14T08:00:00.000Z"),
         updatedAt: new Date("2026-07-14T08:00:00.000Z")
       }
+    };
+  }
+}
+
+class FakeDocumentLookup {
+  seenInput:
+    | { query?: string; documentType?: DocumentType; subjectId?: string }
+    | undefined;
+
+  async execute(input: {
+    query?: string;
+    documentType?: DocumentType;
+    subjectId?: string;
+  }) {
+    this.seenInput = input;
+
+    return {
+      text: [
+        "Registered documents:",
+        "- Max Passport.pdf (identity, subject: max)",
+        "  https://drive.google.com/file/d/passport"
+      ].join("\n")
+    };
+  }
+}
+
+class FakeDocumentManager {
+  seenInput:
+    | {
+        action: "update_metadata";
+        query: string;
+        documentType?: DocumentType;
+        subjectId?: string;
+      }
+    | { action: "archive"; query: string }
+    | undefined;
+
+  async execute(
+    input:
+      | {
+          action: "update_metadata";
+          query: string;
+          documentType?: DocumentType;
+          subjectId?: string;
+        }
+      | { action: "archive"; query: string }
+  ) {
+    this.seenInput = input;
+
+    return {
+      text:
+        input.action === "archive"
+          ? "Archived document: Max Passport.pdf"
+          : "Updated document: Max Passport.pdf (identity, subject: max)"
     };
   }
 }

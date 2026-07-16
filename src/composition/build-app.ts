@@ -12,6 +12,8 @@ import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/sto
 import { ResolveFileDuplicateDecisionUseCase } from "../application/use-cases/file-inbox/resolve-file-duplicate-decision.js";
 import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-inbox/store-message-attachments.js";
 import { RegisterDocumentUseCase } from "../application/use-cases/documents/register-document.js";
+import { FindDocumentsUseCase } from "../application/use-cases/documents/find-documents.js";
+import { ManageDocumentRecordUseCase } from "../application/use-cases/documents/manage-document-record.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -146,6 +148,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         now: () => new Date()
       })
     : undefined;
+  const documentLookup = new FindDocumentsUseCase({
+    repository: documentRepository,
+    limit: 10
+  });
+  const documentManager = new ManageDocumentRecordUseCase({
+    repository: documentRepository,
+    now: () => new Date()
+  });
   const modelProvider = options.modelProvider
     ? options.modelProvider
     : config.codex.modelRoutingEnabled
@@ -192,6 +202,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     familyFactRecall,
     familyFactArchiver,
     ...(documentRegistrar ? { documentRegistrar } : {}),
+    documentLookup,
+    documentManager,
     subjectAliasManager,
     factDecisionResolver,
     pendingAccessRequests: {

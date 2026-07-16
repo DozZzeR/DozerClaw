@@ -550,6 +550,8 @@ describe("buildApp", () => {
             question: null,
             summary: null,
             externalIdOrUrl: "https://drive.google.com/file/d/abc",
+            documentType: "identity",
+            subjectId: "max",
             query: null,
             reason: null
           })
@@ -576,7 +578,9 @@ describe("buildApp", () => {
         now: new Date("2026-07-14T08:00:00.000Z")
       });
 
-      expect(reply.text).toBe("Registered document: Passport.pdf");
+      expect(reply.text).toBe(
+        "Registered document: Passport.pdf (identity, subject: max)"
+      );
       expect(documentStorage.seenInput).toEqual({
         externalIdOrUrl: "https://drive.google.com/file/d/abc"
       });
@@ -591,6 +595,8 @@ describe("buildApp", () => {
           externalId: "drive-abc",
           name: "Passport.pdf",
           url: "https://drive.google.com/file/d/abc",
+          documentType: "identity",
+          subjectId: "max",
           status: "registered"
         })
       );
@@ -653,6 +659,181 @@ describe("buildApp", () => {
       ]);
     } finally {
       await drive.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("finds a locally registered document through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "find_document",
+        question: null,
+        summary: null,
+        externalIdOrUrl: null,
+        documentType: "identity",
+        subjectId: "max",
+        query: "passport",
+        reason: null
+      })
+    ]);
+
+    try {
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteDocumentRepository(database);
+      await repository.saveDocument({
+        id: "document-passport",
+        provider: "google_drive",
+        externalId: "drive-passport",
+        name: "Max Passport.pdf",
+        url: "https://drive.google.com/file/d/passport",
+        documentType: "identity",
+        subjectId: "max",
+        status: "registered",
+        createdAt: new Date("2026-07-14T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:00:00.000Z")
+      });
+      database.close();
+
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document-lookup",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "show Max passport",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:30:00.000Z"),
+        now: new Date("2026-07-14T08:30:00.000Z")
+      });
+
+      expect(reply.text).toBe(
+        [
+          "Registered documents:",
+          "- Max Passport.pdf (identity, subject: max)",
+          "  https://drive.google.com/file/d/passport"
+        ].join("\n")
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("updates and archives a local document through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "update_document",
+        question: null,
+        summary: null,
+        externalIdOrUrl: null,
+        documentType: "identity",
+        subjectId: "max",
+        query: "passport",
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "archive_document",
+        question: null,
+        summary: null,
+        externalIdOrUrl: null,
+        documentType: null,
+        subjectId: null,
+        query: "passport",
+        reason: null
+      })
+    ]);
+
+    try {
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteDocumentRepository(database);
+      await repository.saveDocument({
+        id: "document-passport",
+        provider: "google_drive",
+        externalId: "drive-passport",
+        name: "Max Passport.pdf",
+        url: "https://drive.google.com/file/d/passport",
+        documentType: "other",
+        subjectId: "family",
+        status: "registered",
+        createdAt: new Date("2026-07-14T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:00:00.000Z")
+      });
+      database.close();
+
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const updateReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document-update",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "set Max passport as identity",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:30:00.000Z"),
+        now: new Date("2026-07-14T08:30:00.000Z")
+      });
+
+      expect(updateReply.text).toBe(
+        "Updated document: Max Passport.pdf (identity, subject: max)"
+      );
+
+      const archiveReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-document-archive",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "archive Max passport",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:31:00.000Z"),
+        now: new Date("2026-07-14T08:31:00.000Z")
+      });
+
+      expect(archiveReply.text).toBe("Archived document: Max Passport.pdf");
+
+      const verifyDatabase = createSqliteDatabase({ path: databasePath });
+      const verifyRepository = new SqliteDocumentRepository(verifyDatabase);
+      await expect(
+        verifyRepository.searchDocuments({
+          query: "passport",
+          limit: 10
+        })
+      ).resolves.toEqual([]);
+      verifyDatabase.close();
+    } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });

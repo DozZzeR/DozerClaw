@@ -58,6 +58,7 @@ describe("ModelInboundIntentClassifier", () => {
           "aliasSubjectId",
           "canonicalSubjectId",
           "externalIdOrUrl",
+          "documentType",
           "query",
           "reason"
         ]
@@ -164,12 +165,63 @@ describe("parseInboundIntent", () => {
       parseInboundIntent(
         JSON.stringify({
           kind: "register_document",
-          externalIdOrUrl: " https://drive.google.com/file/d/abc "
+          externalIdOrUrl: " https://drive.google.com/file/d/abc ",
+          documentType: "identity",
+          subjectId: " max "
         })
       )
     ).toEqual({
       kind: "register_document",
-      externalIdOrUrl: "https://drive.google.com/file/d/abc"
+      externalIdOrUrl: "https://drive.google.com/file/d/abc",
+      documentType: "identity",
+      subjectId: "max"
+    });
+  });
+
+  it("parses find document intent", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "find_document",
+          query: " passport ",
+          documentType: "identity",
+          subjectId: " max "
+        })
+      )
+    ).toEqual({
+      kind: "find_document",
+      query: "passport",
+      documentType: "identity",
+      subjectId: "max"
+    });
+  });
+
+  it("parses document mutation intents", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "update_document",
+          query: " passport ",
+          documentType: "identity",
+          subjectId: " max "
+        })
+      )
+    ).toEqual({
+      kind: "update_document",
+      query: "passport",
+      documentType: "identity",
+      subjectId: "max"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "archive_document",
+          query: "old passport"
+        })
+      )
+    ).toEqual({
+      kind: "archive_document",
+      query: "old passport"
     });
   });
 

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { DocumentType } from "../../../core/domain/documents/document-record.js";
 import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
 import type { ModelPort } from "../../../ports/model-port.js";
 
@@ -36,6 +37,24 @@ export type InboundIntent =
   | {
       readonly kind: "register_document";
       readonly externalIdOrUrl: string;
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
+    }
+  | {
+      readonly kind: "find_document";
+      readonly query?: string;
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
+    }
+  | {
+      readonly kind: "update_document";
+      readonly query: string;
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
+    }
+  | {
+      readonly kind: "archive_document";
+      readonly query: string;
     }
   | {
       readonly kind: "save_subject_alias";
@@ -114,7 +133,29 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `register_document` when the user asks to register, save, catalog, or remember an existing Drive document link or file id as a document record.",
       "- `externalIdOrUrl`: the Google Drive URL or external file id from the message.",
+      "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
       "- Do not use `register_document` for generic Telegram attachments without a Drive link; use `store_file` for uploaded files."
+    ].join("\n"),
+    "",
+    "# find_document field rules",
+    [
+      "- Use `find_document` when the user asks to show, find, retrieve, list, or look up registered documents.",
+      "- `query`: the shortest useful search text, or `null` when the type and subject are enough.",
+      "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
+      "- Do not use `find_document` for family memory facts; use `answer_from_memory` for memory recall."
+    ].join("\n"),
+    "",
+    "# document mutation field rules",
+    [
+      "- Use `update_document` when the user asks to correct, change, set, or update metadata for a registered document.",
+      "- `update_document.query`: the shortest phrase identifying the existing registered document.",
+      "- `update_document.documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when not changing type.",
+      "- `update_document.subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when not changing subject.",
+      "- Use `archive_document` when the user asks to archive, remove, hide, or stop showing a registered document record.",
+      "- `archive_document.query`: the shortest phrase identifying the registered document to archive.",
+      "- Do not use these intents to move, delete, or edit the actual Drive file."
     ].join("\n"),
     "",
     "# subject_alias field rules",
@@ -150,8 +191,20 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "",
     "# register_document examples",
     [
-      '{"kind":"register_document","externalIdOrUrl":"https://drive.google.com/file/d/abc"}',
-      '{"kind":"register_document","externalIdOrUrl":"drive-file-id-abc"}'
+      '{"kind":"register_document","externalIdOrUrl":"https://drive.google.com/file/d/abc","documentType":"identity","subjectId":"max"}',
+      '{"kind":"register_document","externalIdOrUrl":"drive-file-id-abc","documentType":"other","subjectId":"family"}'
+    ].join("\n"),
+    "",
+    "# find_document examples",
+    [
+      '{"kind":"find_document","query":"passport","documentType":"identity","subjectId":"max"}',
+      '{"kind":"find_document","query":"train ticket","documentType":"travel","subjectId":"family"}'
+    ].join("\n"),
+    "",
+    "# document mutation examples",
+    [
+      '{"kind":"update_document","query":"Max passport","documentType":"identity","subjectId":"max"}',
+      '{"kind":"archive_document","query":"old passport"}'
     ].join("\n"),
     "",
     "# Input",
@@ -255,7 +308,42 @@ export function parseInboundIntent(text: string): InboundIntent {
       if (externalIdOrUrl) {
         return {
           kind: "register_document",
-          externalIdOrUrl
+          externalIdOrUrl,
+          ...optionalDocumentType(parsed.documentType),
+          ...optionalTrimmedText("subjectId", parsed.subjectId)
+        };
+      }
+    }
+
+    if (parsed.kind === "find_document") {
+      return {
+        kind: "find_document",
+        ...optionalTrimmedQuery(parsed.query),
+        ...optionalDocumentType(parsed.documentType),
+        ...optionalTrimmedText("subjectId", parsed.subjectId)
+      };
+    }
+
+    if (parsed.kind === "update_document" && typeof parsed.query === "string") {
+      const query = parsed.query.trim();
+
+      if (query) {
+        return {
+          kind: "update_document",
+          query,
+          ...optionalDocumentType(parsed.documentType),
+          ...optionalTrimmedText("subjectId", parsed.subjectId)
+        };
+      }
+    }
+
+    if (parsed.kind === "archive_document" && typeof parsed.query === "string") {
+      const query = parsed.query.trim();
+
+      if (query) {
+        return {
+          kind: "archive_document",
+          query
         };
       }
     }
@@ -330,6 +418,9 @@ const inboundIntentSchema = {
         "answer_from_memory",
         "archive_fact",
         "register_document",
+        "find_document",
+        "update_document",
+        "archive_document",
         "save_subject_alias",
         "list_subject_aliases",
         "delete_subject_alias",
@@ -359,6 +450,21 @@ const inboundIntentSchema = {
     externalIdOrUrl: {
       type: ["string", "null"]
     },
+    documentType: {
+      type: ["string", "null"],
+      enum: [
+        "identity",
+        "legal",
+        "health",
+        "finance",
+        "education",
+        "travel",
+        "home",
+        "reference",
+        "other",
+        null
+      ]
+    },
     query: {
       type: ["string", "null"]
     },
@@ -375,6 +481,7 @@ const inboundIntentSchema = {
     "aliasSubjectId",
     "canonicalSubjectId",
     "externalIdOrUrl",
+    "documentType",
     "query",
     "reason"
   ]
@@ -406,6 +513,42 @@ function optionalTrimmedText(
   return {
     [key]: value.trim()
   };
+}
+
+function optionalDocumentType(
+  value: unknown
+): { readonly documentType?: DocumentType } {
+  if (typeof value !== "string" || !isDocumentType(value)) {
+    return {};
+  }
+
+  return {
+    documentType: value
+  };
+}
+
+function optionalTrimmedQuery(value: unknown): { readonly query?: string } {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+
+  return {
+    query: value.trim()
+  };
+}
+
+function isDocumentType(value: string): value is DocumentType {
+  return (
+    value === "identity" ||
+    value === "legal" ||
+    value === "health" ||
+    value === "finance" ||
+    value === "education" ||
+    value === "travel" ||
+    value === "home" ||
+    value === "reference" ||
+    value === "other"
+  );
 }
 
 function fallbackIntent(): InboundIntent {
