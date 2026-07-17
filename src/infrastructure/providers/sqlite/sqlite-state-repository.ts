@@ -4,6 +4,7 @@ import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.
 import type {
   PendingClarification,
   PendingDocumentDecision,
+  PendingDocumentPlacementDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
   PendingFileDestinationDecision,
@@ -511,6 +512,96 @@ export class SqliteStateRepository implements StateRepositoryPort {
       .prepare("delete from pending_document_decisions where chat_id = ?")
       .run(chatId);
   }
+
+  async findActivePendingDocumentPlacementDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingDocumentPlacementDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            document_json as documentJson,
+            target_folder_path as targetFolderPath,
+            target_folder_id as targetFolderId,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_document_placement_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as
+      | PendingDocumentPlacementDecisionRow
+      | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    const [document] = parseDocumentRecords(`[${row.documentJson}]`);
+
+    if (!document) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      document,
+      targetFolderPath: row.targetFolderPath,
+      ...(row.targetFolderId ? { targetFolderId: row.targetFolderId } : {}),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingDocumentPlacementDecision(
+    input: PendingDocumentPlacementDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_document_placement_decisions (
+            chat_id,
+            actor_id,
+            document_json,
+            target_folder_path,
+            target_folder_id,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            document_json = excluded.document_json,
+            target_folder_path = excluded.target_folder_path,
+            target_folder_id = excluded.target_folder_id,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        JSON.stringify(documentRecordToJson(input.document)),
+        input.targetFolderPath,
+        input.targetFolderId ?? null,
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingDocumentPlacementDecisionByChatId(
+    chatId: string
+  ): Promise<void> {
+    this.database
+      .prepare(
+        "delete from pending_document_placement_decisions where chat_id = ?"
+      )
+      .run(chatId);
+  }
 }
 
 interface PendingClarificationRow {
@@ -568,6 +659,16 @@ interface PendingDocumentDecisionRow {
   readonly actorId: string;
   readonly actionJson: string;
   readonly candidatesJson: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
+interface PendingDocumentPlacementDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly documentJson: string;
+  readonly targetFolderPath: string;
+  readonly targetFolderId: string | null;
   readonly createdAt: string;
   readonly expiresAt: string;
 }

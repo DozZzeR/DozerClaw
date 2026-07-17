@@ -14,6 +14,7 @@ import type { ClassifyInboundIntentInput } from "../../../../src/application/use
 import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
 import type {
   PendingDocumentDecision,
+  PendingDocumentPlacementDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
   PendingFileDestinationDecision
@@ -272,6 +273,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
 
   it("updates pending uploaded document metadata from a follow-up reply", async () => {
     const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
     pendingDocumentDecisions.pending = {
       chatId: "chat-owner",
       actorId: "actor-owner",
@@ -292,6 +295,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       documentManager,
       intentClassifier,
       pendingDocumentDecisions,
+      pendingDocumentPlacementDecisions,
       now: () => new Date("2026-07-02T20:10:00.000Z")
     });
 
@@ -305,26 +309,49 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Updated document: passport.pdf (identity, subject: max)"
+      text: [
+        "Updated document: passport.pdf (identity, subject: max)",
+        "Предлагаю папку: Family Documents/max/identity",
+        "Переместить файл туда? Ответь yes или skip."
+      ].join("\n")
     });
     expect(intentClassifier.seenInput).toBeUndefined();
     expect(documentManager.seenInput).toEqual({
       action: "update_metadata",
       query: "passport.pdf",
-      document: uploadedDocumentRecord(),
+      document: {
+        ...uploadedDocumentRecord(),
+        documentType: "identity",
+        subjectId: "max"
+      },
       documentType: "identity",
       subjectId: "max"
     });
     expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
+    expect(pendingDocumentPlacementDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      document: {
+        ...uploadedDocumentRecord(),
+        documentType: "identity",
+        subjectId: "max"
+      },
+      targetFolderPath: "Family Documents/max/identity",
+      createdAt: new Date("2026-07-02T20:10:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:40:00.000Z")
+    });
   });
 
   it("stores explicit metadata on Drive uploads without asking again", async () => {
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
     const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       documentAttachmentStore,
       pendingDocumentDecisions,
+      pendingDocumentPlacementDecisions,
       now: () => new Date("2026-07-02T20:05:00.000Z")
     });
 
@@ -348,7 +375,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
       text: [
         "Uploaded 1 document(s) to Google Drive:",
         "- passport.pdf (identity, subject: max)",
-        "  https://drive.google.com/file/d/drive-passport"
+        "  https://drive.google.com/file/d/drive-passport",
+        "Предлагаю папку: Family Documents/max/identity",
+        "Переместить файл туда? Ответь yes или skip."
       ].join("\n")
     });
     expect(documentAttachmentStore.seenInput).toEqual({
@@ -365,6 +394,84 @@ describe("DispatchAcceptedCommandUseCase", () => {
       subjectId: "max"
     });
     expect(pendingDocumentDecisions.saved).toBeUndefined();
+    expect(pendingDocumentPlacementDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      document: {
+        ...uploadedDocumentRecord(),
+        documentType: "identity",
+        subjectId: "max"
+      },
+      targetFolderPath: "Family Documents/max/identity",
+      createdAt: new Date("2026-07-02T20:05:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+    });
+  });
+
+  it("reports when accepting placement without a configured Drive folder id", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = pendingDocumentPlacementDecision();
+    const mover = new FakeDocumentPlacementMover();
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentPlacementMover: mover,
+      intentClassifier,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "yes move it"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Не двигаю passport.pdf: для папки Family Documents/max/identity пока не настроен Drive folder id.",
+        "Файл остался на текущем месте."
+      ].join("\n")
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(mover.seenInput).toBeUndefined();
+    expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("cancels pending document placement", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = pendingDocumentPlacementDecision();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "skip"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Ок, оставляю passport.pdf на текущем месте."
+    });
+    expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
   });
 
   it("reports unavailable Drive upload without silently storing locally", async () => {
@@ -2120,6 +2227,19 @@ class FakeDocumentManager {
   }
 }
 
+class FakeDocumentPlacementMover {
+  seenInput:
+    | {
+        readonly externalId: string;
+        readonly targetFolderId: string;
+      }
+    | undefined;
+
+  async execute(input: NonNullable<FakeDocumentPlacementMover["seenInput"]>) {
+    this.seenInput = input;
+  }
+}
+
 class FakeFamilyFactArchiver {
   seenInput: { query: string; factId?: string } | undefined;
 
@@ -2339,6 +2459,21 @@ function pendingFileDestinationDecision(): PendingFileDestinationDecision {
   };
 }
 
+function pendingDocumentPlacementDecision(): PendingDocumentPlacementDecision {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    document: {
+      ...uploadedDocumentRecord(),
+      documentType: "identity",
+      subjectId: "max"
+    },
+    targetFolderPath: "Family Documents/max/identity",
+    createdAt: new Date("2026-07-02T20:10:00.000Z"),
+    expiresAt: new Date("2026-07-02T20:40:00.000Z")
+  };
+}
+
 class FakeFamilyFactDecisionResolver {
   seenInput:
     | {
@@ -2462,6 +2597,33 @@ class FakePendingDocumentDecisions {
   }
 
   async save(input: PendingDocumentDecision): Promise<void> {
+    this.saved = input;
+    this.pending = input;
+  }
+
+  async clearByChatId(chatId: string): Promise<void> {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
+class FakePendingDocumentPlacementDecisions {
+  pending: PendingDocumentPlacementDecision | undefined;
+  saved: PendingDocumentPlacementDecision | undefined;
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: PendingDocumentPlacementDecision): Promise<void> {
     this.saved = input;
     this.pending = input;
   }

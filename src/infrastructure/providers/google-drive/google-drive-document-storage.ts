@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type {
   DocumentStoragePort,
+  MoveDocumentInput,
+  MovedDocument,
   ResolveDocumentInput,
   ResolvedDocument,
   UploadDocumentInput
@@ -95,6 +97,36 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
       externalId: metadata.id,
       name: metadata.name,
       url: metadata.webViewLink
+    };
+  }
+
+  async moveDocument(input: MoveDocumentInput): Promise<MovedDocument> {
+    const url = new URL(
+      `/drive/v3/files/${encodeURIComponent(input.externalId)}`,
+      this.apiBaseUrl
+    );
+    url.searchParams.set("addParents", input.targetFolderId);
+    url.searchParams.set("fields", "id");
+
+    const response = await this.fetchImpl(url.toString(), {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${this.options.accessToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google Drive move failed: HTTP ${response.status}`);
+    }
+
+    const metadata = (await response.json()) as GoogleDriveFileMetadata;
+
+    if (!metadata.id) {
+      throw new Error("Google Drive move response was incomplete");
+    }
+
+    return {
+      externalId: metadata.id
     };
   }
 }

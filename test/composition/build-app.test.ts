@@ -1384,6 +1384,12 @@ class FakeDocumentStorage implements DocumentStoragePort {
       url: `https://drive.google.com/file/d/drive-${input.fileName}`
     };
   }
+
+  async moveDocument(input: { readonly externalId: string }) {
+    return {
+      externalId: input.externalId
+    };
+  }
 }
 
 function selectFirstMemoryItem(request: ModelTextRequest): string {

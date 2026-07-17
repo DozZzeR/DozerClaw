@@ -201,8 +201,33 @@ describe("buildApp attachment storage", () => {
       });
 
       expect(metadataReply.text).toBe(
-        "Updated document: passport.pdf (identity, subject: max)"
+        [
+          "Updated document: passport.pdf (identity, subject: max)",
+          "Предлагаю папку: Family Documents/max/identity",
+          "Переместить файл туда? Ответь yes или skip."
+        ].join("\n")
       );
+
+      const placementReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-4",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "yes",
+        attachments: [],
+        receivedAt: new Date("2026-07-04T12:03:00.000Z"),
+        now: new Date("2026-07-04T12:03:00.000Z")
+      });
+
+      expect(placementReply.text).toBe(
+        [
+          "Не двигаю passport.pdf: для папки Family Documents/max/identity пока не настроен Drive folder id.",
+          "Файл остался на текущем месте."
+        ].join("\n")
+      );
+      expect(documentStorage.moves).toEqual([]);
 
       const database = createSqliteDatabase({ path: databasePath });
       const documents = database
@@ -258,6 +283,8 @@ class FakeAttachmentDownloader implements AttachmentDownloadPort {
 
 class FakeDocumentStorage implements DocumentStoragePort {
   readonly uploads: UploadDocumentInput[] = [];
+  readonly moves: Array<{ readonly externalId: string; readonly targetFolderId: string }> =
+    [];
 
   async resolveDocument(_input: ResolveDocumentInput): Promise<ResolvedDocument> {
     throw new Error("should not resolve existing document");
@@ -270,6 +297,17 @@ class FakeDocumentStorage implements DocumentStoragePort {
       externalId: "drive-passport",
       name: input.fileName,
       url: "https://drive.google.com/file/d/drive-passport"
+    };
+  }
+
+  async moveDocument(input: {
+    readonly externalId: string;
+    readonly targetFolderId: string;
+  }) {
+    this.moves.push(input);
+
+    return {
+      externalId: input.externalId
     };
   }
 }

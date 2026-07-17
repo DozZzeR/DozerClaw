@@ -43,6 +43,9 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
             name: "passport.pdf",
             url: "https://drive.google.com/file/d/drive-passport"
           };
+        },
+        async moveDocument() {
+          throw new Error("should not move document");
         }
       } satisfies DocumentStoragePort,
       repository: {

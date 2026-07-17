@@ -160,6 +160,10 @@ class StubDocumentStorage implements DocumentStoragePort {
   async uploadDocument(_input: UploadDocumentInput): Promise<ResolvedDocument> {
     throw new Error("should not upload document");
   }
+
+  async moveDocument(): Promise<{ readonly externalId: string }> {
+    throw new Error("should not move document");
+  }
 }
 
 class RecordingDocumentRepository implements DocumentRepositoryPort {

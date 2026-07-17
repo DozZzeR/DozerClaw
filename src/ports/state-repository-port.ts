@@ -49,6 +49,14 @@ export interface StateRepositoryPort {
   ): Promise<PendingDocumentDecision | undefined>;
   savePendingDocumentDecision(input: PendingDocumentDecision): Promise<void>;
   clearPendingDocumentDecisionByChatId(chatId: string): Promise<void>;
+  findActivePendingDocumentPlacementDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingDocumentPlacementDecision | undefined>;
+  savePendingDocumentPlacementDecision(
+    input: PendingDocumentPlacementDecision
+  ): Promise<void>;
+  clearPendingDocumentPlacementDecisionByChatId(chatId: string): Promise<void>;
 }
 
 export interface StateRepositoryHealth {
@@ -121,6 +129,16 @@ export interface PendingDocumentDecision {
   readonly actorId: string;
   readonly action: PendingDocumentDecisionAction;
   readonly candidates: readonly DocumentRecord[];
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+export interface PendingDocumentPlacementDecision {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly document: DocumentRecord;
+  readonly targetFolderPath: string;
+  readonly targetFolderId?: string;
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }

@@ -417,6 +417,53 @@ describe("SqliteStateRepository", () => {
 
     database.close();
   });
+
+  it("stores and clears active pending document placement decisions by chat", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.savePendingDocumentPlacementDecision({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+      targetFolderPath: "Family Documents/max/identity",
+      targetFolderId: "folder-max-identity",
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingDocumentPlacementDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+      targetFolderPath: "Family Documents/max/identity",
+      targetFolderId: "folder-max-identity",
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingDocumentPlacementDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.clearPendingDocumentPlacementDecisionByChatId("chat-1");
+    await expect(
+      repository.findActivePendingDocumentPlacementDecisionByChatId(
+        "chat-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
 });
 
 function documentRecord(

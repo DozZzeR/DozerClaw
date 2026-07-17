@@ -91,6 +91,29 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       '"name":"Passport.pdf"'
     );
   });
+
+  it("moves files by adding a target Drive parent", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      accessToken: "drive-token",
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com"
+    });
+
+    await expect(
+      provider.moveDocument({
+        externalId: "drive-abc",
+        targetFolderId: "folder-identity-max"
+      })
+    ).resolves.toEqual({
+      externalId: "drive-abc"
+    });
+    expect(fetch.requests[0]).toMatchObject({
+      url: "https://www.googleapis.com/drive/v3/files/drive-abc?addParents=folder-identity-max&fields=id",
+      authorization: "Bearer drive-token",
+      method: "PATCH"
+    });
+  });
 });
 
 class RecordingFetch {

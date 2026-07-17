@@ -99,6 +99,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingFamilyFactDecisionsTable(database);
   ensurePendingFamilyFactArchiveDecisionsTable(database);
   ensurePendingDocumentDecisionsTable(database);
+  ensurePendingDocumentPlacementDecisionsTable(database);
 }
 
 function ensureDocumentsTable(database: SqliteDatabase): void {
@@ -345,6 +346,22 @@ function ensurePendingDocumentDecisionsTable(database: SqliteDatabase): void {
       actor_id text not null,
       action_json text not null,
       candidates_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+  `);
+}
+
+function ensurePendingDocumentPlacementDecisionsTable(
+  database: SqliteDatabase
+): void {
+  database.exec(`
+    create table if not exists pending_document_placement_decisions (
+      chat_id text primary key,
+      actor_id text not null,
+      document_json text not null,
+      target_folder_path text not null,
+      target_folder_id text,
       created_at text not null,
       expires_at text not null
     );

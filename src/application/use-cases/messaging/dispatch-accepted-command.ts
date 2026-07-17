@@ -20,6 +20,7 @@ import type { PendingAccessRequest } from "../../../ports/identity-access-reposi
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type { PendingDocumentDecision } from "../../../ports/state-repository-port.js";
+import type { PendingDocumentPlacementDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactArchiveDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDestinationDecision } from "../../../ports/state-repository-port.js";
@@ -105,6 +106,13 @@ export interface DocumentManager {
   execute(input: ManageDocumentRecordInput): Promise<ManageDocumentRecordResult>;
 }
 
+export interface DocumentPlacementMover {
+  execute(input: {
+    readonly externalId: string;
+    readonly targetFolderId: string;
+  }): Promise<void>;
+}
+
 export interface SubjectAliasManager {
   execute(input: ManageSubjectAliasesInput): Promise<ManageSubjectAliasesResult>;
 }
@@ -183,6 +191,15 @@ export interface PendingDocumentDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingDocumentPlacementDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingDocumentPlacementDecision | undefined>;
+  save(input: PendingDocumentPlacementDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -198,6 +215,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly documentRegistrar?: DocumentRegistrar;
   readonly documentLookup?: DocumentLookup;
   readonly documentManager?: DocumentManager;
+  readonly documentPlacementMover?: DocumentPlacementMover;
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
@@ -210,6 +228,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingFamilyFactDecisions?: PendingFamilyFactDecisionStore;
   readonly pendingFamilyFactArchiveDecisions?: PendingFamilyFactArchiveDecisionStore;
   readonly pendingDocumentDecisions?: PendingDocumentDecisionStore;
+  readonly pendingDocumentPlacementDecisions?: PendingDocumentPlacementDecisionStore;
   readonly now?: () => Date;
 }
 
@@ -274,6 +293,19 @@ export class DispatchAcceptedCommandUseCase {
       return this.dispatchPendingFileDestinationDecision(
         context,
         pendingDestination
+      );
+    }
+
+    const pendingPlacement =
+      await this.dependencies.pendingDocumentPlacementDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingPlacement && context.attachments.length === 0) {
+      return this.dispatchPendingDocumentPlacementDecision(
+        context,
+        pendingPlacement
       );
     }
 
@@ -435,6 +467,19 @@ export class DispatchAcceptedCommandUseCase {
       return this.dispatchPendingFileDestinationDecision(
         context,
         pendingDestination
+      );
+    }
+
+    const pendingPlacement =
+      await this.dependencies.pendingDocumentPlacementDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingPlacement && context.attachments.length === 0) {
+      return this.dispatchPendingDocumentPlacementDecision(
+        context,
+        pendingPlacement
       );
     }
 
@@ -868,9 +913,19 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
+      context,
+      uploadedDocuments
+    );
+
     return {
       chatId: context.chat.id,
-      text: formatUploadedDocumentsReply(uploadedDocuments)
+      text: [
+        formatUploadedDocumentsReply(uploadedDocuments),
+        ...(placementSuggested
+          ? formatPlacementSuggestionLines(uploadedDocuments[0])
+          : [])
+      ].join("\n")
     };
   }
 
@@ -951,6 +1006,51 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: `Не могу применить решение по файлу ${pending.fileName}: не сохранились данные исходного вложения. Пришли файл еще раз.`
+    };
+  }
+
+  private async dispatchPendingDocumentPlacementDecision(
+    context: AcceptedMessageContext,
+    pending: PendingDocumentPlacementDecision
+  ): Promise<OutboundReply> {
+    const decision = parsePlacementDecision(context.text);
+
+    if (!decision) {
+      return {
+        chatId: context.chat.id,
+        text: placementDecisionPrompt(pending)
+      };
+    }
+
+    await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    if (decision === "skip") {
+      return {
+        chatId: context.chat.id,
+        text: `Ок, оставляю ${pending.document.name} на текущем месте.`
+      };
+    }
+
+    if (!pending.targetFolderId || !this.dependencies.documentPlacementMover) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          `Не двигаю ${pending.document.name}: для папки ${pending.targetFolderPath} пока не настроен Drive folder id.`,
+          "Файл остался на текущем месте."
+        ].join("\n")
+      };
+    }
+
+    await this.dependencies.documentPlacementMover.execute({
+      externalId: pending.document.externalId,
+      targetFolderId: pending.targetFolderId
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: `Готово: переместил ${pending.document.name} в ${pending.targetFolderPath}.`
     };
   }
 
@@ -1169,8 +1269,12 @@ export class DispatchAcceptedCommandUseCase {
     );
 
     const updated: string[] = [];
+    const updatedDocuments = pending.candidates.map((document) => ({
+      ...document,
+      ...metadata
+    }));
 
-    for (const document of pending.candidates) {
+    for (const document of updatedDocuments) {
       const result = await this.dependencies.documentManager.execute({
         action: "update_metadata",
         query: document.name,
@@ -1180,10 +1284,43 @@ export class DispatchAcceptedCommandUseCase {
       updated.push(result.text);
     }
 
+    const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
+      context,
+      updatedDocuments
+    );
+
     return {
       chatId: context.chat.id,
-      text: updated.join("\n")
+      text: [
+        updated.join("\n"),
+        ...(placementSuggested
+          ? formatPlacementSuggestionLines(updatedDocuments[0])
+          : [])
+      ].join("\n")
     };
+  }
+
+  private async savePendingDocumentPlacementSuggestion(
+    context: AcceptedMessageContext,
+    documents: readonly PendingDocumentPlacementDecision["document"][]
+  ): Promise<boolean> {
+    const [document] = documents;
+
+    if (!document || !this.dependencies.pendingDocumentPlacementDecisions) {
+      return false;
+    }
+
+    const targetFolderPath = canonicalDocumentFolderPath(document);
+    const now = this.dependencies.now?.() ?? new Date();
+    await this.dependencies.pendingDocumentPlacementDecisions.save({
+      chatId: context.chat.id,
+      actorId: context.actor.id,
+      document,
+      targetFolderPath,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+    });
+    return true;
   }
 
   private async dispatchPendingFamilyFactDecision(
@@ -1633,6 +1770,61 @@ function formatUploadedDocumentLine(
     : document.name;
 
   return `- ${name}\n  ${document.url}`;
+}
+
+function canonicalDocumentFolderPath(
+  document: PendingDocumentPlacementDecision["document"]
+): string {
+  return [
+    "Family Documents",
+    document.subjectId ?? "family",
+    document.documentType ?? "other"
+  ].join("/");
+}
+
+function formatPlacementSuggestionLines(
+  document: PendingDocumentPlacementDecision["document"] | undefined
+): string[] {
+  if (!document) {
+    return [];
+  }
+
+  const targetFolderPath = canonicalDocumentFolderPath(document);
+
+  return [
+    `Предлагаю папку: ${targetFolderPath}`,
+    "Переместить файл туда? Ответь yes или skip."
+  ];
+}
+
+function placementDecisionPrompt(
+  pending: PendingDocumentPlacementDecision
+): string {
+  return [
+    `Я жду решение по размещению ${pending.document.name}.`,
+    `Предлагаемая папка: ${pending.targetFolderPath}`,
+    "Можно ответить yes или skip."
+  ].join("\n");
+}
+
+function parsePlacementDecision(text: string): "accept" | "skip" | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (
+    /\b(yes|ok|move|accept|confirm)\b/.test(normalized) ||
+    /да|ок|перемести|подтверж|соглас/.test(normalized)
+  ) {
+    return "accept";
+  }
+
+  if (
+    /\b(no|skip|cancel|nothing|later)\b/.test(normalized) ||
+    /нет|пропусти|отмена|ничего|потом|не надо/.test(normalized)
+  ) {
+    return "skip";
+  }
+
+  return undefined;
 }
 
 function formatRegisteredDocumentReply(
