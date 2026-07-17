@@ -62,12 +62,14 @@ describe("loadConfig", () => {
       loadConfig({
         DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
         DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "http://127.0.0.1:9999",
+        DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID: "folder-inbox",
         DOZERCLAW_DRIVE_FOLDER_MAP_JSON:
           '{"Family Documents/max/identity":"folder-max-identity"}'
       }).googleDrive
     ).toEqual({
       accessToken: "drive-token",
       apiBaseUrl: "http://127.0.0.1:9999",
+      uploadFolderId: "folder-inbox",
       folderIdByPath: {
         "Family Documents/max/identity": "folder-max-identity"
       }

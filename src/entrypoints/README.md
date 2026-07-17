@@ -15,3 +15,5 @@ Current dev-only CLI harnesses:
 - `dev:codex-smoke` checks the configured Codex model provider.
 - `dev:mempalace-smoke` checks family fact record/recall through configured
   SQLite and MemPalace.
+- `dev:google-drive-smoke` checks service-account Drive upload and confirmed
+  placement through the normalized message path.

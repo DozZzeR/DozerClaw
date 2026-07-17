@@ -14,6 +14,7 @@ export interface GoogleDriveDocumentStorageProviderOptions {
   readonly accessToken?: string;
   readonly serviceAccountKeyPath?: string;
   readonly apiBaseUrl?: string;
+  readonly uploadFolderId?: string;
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
 }
@@ -64,6 +65,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
       this.apiBaseUrl
     );
     url.searchParams.set("fields", "id,name,webViewLink");
+    url.searchParams.set("supportsAllDrives", "true");
 
     const response = await this.fetchImpl(url.toString(), {
       method: "GET",
@@ -74,7 +76,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
 
     if (!response.ok) {
       throw new Error(
-        `Google Drive metadata request failed: HTTP ${response.status}`
+        `Google Drive metadata request failed: HTTP ${response.status}${await formatGoogleErrorDetail(response)}`
       );
     }
 
@@ -96,6 +98,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     const url = new URL("/upload/drive/v3/files", this.apiBaseUrl);
     url.searchParams.set("uploadType", "multipart");
     url.searchParams.set("fields", "id,name,webViewLink");
+    url.searchParams.set("supportsAllDrives", "true");
 
     const response = await this.fetchImpl(url.toString(), {
       method: "POST",
@@ -103,11 +106,13 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
         authorization: `Bearer ${await this.accessToken()}`,
         "content-type": `multipart/related; boundary=${boundary}`
       },
-      body: buildMultipartUploadBody(input, boundary)
+      body: buildMultipartUploadBody(input, boundary, this.options.uploadFolderId)
     });
 
     if (!response.ok) {
-      throw new Error(`Google Drive upload failed: HTTP ${response.status}`);
+      throw new Error(
+        `Google Drive upload failed: HTTP ${response.status}${await formatGoogleErrorDetail(response)}`
+      );
     }
 
     const metadata = (await response.json()) as GoogleDriveFileMetadata;
@@ -130,6 +135,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     );
     url.searchParams.set("addParents", input.targetFolderId);
     url.searchParams.set("fields", "id");
+    url.searchParams.set("supportsAllDrives", "true");
 
     const response = await this.fetchImpl(url.toString(), {
       method: "PATCH",
@@ -139,7 +145,9 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     });
 
     if (!response.ok) {
-      throw new Error(`Google Drive move failed: HTTP ${response.status}`);
+      throw new Error(
+        `Google Drive move failed: HTTP ${response.status}${await formatGoogleErrorDetail(response)}`
+      );
     }
 
     const metadata = (await response.json()) as GoogleDriveFileMetadata;
@@ -239,7 +247,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
 
     if (!response.ok) {
       throw new Error(
-        `Google Drive service account token request failed: HTTP ${response.status}`
+        `Google Drive service account token request failed: HTTP ${response.status}${await formatGoogleErrorDetail(response)}`
       );
     }
 
@@ -282,15 +290,54 @@ function base64UrlEncode(input: string | Buffer): string {
     .replace(/=+$/u, "");
 }
 
+async function formatGoogleErrorDetail(response: Response): Promise<string> {
+  const text = await response.text();
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const message = googleErrorMessage(parsed);
+
+    return message ? ` (${message})` : "";
+  } catch {
+    return "";
+  }
+}
+
+function googleErrorMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || !("error" in value)) {
+    return undefined;
+  }
+
+  const error = value.error;
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return typeof error.message === "string" ? error.message : undefined;
+  }
+
+  return undefined;
+}
+
 function buildMultipartUploadBody(
   input: UploadDocumentInput,
-  boundary: string
+  boundary: string,
+  uploadFolderId: string | undefined
 ): Blob {
   return new Blob(
     [
       `--${boundary}\r\n`,
       "Content-Type: application/json; charset=UTF-8\r\n\r\n",
-      JSON.stringify({ name: input.fileName }),
+      JSON.stringify({
+        name: input.fileName,
+        ...(uploadFolderId ? { parents: [uploadFolderId] } : {})
+      }),
       "\r\n",
       `--${boundary}\r\n`,
       `Content-Type: ${input.mimeType ?? "application/octet-stream"}\r\n\r\n`,

@@ -41,6 +41,7 @@ export interface GoogleDriveConfig {
   readonly accessToken?: string;
   readonly serviceAccountKeyPath?: string;
   readonly apiBaseUrl: string;
+  readonly uploadFolderId?: string;
   readonly folderIdByPath?: Readonly<Record<string, string>>;
 }
 
@@ -96,6 +97,7 @@ function googleDriveConfig(
   const accessToken = env.DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN?.trim();
   const serviceAccountKeyPath =
     env.DOZERCLAW_GOOGLE_SERVICE_ACCOUNT_KEY_PATH?.trim();
+  const uploadFolderId = env.DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID?.trim();
 
   if (!accessToken && !serviceAccountKeyPath) {
     return {};
@@ -108,6 +110,7 @@ function googleDriveConfig(
       apiBaseUrl:
         env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
         "https://www.googleapis.com",
+      ...(uploadFolderId ? { uploadFolderId } : {}),
       ...parseDriveFolderMap(env.DOZERCLAW_DRIVE_FOLDER_MAP_JSON)
     }
   };

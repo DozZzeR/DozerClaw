@@ -653,7 +653,7 @@ describe("buildApp", () => {
       expect(reply.text).toBe("Registered document: Passport.pdf");
       expect(drive.requests).toEqual([
         {
-          path: "/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink",
+          path: "/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink&supportsAllDrives=true",
           authorization: "Bearer drive-token"
         }
       ]);

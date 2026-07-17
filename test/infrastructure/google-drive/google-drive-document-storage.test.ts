@@ -27,7 +27,7 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     });
     expect(fetch.requests).toEqual([
       expect.objectContaining({
-        url: "https://www.googleapis.com/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink",
+        url: "https://www.googleapis.com/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink&supportsAllDrives=true",
         authorization: "Bearer drive-token"
       })
     ]);
@@ -46,7 +46,7 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     });
 
     expect(fetch.requests[0]?.url).toBe(
-      "https://www.googleapis.com/drive/v3/files/drive-raw-id?fields=id%2Cname%2CwebViewLink"
+      "https://www.googleapis.com/drive/v3/files/drive-raw-id?fields=id%2Cname%2CwebViewLink&supportsAllDrives=true"
     );
   });
 
@@ -72,7 +72,8 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     const provider = new GoogleDriveDocumentStorageProvider({
       accessToken: "drive-token",
       fetch: fetch.fetch.bind(fetch),
-      apiBaseUrl: "https://www.googleapis.com"
+      apiBaseUrl: "https://www.googleapis.com",
+      uploadFolderId: "folder-inbox"
     });
 
     await expect(
@@ -87,13 +88,16 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       url: "https://drive.google.com/file/d/drive-abc/view"
     });
     expect(fetch.requests[0]).toMatchObject({
-      url: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2Cname%2CwebViewLink",
+      url: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2Cname%2CwebViewLink&supportsAllDrives=true",
       authorization: "Bearer drive-token",
       method: "POST"
     });
     expect(fetch.requests[0]?.contentType).toContain("multipart/related");
     await expect(fetch.requests[0]?.body?.text()).resolves.toContain(
       '"name":"Passport.pdf"'
+    );
+    await expect(fetch.requests[0]?.body?.text()).resolves.toContain(
+      '"parents":["folder-inbox"]'
     );
   });
 
@@ -114,7 +118,7 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       externalId: "drive-abc"
     });
     expect(fetch.requests[0]).toMatchObject({
-      url: "https://www.googleapis.com/drive/v3/files/drive-abc?addParents=folder-identity-max&fields=id",
+      url: "https://www.googleapis.com/drive/v3/files/drive-abc?addParents=folder-identity-max&fields=id&supportsAllDrives=true",
       authorization: "Bearer drive-token",
       method: "PATCH"
     });
@@ -149,7 +153,7 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       );
       expect(fetch.tokenRequests[0]?.body.get("assertion")).toContain(".");
       expect(fetch.requests[0]).toMatchObject({
-        url: "https://www.googleapis.com/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink",
+        url: "https://www.googleapis.com/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink&supportsAllDrives=true",
         authorization: "Bearer minted-drive-token"
       });
     } finally {
