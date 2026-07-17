@@ -225,6 +225,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
           }
         }
       : {}),
+    ...(config.googleDrive?.folderIdByPath
+      ? {
+          documentFolderResolver: {
+            findFolderIdByPath: (path) =>
+              config.googleDrive?.folderIdByPath?.[path]
+          }
+        }
+      : {}),
     subjectAliasManager,
     factDecisionResolver,
     pendingAccessRequests: {

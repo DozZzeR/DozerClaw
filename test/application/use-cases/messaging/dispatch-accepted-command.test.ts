@@ -408,6 +408,53 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("saves a target folder id when a placement folder mapping exists", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      pendingDocumentPlacementDecisions,
+      documentFolderResolver: {
+        findFolderIdByPath: (path) =>
+          path === "Family Documents/max/identity"
+            ? "folder-max-identity"
+            : undefined
+      },
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "upload passport for max to Google Drive",
+        attachments: [
+          {
+            id: "attachment-1",
+            providerFileId: "telegram-file-1",
+            fileName: "passport.pdf"
+          }
+        ]
+      }
+    });
+
+    expect(pendingDocumentPlacementDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      document: {
+        ...uploadedDocumentRecord(),
+        documentType: "identity",
+        subjectId: "max"
+      },
+      targetFolderPath: "Family Documents/max/identity",
+      targetFolderId: "folder-max-identity",
+      createdAt: new Date("2026-07-02T20:05:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+    });
+  });
+
   it("reports when accepting placement without a configured Drive folder id", async () => {
     const pendingDocumentPlacementDecisions =
       new FakePendingDocumentPlacementDecisions();
@@ -442,6 +489,42 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
     expect(intentClassifier.seenInput).toBeUndefined();
     expect(mover.seenInput).toBeUndefined();
+    expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("moves a document when accepting placement with a configured Drive folder id", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = {
+      ...pendingDocumentPlacementDecision(),
+      targetFolderId: "folder-max-identity"
+    };
+    const mover = new FakeDocumentPlacementMover();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentPlacementMover: mover,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "yes move it"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Готово: переместил passport.pdf в Family Documents/max/identity."
+    });
+    expect(mover.seenInput).toEqual({
+      externalId: "drive-passport",
+      targetFolderId: "folder-max-identity"
+    });
     expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
       "chat-owner"
     ]);

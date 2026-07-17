@@ -262,6 +262,105 @@ describe("buildApp attachment storage", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("moves uploaded Drive documents after confirmed placement when folder mapping is configured", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const fileStorageRoot = join(directory, "file-inbox");
+    const downloader = new FakeAttachmentDownloader();
+    const documentStorage = new FakeDocumentStorage();
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_FILE_STORAGE_ROOT: fileStorageRoot,
+          DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
+          DOZERCLAW_DRIVE_FOLDER_MAP_JSON:
+            '{"Family Documents/max/identity":"folder-max-identity"}',
+          NODE_ENV: "test"
+        },
+        attachmentDownloader: downloader,
+        documentStorage
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        displayName: "Owner"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-1",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "save this",
+        attachments: [
+          {
+            id: "attachment-1",
+            providerFileId: "telegram-file-1",
+            fileName: "passport.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 11
+          }
+        ],
+        receivedAt: new Date("2026-07-04T12:00:00.000Z"),
+        now: new Date("2026-07-04T12:00:00.000Z")
+      });
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-2",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "Google Drive",
+        attachments: [],
+        receivedAt: new Date("2026-07-04T12:01:00.000Z"),
+        now: new Date("2026-07-04T12:01:00.000Z")
+      });
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-3",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "identity max",
+        attachments: [],
+        receivedAt: new Date("2026-07-04T12:02:00.000Z"),
+        now: new Date("2026-07-04T12:02:00.000Z")
+      });
+
+      const placementReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-4",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "yes",
+        attachments: [],
+        receivedAt: new Date("2026-07-04T12:03:00.000Z"),
+        now: new Date("2026-07-04T12:03:00.000Z")
+      });
+
+      expect(placementReply.text).toBe(
+        "Готово: переместил passport.pdf в Family Documents/max/identity."
+      );
+      expect(documentStorage.moves).toEqual([
+        {
+          externalId: "drive-passport",
+          targetFolderId: "folder-max-identity"
+        }
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 class FakeAttachmentDownloader implements AttachmentDownloadPort {

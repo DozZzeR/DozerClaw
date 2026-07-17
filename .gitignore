@@ -5,4 +5,5 @@ data/
 .env
 .env.*
 !.env.example
+setting_key.json
 npm-debug.log*

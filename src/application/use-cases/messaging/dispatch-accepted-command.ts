@@ -113,6 +113,10 @@ export interface DocumentPlacementMover {
   }): Promise<void>;
 }
 
+export interface DocumentFolderResolver {
+  findFolderIdByPath(path: string): string | undefined;
+}
+
 export interface SubjectAliasManager {
   execute(input: ManageSubjectAliasesInput): Promise<ManageSubjectAliasesResult>;
 }
@@ -216,6 +220,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly documentLookup?: DocumentLookup;
   readonly documentManager?: DocumentManager;
   readonly documentPlacementMover?: DocumentPlacementMover;
+  readonly documentFolderResolver?: DocumentFolderResolver;
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
@@ -1311,12 +1316,17 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const targetFolderPath = canonicalDocumentFolderPath(document);
+    const targetFolderId =
+      this.dependencies.documentFolderResolver?.findFolderIdByPath(
+        targetFolderPath
+      );
     const now = this.dependencies.now?.() ?? new Date();
     await this.dependencies.pendingDocumentPlacementDecisions.save({
       chatId: context.chat.id,
       actorId: context.actor.id,
       document,
       targetFolderPath,
+      ...(targetFolderId ? { targetFolderId } : {}),
       createdAt: now,
       expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
     });

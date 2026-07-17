@@ -40,6 +40,7 @@ export interface MemoryConfig {
 export interface GoogleDriveConfig {
   readonly accessToken: string;
   readonly apiBaseUrl: string;
+  readonly folderIdByPath?: Readonly<Record<string, string>>;
 }
 
 export interface MempalaceMemoryConfig {
@@ -102,9 +103,41 @@ function googleDriveConfig(
       accessToken,
       apiBaseUrl:
         env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
-        "https://www.googleapis.com"
+        "https://www.googleapis.com",
+      ...parseDriveFolderMap(env.DOZERCLAW_DRIVE_FOLDER_MAP_JSON)
     }
   };
+}
+
+function parseDriveFolderMap(
+  value: string | undefined
+): { readonly folderIdByPath?: Readonly<Record<string, string>> } {
+  if (!value?.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const folderIdByPath: Record<string, string> = {};
+
+    for (const [rawPath, rawFolderId] of Object.entries(parsed)) {
+      const path = rawPath.trim();
+      const folderId = typeof rawFolderId === "string" ? rawFolderId.trim() : "";
+
+      if (path && folderId) {
+        folderIdByPath[path] = folderId;
+      }
+    }
+
+    return Object.keys(folderIdByPath).length > 0 ? { folderIdByPath } : {};
+  } catch {
+    return {};
+  }
 }
 
 function memoryConfig(env: NodeJS.ProcessEnv): { readonly memory?: MemoryConfig } {

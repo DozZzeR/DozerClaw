@@ -61,11 +61,16 @@ describe("loadConfig", () => {
     expect(
       loadConfig({
         DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
-        DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "http://127.0.0.1:9999"
+        DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "http://127.0.0.1:9999",
+        DOZERCLAW_DRIVE_FOLDER_MAP_JSON:
+          '{"Family Documents/max/identity":"folder-max-identity"}'
       }).googleDrive
     ).toEqual({
       accessToken: "drive-token",
-      apiBaseUrl: "http://127.0.0.1:9999"
+      apiBaseUrl: "http://127.0.0.1:9999",
+      folderIdByPath: {
+        "Family Documents/max/identity": "folder-max-identity"
+      }
     });
   });
 });
