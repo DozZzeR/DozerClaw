@@ -1,3 +1,8 @@
+import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { GoogleDriveDocumentStorageProvider } from "../../../src/infrastructure/providers/google-drive/google-drive-document-storage.js";
@@ -114,6 +119,70 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       method: "PATCH"
     });
   });
+
+  it("exchanges a service account JWT for a Drive access token", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-drive-auth-"));
+    const keyPath = join(directory, "service-account.json");
+    const fetch = new RecordingFetch();
+
+    try {
+      writeFileSync(keyPath, JSON.stringify(serviceAccountKey()));
+      const provider = new GoogleDriveDocumentStorageProvider({
+        serviceAccountKeyPath: keyPath,
+        fetch: fetch.fetch.bind(fetch),
+        apiBaseUrl: "https://www.googleapis.com",
+        now: () => new Date("2026-07-17T12:00:00.000Z")
+      });
+
+      await provider.resolveDocument({
+        externalIdOrUrl: "drive-abc"
+      });
+
+      expect(fetch.tokenRequests).toHaveLength(1);
+      expect(fetch.tokenRequests[0]).toMatchObject({
+        url: "https://oauth2.googleapis.com/token",
+        method: "POST",
+        contentType: "application/x-www-form-urlencoded"
+      });
+      expect(fetch.tokenRequests[0]?.body.get("grant_type")).toBe(
+        "urn:ietf:params:oauth:grant-type:jwt-bearer"
+      );
+      expect(fetch.tokenRequests[0]?.body.get("assertion")).toContain(".");
+      expect(fetch.requests[0]).toMatchObject({
+        url: "https://www.googleapis.com/drive/v3/files/drive-abc?fields=id%2Cname%2CwebViewLink",
+        authorization: "Bearer minted-drive-token"
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reuses a cached service account access token", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-drive-auth-"));
+    const keyPath = join(directory, "service-account.json");
+    const fetch = new RecordingFetch();
+
+    try {
+      writeFileSync(keyPath, JSON.stringify(serviceAccountKey()));
+      const provider = new GoogleDriveDocumentStorageProvider({
+        serviceAccountKeyPath: keyPath,
+        fetch: fetch.fetch.bind(fetch),
+        apiBaseUrl: "https://www.googleapis.com",
+        now: () => new Date("2026-07-17T12:00:00.000Z")
+      });
+
+      await provider.resolveDocument({ externalIdOrUrl: "drive-abc" });
+      await provider.resolveDocument({ externalIdOrUrl: "drive-def" });
+
+      expect(fetch.tokenRequests).toHaveLength(1);
+      expect(fetch.requests.map((request) => request.authorization)).toEqual([
+        "Bearer minted-drive-token",
+        "Bearer minted-drive-token"
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 class RecordingFetch {
@@ -124,9 +193,40 @@ class RecordingFetch {
     readonly contentType: string;
     readonly body?: Blob;
   }> = [];
+  readonly tokenRequests: Array<{
+    readonly url: string;
+    readonly method: string;
+    readonly contentType: string;
+    readonly body: URLSearchParams;
+  }> = [];
 
   async fetch(input: Parameters<typeof fetch>[0], init?: RequestInit) {
     const headers = new Headers(init?.headers);
+
+    if (String(input) === "https://oauth2.googleapis.com/token") {
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      this.tokenRequests.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        contentType: String(headers.get("content-type") ?? ""),
+        body
+      });
+
+      return new Response(
+        JSON.stringify({
+          access_token: "minted-drive-token",
+          expires_in: 3600,
+          token_type: "Bearer"
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    }
+
     this.requests.push({
       url: String(input),
       authorization: String(headers.get("authorization") ?? ""),
@@ -149,4 +249,20 @@ class RecordingFetch {
       }
     );
   }
+}
+
+function serviceAccountKey() {
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048
+  });
+
+  return {
+    type: "service_account",
+    client_email: "family-bot@example.iam.gserviceaccount.com",
+    private_key: privateKey.export({
+      type: "pkcs8",
+      format: "pem"
+    }),
+    token_uri: "https://oauth2.googleapis.com/token"
+  };
 }

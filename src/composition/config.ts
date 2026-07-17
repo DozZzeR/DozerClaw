@@ -38,7 +38,8 @@ export interface MemoryConfig {
 }
 
 export interface GoogleDriveConfig {
-  readonly accessToken: string;
+  readonly accessToken?: string;
+  readonly serviceAccountKeyPath?: string;
   readonly apiBaseUrl: string;
   readonly folderIdByPath?: Readonly<Record<string, string>>;
 }
@@ -93,14 +94,17 @@ function googleDriveConfig(
   env: NodeJS.ProcessEnv
 ): { readonly googleDrive?: GoogleDriveConfig } {
   const accessToken = env.DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN?.trim();
+  const serviceAccountKeyPath =
+    env.DOZERCLAW_GOOGLE_SERVICE_ACCOUNT_KEY_PATH?.trim();
 
-  if (!accessToken) {
+  if (!accessToken && !serviceAccountKeyPath) {
     return {};
   }
 
   return {
     googleDrive: {
-      accessToken,
+      ...(accessToken ? { accessToken } : {}),
+      ...(serviceAccountKeyPath ? { serviceAccountKeyPath } : {}),
       apiBaseUrl:
         env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
         "https://www.googleapis.com",
