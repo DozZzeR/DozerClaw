@@ -15,8 +15,10 @@ describe("runDevGoogleOAuth", () => {
     expect(lines).toEqual(["dev Google OAuth helper is not available in production."]);
   });
 
-  it("prints an authorization URL when no code is provided", async () => {
+  it("waits for a callback code when no code is provided", async () => {
     const lines: string[] = [];
+    const fetch = new RecordingFetch();
+    const waitedRedirectUris: string[] = [];
 
     const exitCode = await runDevGoogleOAuth({
       env: {
@@ -24,7 +26,13 @@ describe("runDevGoogleOAuth", () => {
         DOZERCLAW_GOOGLE_OAUTH_CLIENT: "oauth-client",
         DOZERCLAW_GOOGLE_OAUTH_SECRET: "oauth-secret"
       },
-      write: (line) => lines.push(line)
+      write: (line) => lines.push(line),
+      fetch: fetch.fetch.bind(fetch),
+      waitForCode: async (redirectUri) => {
+        waitedRedirectUris.push(redirectUri);
+
+        return "callback-code";
+      }
     });
 
     expect(exitCode).toBe(0);
@@ -33,6 +41,10 @@ describe("runDevGoogleOAuth", () => {
     expect(lines[1]).toContain("client_id=oauth-client");
     expect(lines[1]).toContain("access_type=offline");
     expect(lines[1]).toContain("prompt=consent");
+    expect(lines).toContain("Waiting for OAuth callback...");
+    expect(waitedRedirectUris).toEqual(["http://127.0.0.1:53682/oauth2callback"]);
+    expect(fetch.requests[0]?.body.get("code")).toBe("callback-code");
+    expect(lines).toContain("DOZERCLAW_GOOGLE_OAUTH_REFRESH_TOKEN=refresh-token");
   });
 
   it("exchanges an authorization code for a refresh token", async () => {

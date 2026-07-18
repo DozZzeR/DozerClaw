@@ -1,9 +1,11 @@
+import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 
 export interface DevGoogleOAuthOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly write: (line: string) => void;
   readonly fetch?: typeof fetch;
+  readonly waitForCode?: (redirectUri: string) => Promise<string>;
 }
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -38,16 +40,13 @@ export async function runDevGoogleOAuth(
     return 1;
   }
 
-  const code = options.env.DOZERCLAW_GOOGLE_OAUTH_CODE?.trim();
+  let code = options.env.DOZERCLAW_GOOGLE_OAUTH_CODE?.trim();
 
   if (!code) {
     options.write("Open this URL and approve Drive access:");
     options.write(buildAuthorizationUrl({ clientId, redirectUri }));
-    options.write(
-      "Then run again with DOZERCLAW_GOOGLE_OAUTH_CODE set to the returned code."
-    );
-
-    return 0;
+    options.write("Waiting for OAuth callback...");
+    code = await (options.waitForCode ?? waitForOAuthCallback)(redirectUri);
   }
 
   const response = await (options.fetch ?? fetch)(TOKEN_URL, {
@@ -99,6 +98,60 @@ function buildAuthorizationUrl(input: {
   url.searchParams.set("prompt", "consent");
 
   return url.toString();
+}
+
+function waitForOAuthCallback(redirectUri: string): Promise<string> {
+  const url = new URL(redirectUri);
+  const port = Number.parseInt(url.port, 10);
+  const expectedPath = url.pathname;
+
+  return new Promise((resolve, reject) => {
+    const server = createServer((request, response) => {
+      try {
+        const requestUrl = new URL(request.url ?? "/", redirectUri);
+
+        if (requestUrl.pathname !== expectedPath) {
+          response.writeHead(404, { "content-type": "text/plain" });
+          response.end("Not found");
+
+          return;
+        }
+
+        const error = requestUrl.searchParams.get("error");
+
+        if (error) {
+          response.writeHead(400, { "content-type": "text/plain" });
+          response.end("OAuth failed. You can close this tab.");
+          reject(new Error(`Google OAuth callback failed: ${error}`));
+          server.close();
+
+          return;
+        }
+
+        const code = requestUrl.searchParams.get("code");
+
+        if (!code) {
+          response.writeHead(400, { "content-type": "text/plain" });
+          response.end("OAuth code was missing. You can close this tab.");
+          reject(new Error("Google OAuth callback did not include code."));
+          server.close();
+
+          return;
+        }
+
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.end("OAuth code received. You can close this tab.");
+        resolve(code);
+        server.close();
+      } catch (error) {
+        reject(error);
+        server.close();
+      }
+    });
+
+    server.once("error", reject);
+    server.listen(port, url.hostname);
+  });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
