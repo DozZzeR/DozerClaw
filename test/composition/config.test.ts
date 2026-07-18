@@ -91,4 +91,21 @@ describe("loadConfig", () => {
       }
     });
   });
+
+  it("loads Google Drive user OAuth refresh token config", () => {
+    expect(
+      loadConfig({
+        DOZERCLAW_GOOGLE_OAUTH_CLIENT: "oauth-client",
+        DOZERCLAW_GOOGLE_OAUTH_SECRET: "oauth-secret",
+        DOZERCLAW_GOOGLE_OAUTH_REFRESH_TOKEN: "refresh-token"
+      }).googleDrive
+    ).toEqual({
+      oauth: {
+        clientId: "oauth-client",
+        clientSecret: "oauth-secret",
+        refreshToken: "refresh-token"
+      },
+      apiBaseUrl: "https://www.googleapis.com"
+    });
+  });
 });

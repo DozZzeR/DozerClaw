@@ -187,6 +187,62 @@ describe("GoogleDriveDocumentStorageProvider", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("exchanges a user OAuth refresh token for a Drive access token", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      oauth: {
+        clientId: "oauth-client",
+        clientSecret: "oauth-secret",
+        refreshToken: "refresh-token"
+      },
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com",
+      now: () => new Date("2026-07-18T10:00:00.000Z")
+    });
+
+    await provider.resolveDocument({
+      externalIdOrUrl: "drive-abc"
+    });
+
+    expect(fetch.oauthRefreshRequests).toHaveLength(1);
+    expect(fetch.oauthRefreshRequests[0]?.body.get("grant_type")).toBe(
+      "refresh_token"
+    );
+    expect(fetch.oauthRefreshRequests[0]?.body.get("client_id")).toBe(
+      "oauth-client"
+    );
+    expect(fetch.oauthRefreshRequests[0]?.body.get("client_secret")).toBe(
+      "oauth-secret"
+    );
+    expect(fetch.oauthRefreshRequests[0]?.body.get("refresh_token")).toBe(
+      "refresh-token"
+    );
+    expect(fetch.requests[0]?.authorization).toBe("Bearer oauth-drive-token");
+  });
+
+  it("reuses a cached user OAuth access token", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      oauth: {
+        clientId: "oauth-client",
+        clientSecret: "oauth-secret",
+        refreshToken: "refresh-token"
+      },
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com",
+      now: () => new Date("2026-07-18T10:00:00.000Z")
+    });
+
+    await provider.resolveDocument({ externalIdOrUrl: "drive-abc" });
+    await provider.resolveDocument({ externalIdOrUrl: "drive-def" });
+
+    expect(fetch.oauthRefreshRequests).toHaveLength(1);
+    expect(fetch.requests.map((request) => request.authorization)).toEqual([
+      "Bearer oauth-drive-token",
+      "Bearer oauth-drive-token"
+    ]);
+  });
 });
 
 class RecordingFetch {
@@ -203,12 +259,41 @@ class RecordingFetch {
     readonly contentType: string;
     readonly body: URLSearchParams;
   }> = [];
+  readonly oauthRefreshRequests: Array<{
+    readonly url: string;
+    readonly method: string;
+    readonly contentType: string;
+    readonly body: URLSearchParams;
+  }> = [];
 
   async fetch(input: Parameters<typeof fetch>[0], init?: RequestInit) {
     const headers = new Headers(init?.headers);
 
     if (String(input) === "https://oauth2.googleapis.com/token") {
       const body = new URLSearchParams(String(init?.body ?? ""));
+      if (body.get("grant_type") === "refresh_token") {
+        this.oauthRefreshRequests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          contentType: String(headers.get("content-type") ?? ""),
+          body
+        });
+
+        return new Response(
+          JSON.stringify({
+            access_token: "oauth-drive-token",
+            expires_in: 3600,
+            token_type: "Bearer"
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        );
+      }
+
       this.tokenRequests.push({
         url: String(input),
         method: init?.method ?? "GET",

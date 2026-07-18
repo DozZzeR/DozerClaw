@@ -40,9 +40,16 @@ export interface MemoryConfig {
 export interface GoogleDriveConfig {
   readonly accessToken?: string;
   readonly serviceAccountKeyPath?: string;
+  readonly oauth?: GoogleOAuthConfig;
   readonly apiBaseUrl: string;
   readonly uploadFolderId?: string;
   readonly folderIdByPath?: Readonly<Record<string, string>>;
+}
+
+export interface GoogleOAuthConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly refreshToken: string;
 }
 
 export interface MempalaceMemoryConfig {
@@ -97,9 +104,10 @@ function googleDriveConfig(
   const accessToken = env.DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN?.trim();
   const serviceAccountKeyPath =
     env.DOZERCLAW_GOOGLE_SERVICE_ACCOUNT_KEY_PATH?.trim();
+  const oauth = googleOAuthConfig(env);
   const uploadFolderId = env.DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID?.trim();
 
-  if (!accessToken && !serviceAccountKeyPath) {
+  if (!accessToken && !serviceAccountKeyPath && !oauth) {
     return {};
   }
 
@@ -107,12 +115,29 @@ function googleDriveConfig(
     googleDrive: {
       ...(accessToken ? { accessToken } : {}),
       ...(serviceAccountKeyPath ? { serviceAccountKeyPath } : {}),
+      ...(oauth ? { oauth } : {}),
       apiBaseUrl:
         env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
         "https://www.googleapis.com",
       ...(uploadFolderId ? { uploadFolderId } : {}),
       ...parseDriveFolderMap(env.DOZERCLAW_DRIVE_FOLDER_MAP_JSON)
     }
+  };
+}
+
+function googleOAuthConfig(env: NodeJS.ProcessEnv): GoogleOAuthConfig | undefined {
+  const clientId = env.DOZERCLAW_GOOGLE_OAUTH_CLIENT?.trim();
+  const clientSecret = env.DOZERCLAW_GOOGLE_OAUTH_SECRET?.trim();
+  const refreshToken = env.DOZERCLAW_GOOGLE_OAUTH_REFRESH_TOKEN?.trim();
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    return undefined;
+  }
+
+  return {
+    clientId,
+    clientSecret,
+    refreshToken
   };
 }
 

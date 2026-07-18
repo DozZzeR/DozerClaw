@@ -13,10 +13,17 @@ import type {
 export interface GoogleDriveDocumentStorageProviderOptions {
   readonly accessToken?: string;
   readonly serviceAccountKeyPath?: string;
+  readonly oauth?: GoogleDriveOAuthOptions;
   readonly apiBaseUrl?: string;
   readonly uploadFolderId?: string;
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
+}
+
+export interface GoogleDriveOAuthOptions {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly refreshToken: string;
 }
 
 interface GoogleDriveFileMetadata {
@@ -170,11 +177,59 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
       return this.cachedToken.accessToken;
     }
 
+    if (this.options.oauth) {
+      const token = await this.exchangeRefreshToken(this.options.oauth);
+      this.cachedToken = token;
+
+      return token.accessToken;
+    }
+
     const key = this.readServiceAccountKey();
     const token = await this.exchangeServiceAccountJwt(key);
     this.cachedToken = token;
 
     return token.accessToken;
+  }
+
+  private async exchangeRefreshToken(
+    oauth: GoogleDriveOAuthOptions
+  ): Promise<{
+    readonly accessToken: string;
+    readonly expiresAtMs: number;
+  }> {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: oauth.clientId,
+      client_secret: oauth.clientSecret,
+      refresh_token: oauth.refreshToken
+    });
+
+    const response = await this.fetchImpl("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Google Drive OAuth refresh request failed: HTTP ${response.status}${await formatGoogleErrorDetail(response)}`
+      );
+    }
+
+    const token = (await response.json()) as TokenResponse;
+
+    if (!token.access_token) {
+      throw new Error("Google Drive OAuth refresh response was incomplete");
+    }
+
+    const expiresInMs = (token.expires_in ?? 3600) * 1000;
+
+    return {
+      accessToken: token.access_token,
+      expiresAtMs: this.now().getTime() + expiresInMs - 60_000
+    };
   }
 
   private readServiceAccountKey(): ServiceAccountKey {
