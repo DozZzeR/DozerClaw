@@ -59,6 +59,7 @@ describe("ModelInboundIntentClassifier", () => {
           "canonicalSubjectId",
           "externalIdOrUrl",
           "documentType",
+          "destination",
           "query",
           "reason"
         ]
@@ -74,12 +75,18 @@ describe("parseInboundIntent", () => {
       parseInboundIntent(
         JSON.stringify({
           kind: "store_file",
-          summary: "passport scan"
+          summary: "passport scan",
+          destination: "google_drive",
+          documentType: "identity",
+          subjectId: "max"
         })
       )
     ).toEqual({
       kind: "store_file",
-      summary: "passport scan"
+      summary: "passport scan",
+      destination: "google_drive",
+      documentType: "identity",
+      subjectId: "max"
     });
   });
 

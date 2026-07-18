@@ -785,6 +785,99 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("uses model store_file destination and metadata for Drive uploads", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      pendingDocumentPlacementDecisions,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "store_file",
+        summary: "personal id card",
+        destination: "google_drive",
+        documentType: "identity"
+      }),
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "put it somewhere appropriate",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "card.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf (identity)",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Предлагаю папку: Family Documents/family/identity",
+        "Переместить файл туда? Ответь yes или skip."
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "card.pdf"
+        }
+      ],
+      documentType: "identity"
+    });
+  });
+
+  it("keeps deterministic local destination over model Drive destination", async () => {
+    const attachmentStore = new FakeAttachmentStore(1);
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      documentAttachmentStore,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "store_file",
+        destination: "google_drive",
+        documentType: "identity"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "save this local inbox",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "card.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved 1 attachment(s)."
+    });
+    expect(attachmentStore.seenInput).toBeDefined();
+    expect(documentAttachmentStore.seenInput).toBeUndefined();
+  });
+
   it("records a family fact from model record_fact intent", async () => {
     const factRecorder = new FakeFamilyFactRecorder();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -2153,7 +2246,13 @@ class FakeIntentClassifier {
   constructor(
     private readonly intent:
       | { readonly kind: "ask_clarification"; readonly question: string }
-      | { readonly kind: "store_file"; readonly summary?: string }
+      | {
+          readonly kind: "store_file";
+          readonly summary?: string;
+          readonly destination?: "local_inbox" | "google_drive";
+          readonly documentType?: DocumentType;
+          readonly subjectId?: string;
+        }
       | {
           readonly kind: "record_fact";
           readonly summary: string;

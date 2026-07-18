@@ -15,6 +15,9 @@ export type InboundIntent =
   | {
       readonly kind: "store_file";
       readonly summary?: string;
+      readonly destination?: "local_inbox" | "google_drive";
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
     }
   | {
       readonly kind: "record_fact";
@@ -120,6 +123,15 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use category `place` for addresses, schools, venues, favorite locations, and where something belongs.",
       "- Use category `reference_link` for URLs, document links, external references, and pointers to saved resources.",
       "- If category is unclear, use `preference`; if subject is unclear, set `subjectId` to `null`."
+    ].join("\n"),
+    "",
+    "# store_file field rules",
+    [
+      "- Use `store_file` for uploaded attachments.",
+      "- `destination`: use `google_drive` when the user asks for Google Drive, Drive, cloud document storage, or equivalent; use `local_inbox` when they ask to save locally; use `null` when unclear.",
+      "- `documentType`: for document-like uploads choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when unclear.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
+      "- The model only classifies. It must not claim the file was saved."
     ].join("\n"),
     "",
     "# archive_fact field rules",
@@ -255,7 +267,10 @@ export function parseInboundIntent(text: string): InboundIntent {
         kind: "store_file",
         ...(typeof parsed.summary === "string" && parsed.summary.trim()
           ? { summary: parsed.summary.trim() }
-          : {})
+          : {}),
+        ...optionalFileDestination(parsed.destination),
+        ...optionalDocumentType(parsed.documentType),
+        ...optionalTrimmedText("subjectId", parsed.subjectId)
       };
     }
 
@@ -465,6 +480,10 @@ const inboundIntentSchema = {
         null
       ]
     },
+    destination: {
+      type: ["string", "null"],
+      enum: ["local_inbox", "google_drive", null]
+    },
     query: {
       type: ["string", "null"]
     },
@@ -482,6 +501,7 @@ const inboundIntentSchema = {
     "canonicalSubjectId",
     "externalIdOrUrl",
     "documentType",
+    "destination",
     "query",
     "reason"
   ]
@@ -524,6 +544,18 @@ function optionalDocumentType(
 
   return {
     documentType: value
+  };
+}
+
+function optionalFileDestination(
+  value: unknown
+): { readonly destination?: "local_inbox" | "google_drive" } {
+  if (value !== "local_inbox" && value !== "google_drive") {
+    return {};
+  }
+
+  return {
+    destination: value
   };
 }
 

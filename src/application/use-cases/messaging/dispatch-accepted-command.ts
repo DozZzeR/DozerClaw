@@ -411,7 +411,9 @@ export class DispatchAcceptedCommandUseCase {
           ...context,
           attachments: classifierInput.attachments
         },
-        intent
+        intent,
+        parseFileUploadDestination(context.text) ??
+          parseModelFileUploadDestination(intent)
       );
     }
 
@@ -812,7 +814,10 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (destination === "google_drive") {
-      return this.storeFamilyMessageDocumentAttachments(context);
+      return this.storeFamilyMessageDocumentAttachments(
+        context,
+        parseModelDocumentMetadata(intent)
+      );
     }
 
     const results = await this.dependencies.attachmentStore?.execute({
@@ -870,7 +875,11 @@ export class DispatchAcceptedCommandUseCase {
   }
 
   private async storeFamilyMessageDocumentAttachments(
-    context: AcceptedMessageContext
+    context: AcceptedMessageContext,
+    metadataOverride: {
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
+    } = {}
   ): Promise<OutboundReply> {
     if (!this.dependencies.documentAttachmentStore) {
       return {
@@ -879,7 +888,10 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    const metadata = parseDocumentMetadata(context.text);
+    const metadata = mergeDocumentMetadata(
+      parseDocumentMetadata(context.text),
+      metadataOverride
+    );
     const results = await this.dependencies.documentAttachmentStore.execute({
       provider: context.provider,
       receivedAt: context.receivedAt,
@@ -1638,6 +1650,24 @@ function parseFileUploadDestination(
   return undefined;
 }
 
+function parseModelFileUploadDestination(
+  intent: Extract<InboundIntent, { readonly kind: "store_file" }> | undefined
+): FileUploadDestination | undefined {
+  return intent?.destination;
+}
+
+function parseModelDocumentMetadata(
+  intent: Extract<InboundIntent, { readonly kind: "store_file" }> | undefined
+): {
+  readonly documentType?: DocumentType;
+  readonly subjectId?: string;
+} {
+  return {
+    ...(intent?.documentType ? { documentType: intent.documentType } : {}),
+    ...(intent?.subjectId ? { subjectId: intent.subjectId } : {})
+  };
+}
+
 function fileDestinationPrompt(attachments: readonly MessageAttachment[]): string {
   const names = attachments
     .map((attachment) => attachment.fileName)
@@ -1682,6 +1712,34 @@ function parseDocumentMetadata(text: string): {
   };
 }
 
+function mergeDocumentMetadata(
+  deterministic: {
+    readonly documentType?: DocumentType;
+    readonly subjectId?: string;
+  },
+  fallback: {
+    readonly documentType?: DocumentType;
+    readonly subjectId?: string;
+  }
+): {
+  readonly documentType?: DocumentType;
+  readonly subjectId?: string;
+} {
+  if (!fallback.documentType && !fallback.subjectId) {
+    return deterministic;
+  }
+
+  const documentType = deterministic.documentType ?? fallback.documentType;
+  const subjectId = deterministic.documentType
+    ? deterministic.subjectId ?? fallback.subjectId
+    : fallback.subjectId;
+
+  return {
+    ...(documentType ? { documentType } : {}),
+    ...(subjectId ? { subjectId } : {})
+  };
+}
+
 function parseDocumentType(tokens: readonly string[]): DocumentType | undefined {
   for (const token of tokens) {
     if ((documentTypes as readonly string[]).includes(token)) {
@@ -1716,9 +1774,11 @@ function parseDocumentSubject(tokens: readonly string[]): string | undefined {
     "store",
     "upload",
     "uploaded",
+    "put",
     "file",
     "document",
     "this",
+    "it",
     "to",
     "in",
     "as",
