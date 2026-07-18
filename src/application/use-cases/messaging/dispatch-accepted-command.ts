@@ -880,6 +880,7 @@ export class DispatchAcceptedCommandUseCase {
       provider: context.provider,
       receivedAt: context.receivedAt,
       attachments: context.attachments,
+      userText: context.text,
       ...metadata
     });
     const uploadedDocuments = results.flatMap((result) =>

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 
 import type { DozerClawApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -35,6 +36,7 @@ import { LocalServerMonitor } from "../infrastructure/providers/local-monitor/lo
 import { RegistryServiceMonitor } from "../infrastructure/providers/local-monitor/registry-service-monitor.js";
 import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-cli-model-provider.js";
 import { MempalaceMemoryProvider } from "../infrastructure/providers/mempalace/mempalace-memory-provider.js";
+import { JsonDocumentFolderPolicy } from "../infrastructure/providers/document-folder-policy/json-document-folder-policy.js";
 import { GoogleDriveDocumentStorageProvider } from "../infrastructure/providers/google-drive/google-drive-document-storage.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
@@ -46,6 +48,7 @@ import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sql
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
 import type { AttachmentDownloadPort } from "../ports/attachment-download-port.js";
+import type { DocumentFolderPolicyPort } from "../ports/document-folder-policy-port.js";
 import type { DocumentStoragePort } from "../ports/document-storage-port.js";
 import type { ModelPort } from "../ports/model-port.js";
 
@@ -53,6 +56,7 @@ export interface BuildAppOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly attachmentDownloader?: AttachmentDownloadPort;
   readonly documentStorage?: DocumentStoragePort;
+  readonly documentFolderPolicy?: DocumentFolderPolicyPort;
   readonly modelProvider?: ModelPort;
 }
 
@@ -143,6 +147,12 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     (config.googleDrive
       ? new GoogleDriveDocumentStorageProvider(config.googleDrive)
       : undefined);
+  const documentFolderPolicy =
+    options.documentFolderPolicy ??
+    loadDocumentFolderPolicy(
+      options.env?.DOZERCLAW_DOCUMENT_FOLDER_POLICY_PATH ??
+        (config.environment === "test" ? undefined : "config/document-folder-policy.json")
+    );
   const documentRegistrar = documentStorage
     ? new RegisterDocumentUseCase({
         repository: documentRepository,
@@ -156,6 +166,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       ? new StoreMessageDocumentAttachmentsUseCase({
           attachmentDownloader: options.attachmentDownloader,
           documentStorage,
+          ...(documentFolderPolicy ? { documentFolderPolicy } : {}),
           repository: documentRepository,
           generateId,
           now: () => new Date()
@@ -340,6 +351,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       return handleNormalizedInboundMessage.execute(input);
     }
   };
+}
+
+function loadDocumentFolderPolicy(
+  path: string | undefined
+): DocumentFolderPolicyPort | undefined {
+  if (!path || !existsSync(path)) {
+    return undefined;
+  }
+
+  return JsonDocumentFolderPolicy.fromFile(path);
 }
 
 function healthToDiagnostic(

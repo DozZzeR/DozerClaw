@@ -161,6 +161,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "save this",
       attachments: [
         {
           id: "attachment-1",
@@ -337,6 +338,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "в google drive",
       attachments: [
         {
           id: "attachment-1",
@@ -569,6 +571,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "upload passport for max to Google Drive",
       attachments: [
         {
           id: "attachment-1",
@@ -635,6 +638,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "сохрани файл в гугл. это личная карта",
       attachments: [
         {
           id: "attachment-1",
@@ -1280,6 +1284,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "put it somewhere appropriate",
       attachments: [
         {
           id: "attachment-1",
@@ -1380,6 +1385,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "сохрани файл",
       attachments: [
         {
           id: "attachment-1",
@@ -2712,6 +2718,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "сохрани в гугл",
       attachments: [
         {
           id: "attachment-1",

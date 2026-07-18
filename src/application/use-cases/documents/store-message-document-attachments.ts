@@ -4,12 +4,14 @@ import type {
 } from "../../../core/domain/documents/document-record.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { AttachmentDownloadPort } from "../../../ports/attachment-download-port.js";
+import type { DocumentFolderPolicyPort } from "../../../ports/document-folder-policy-port.js";
 import type { DocumentRepositoryPort } from "../../../ports/document-repository-port.js";
 import type { DocumentStoragePort } from "../../../ports/document-storage-port.js";
 
 export interface StoreMessageDocumentAttachmentsDependencies {
   readonly attachmentDownloader: AttachmentDownloadPort;
   readonly documentStorage: DocumentStoragePort;
+  readonly documentFolderPolicy?: DocumentFolderPolicyPort;
   readonly repository: DocumentRepositoryPort;
   readonly generateId: () => string;
   readonly now: () => Date;
@@ -19,6 +21,7 @@ export interface StoreMessageDocumentAttachmentsInput {
   readonly provider: string;
   readonly receivedAt: Date;
   readonly attachments: readonly MessageAttachment[];
+  readonly userText?: string;
   readonly documentType?: DocumentType;
   readonly subjectId?: string;
 }
@@ -62,10 +65,19 @@ export class StoreMessageDocumentAttachmentsUseCase {
           ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
           ...(attachment.sizeBytes ? { sizeBytes: attachment.sizeBytes } : {})
         });
+      const targetFolder =
+        this.dependencies.documentFolderPolicy?.resolveUploadFolder({
+          fileName: downloaded.fileName,
+          ...(downloaded.mimeType ? { mimeType: downloaded.mimeType } : {}),
+          ...(input.userText ? { userText: input.userText } : {}),
+          ...(input.documentType ? { documentType: input.documentType } : {}),
+          ...(input.subjectId ? { subjectId: input.subjectId } : {})
+        });
       const uploaded = await this.dependencies.documentStorage.uploadDocument({
         fileName: downloaded.fileName,
         ...(downloaded.mimeType ? { mimeType: downloaded.mimeType } : {}),
-        bytes: downloaded.bytes
+        bytes: downloaded.bytes,
+        ...(targetFolder ? { targetFolderId: targetFolder.folderId } : {})
       });
       const now = this.dependencies.now();
       const document: DocumentRecord = {

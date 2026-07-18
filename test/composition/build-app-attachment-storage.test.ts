@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -304,6 +304,87 @@ describe("buildApp attachment storage", () => {
       expect(ignoredPlacementReply.text).toBe(
         "Command not implemented yet: family_message."
       );
+      expect(documentStorage.moves).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("uploads attachments to a configured policy folder without asking placement confirmation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const fileStorageRoot = join(directory, "file-inbox");
+    const policyPath = join(directory, "document-folder-policy.json");
+    const downloader = new FakeAttachmentDownloader();
+    const documentStorage = new FakeDocumentStorage();
+
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        folders: [
+          {
+            path: "01_Личные_документы/Alexey",
+            driveFolderId: "folder-personal-alexey",
+            description: "Личные документы Алексея",
+            documentTypes: ["passport", "id_card"],
+            subjects: ["alexey"],
+            aliases: ["алексей", "личная карта"],
+            examples: ["GoryainovAV-lična karta.pdf"]
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_FILE_STORAGE_ROOT: fileStorageRoot,
+          DOZERCLAW_DOCUMENT_FOLDER_POLICY_PATH: policyPath,
+          NODE_ENV: "test"
+        },
+        attachmentDownloader: downloader,
+        documentStorage
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        displayName: "Owner"
+      });
+
+      const uploaded = await app.handleNormalizedInboundMessage({
+        messageId: "message-1",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "сохрани личную карту alexey в гугл",
+        attachments: [
+          {
+            id: "attachment-1",
+            providerFileId: "telegram-file-1",
+            fileName: "GoryainovAV-lična karta.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 11
+          }
+        ],
+        receivedAt: new Date("2026-07-04T12:00:00.000Z"),
+        now: new Date("2026-07-04T12:00:00.000Z")
+      });
+
+      expect(uploaded.text).toContain("Uploaded 1 document(s) to Google Drive:");
+      expect(uploaded.text).not.toContain("Переместить файл туда?");
+      expect(documentStorage.uploads).toEqual([
+        {
+          fileName: "GoryainovAV-lična karta.pdf",
+          mimeType: "application/pdf",
+          bytes: new TextEncoder().encode("hello world"),
+          targetFolderId: "folder-personal-alexey"
+        }
+      ]);
       expect(documentStorage.moves).toEqual([]);
     } finally {
       rmSync(directory, { recursive: true, force: true });

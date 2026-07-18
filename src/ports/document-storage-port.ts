@@ -13,6 +13,7 @@ export interface UploadDocumentInput {
   readonly fileName: string;
   readonly mimeType?: string;
   readonly bytes: Uint8Array;
+  readonly targetFolderId?: string;
 }
 
 export interface MoveDocumentInput {

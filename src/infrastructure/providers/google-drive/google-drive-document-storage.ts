@@ -105,7 +105,11 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
         authorization: `Bearer ${await this.accessToken()}`,
         "content-type": `multipart/related; boundary=${boundary}`
       },
-      body: buildMultipartUploadBody(input, boundary, this.options.uploadFolderId)
+      body: buildMultipartUploadBody(
+        input,
+        boundary,
+        input.targetFolderId ?? this.options.uploadFolderId
+      )
     });
 
     if (!response.ok) {

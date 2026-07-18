@@ -96,6 +96,27 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     );
   });
 
+  it("uses an upload target folder before the configured inbox folder", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      accessToken: "drive-token",
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com",
+      uploadFolderId: "folder-inbox"
+    });
+
+    await provider.uploadDocument({
+      fileName: "Passport.pdf",
+      mimeType: "application/pdf",
+      bytes: new Uint8Array([1, 2, 3]),
+      targetFolderId: "folder-personal-alexey"
+    });
+
+    await expect(fetch.requests[0]?.body?.text()).resolves.toContain(
+      '"parents":["folder-personal-alexey"]'
+    );
+  });
+
   it("moves files by adding a target Drive parent", async () => {
     const fetch = new RecordingFetch();
     const provider = new GoogleDriveDocumentStorageProvider({
