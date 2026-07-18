@@ -2106,6 +2106,74 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("routes a pending duplicate source attachment to Drive when the user chooses Google", async () => {
+    const pendingFileDuplicateDecisions =
+      new FakePendingFileDuplicateDecisions();
+    pendingFileDuplicateDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      fileName: "GoryainovAV-lična karta.pdf",
+      suggestedCopyName: "GoryainovAV-lična karta (2).pdf",
+      existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "GoryainovAV-lična karta.pdf"
+      },
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const duplicateDecisionResolver = new FakeDuplicateDecisionResolver("copied");
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      duplicateDecisionResolver,
+      intentClassifier,
+      pendingFileDuplicateDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "сохрани в гугл"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Какой это документ?",
+        "Можно ответить тип и subject, например: identity max, или skip."
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "GoryainovAV-lična karta.pdf"
+        }
+      ]
+    });
+    expect(duplicateDecisionResolver.seenInput).toBeUndefined();
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
   it("lists pending access requests for owner review", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,

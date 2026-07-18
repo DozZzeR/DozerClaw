@@ -321,6 +321,16 @@ export class DispatchAcceptedCommandUseCase {
       );
 
     if (pendingDuplicate && context.attachments.length === 0) {
+      const destination = parseFileUploadDestination(context.text);
+
+      if (destination) {
+        return this.dispatchPendingDuplicateDestination(
+          context,
+          pendingDuplicate,
+          destination
+        );
+      }
+
       return this.dispatchPendingDuplicateDecision(context, pendingDuplicate);
     }
 
@@ -1024,6 +1034,34 @@ export class DispatchAcceptedCommandUseCase {
       chatId: context.chat.id,
       text: `Не могу применить решение по файлу ${pending.fileName}: не сохранились данные исходного вложения. Пришли файл еще раз.`
     };
+  }
+
+  private async dispatchPendingDuplicateDestination(
+    context: AcceptedMessageContext,
+    pending: PendingFileDuplicateDecision,
+    destination: FileUploadDestination
+  ): Promise<OutboundReply> {
+    if (!pending.provider || !pending.receivedAt || !pending.sourceAttachment) {
+      return {
+        chatId: context.chat.id,
+        text: `Не могу сохранить ${pending.fileName} в выбранное место: не сохранились данные исходного вложения. Пришли файл еще раз.`
+      };
+    }
+
+    await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    return this.storeFamilyMessageAttachments(
+      {
+        ...context,
+        provider: pending.provider,
+        receivedAt: pending.receivedAt,
+        attachments: [pending.sourceAttachment]
+      },
+      undefined,
+      destination
+    );
   }
 
   private async dispatchPendingDocumentPlacementDecision(
