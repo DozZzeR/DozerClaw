@@ -936,39 +936,17 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDestinationDecision
   ): Promise<OutboundReply | undefined> {
-    if (
-      !allowsFreeFormPendingInterruption(fileDestinationDecisionPolicy) ||
-      !this.dependencies.intentClassifier
-    ) {
-      return undefined;
-    }
-
-    let intent: InboundIntent;
-    try {
-      intent = await this.dependencies.intentClassifier.execute({
-        text: buildPendingFileDestinationInterruptionClassifierText(
-          pending,
-          context.text
-        ),
-        attachments: []
-      });
-    } catch {
-      return undefined;
-    }
-
-    if (intent.kind === "ask_clarification" || intent.kind === "store_file") {
-      return undefined;
-    }
-
-    await this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return this.dispatchClassifiedModelIntent({
+    return this.dispatchSafePendingInterruption({
       context,
-      intent,
-      attachments: [],
-      allowFileOrClarification: false
+      policy: fileDestinationDecisionPolicy,
+      classifierText: buildPendingFileDestinationInterruptionClassifierText(
+        pending,
+        context.text
+      ),
+      clearPending: () =>
+        this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
+          context.chat.id
+        )
     });
   }
 
@@ -1226,8 +1204,28 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply | undefined> {
+    return this.dispatchSafePendingInterruption({
+      context,
+      policy: documentPlacementDecisionPolicy,
+      classifierText: buildPendingDocumentPlacementInterruptionClassifierText(
+        pending,
+        context.text
+      ),
+      clearPending: () =>
+        this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
+          context.chat.id
+        )
+    });
+  }
+
+  private async dispatchSafePendingInterruption(input: {
+    readonly context: AcceptedMessageContext;
+    readonly policy: PendingDecisionPolicy;
+    readonly classifierText: string;
+    readonly clearPending: () => Promise<void> | undefined;
+  }): Promise<OutboundReply | undefined> {
     if (
-      !allowsFreeFormPendingInterruption(documentPlacementDecisionPolicy) ||
+      !allowsFreeFormPendingInterruption(input.policy) ||
       !this.dependencies.intentClassifier
     ) {
       return undefined;
@@ -1236,10 +1234,7 @@ export class DispatchAcceptedCommandUseCase {
     let intent: InboundIntent;
     try {
       intent = await this.dependencies.intentClassifier.execute({
-        text: buildPendingDocumentPlacementInterruptionClassifierText(
-          pending,
-          context.text
-        ),
+        text: input.classifierText,
         attachments: []
       });
     } catch {
@@ -1250,12 +1245,10 @@ export class DispatchAcceptedCommandUseCase {
       return undefined;
     }
 
-    await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
-      context.chat.id
-    );
+    await input.clearPending();
 
     return this.dispatchClassifiedModelIntent({
-      context,
+      context: input.context,
       intent,
       attachments: [],
       allowFileOrClarification: false
