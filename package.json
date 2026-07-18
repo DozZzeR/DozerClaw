@@ -13,6 +13,7 @@
     "dev:delete-subject-alias": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-delete-subject-alias.ts",
     "dev:google-oauth": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-google-oauth.ts",
     "dev:mempalace-smoke": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-mempalace-smoke.ts",
+    "dev:pending-routing-events": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-pending-routing-events.ts",
     "dev:list-subject-aliases": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-list-subject-aliases.ts",
     "dev:register-services": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-register-services.ts",
     "dev:store-file": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-store-file.ts",
