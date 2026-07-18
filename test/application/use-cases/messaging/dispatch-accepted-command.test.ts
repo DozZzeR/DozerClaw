@@ -1240,6 +1240,64 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toBeUndefined();
   });
 
+  it("does not silently use model local destination when the user did not choose local storage", async () => {
+    const attachmentStore = new FakeAttachmentStore(1);
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      pendingFileDestinationDecisions,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "store_file",
+        summary: "ODIGEO cover",
+        destination: "local_inbox"
+      }),
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "сохрани файл",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "ODIGEO cover.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Куда сохранить файл: ODIGEO cover.pdf?",
+        "Можно ответить:",
+        "- local inbox",
+        "- Google Drive"
+      ].join("\n")
+    });
+    expect(attachmentStore.seenInput).toBeUndefined();
+    expect(pendingFileDestinationDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "ODIGEO cover.pdf"
+        }
+      ],
+      createdAt: new Date("2026-07-02T20:05:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+    });
+  });
+
   it("records a family fact from model record_fact intent", async () => {
     const factRecorder = new FakeFamilyFactRecorder();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -2536,6 +2594,59 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("starts a Drive upload task for the existing local file when pending duplicate context is known", async () => {
+    const pendingFileDuplicateDecisions =
+      new FakePendingFileDuplicateDecisions();
+    pendingFileDuplicateDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      fileName: "GoryainovAV-lična karta.pdf",
+      suggestedCopyName: "GoryainovAV-lična karta (2).pdf",
+      existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const fileInboxDocumentUploader = new FakeFileInboxDocumentUploader();
+    const duplicateDecisionResolver = new FakeDuplicateDecisionResolver("copied");
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      fileInboxDocumentUploader,
+      duplicateDecisionResolver,
+      intentClassifier,
+      pendingFileDuplicateDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "файл есть в локальном хранилище, сохрани его в гугл"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- GoryainovAV-lična karta.pdf",
+        "  https://drive.google.com/file/d/local-drive-file"
+      ].join("\n")
+    });
+    expect(fileInboxDocumentUploader.seenInput).toEqual({
+      fileInboxRecordId: "file-existing"
+    });
+    expect(duplicateDecisionResolver.seenInput).toBeUndefined();
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
   it("lists pending access requests for owner review", async () => {
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
@@ -3549,5 +3660,39 @@ class FakeDocumentAttachmentStore {
         }
       }
     ];
+  }
+}
+
+class FakeFileInboxDocumentUploader {
+  seenInput:
+    | {
+        fileInboxRecordId: string;
+        documentType?: DocumentType;
+        subjectId?: string;
+      }
+    | undefined;
+
+  async execute(input: {
+    fileInboxRecordId: string;
+    documentType?: DocumentType;
+    subjectId?: string;
+  }) {
+    this.seenInput = input;
+
+    return {
+      status: "uploaded" as const,
+      document: {
+        id: "document-local",
+        provider: "google_drive" as const,
+        externalId: "local-drive-file",
+        name: "GoryainovAV-lična karta.pdf",
+        url: "https://drive.google.com/file/d/local-drive-file",
+        ...(input.documentType ? { documentType: input.documentType } : {}),
+        ...(input.subjectId ? { subjectId: input.subjectId } : {}),
+        status: "registered" as const,
+        createdAt: new Date("2026-07-02T20:05:00.000Z"),
+        updatedAt: new Date("2026-07-02T20:05:00.000Z")
+      }
+    };
   }
 }

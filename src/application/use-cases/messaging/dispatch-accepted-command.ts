@@ -16,6 +16,10 @@ import type {
   StoreMessageDocumentAttachmentResult,
   StoreMessageDocumentAttachmentsInput
 } from "../documents/store-message-document-attachments.js";
+import type {
+  UploadFileInboxDocumentInput,
+  UploadFileInboxDocumentResult
+} from "../documents/upload-file-inbox-document.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
@@ -89,6 +93,12 @@ export interface MessageDocumentAttachmentStore {
   execute(
     input: StoreMessageDocumentAttachmentsInput
   ): Promise<readonly StoreMessageDocumentAttachmentResult[]>;
+}
+
+export interface FileInboxDocumentUploader {
+  execute(
+    input: UploadFileInboxDocumentInput
+  ): Promise<UploadFileInboxDocumentResult>;
 }
 
 export interface FamilyFactRecorder {
@@ -223,6 +233,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly eventLog?: Pick<EventLogPort, "record">;
   readonly attachmentStore?: MessageAttachmentStore;
   readonly documentAttachmentStore?: MessageDocumentAttachmentStore;
+  readonly fileInboxDocumentUploader?: FileInboxDocumentUploader;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
   readonly familyFactArchiver?: FamilyFactArchiver;
@@ -1015,8 +1026,7 @@ export class DispatchAcceptedCommandUseCase {
           attachments: input.attachments
         },
         intent,
-        parseFileUploadDestination(context.text) ??
-          parseModelFileUploadDestination(intent)
+        resolveFileUploadDestinationForModelIntent(context.text, intent)
       );
     }
 
@@ -1139,6 +1149,41 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingFileDuplicateDecision,
     destination: FileUploadDestination
   ): Promise<OutboundReply> {
+    if (
+      destination === "google_drive" &&
+      this.dependencies.fileInboxDocumentUploader
+    ) {
+      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+        context.chat.id
+      );
+
+      const upload = await this.dependencies.fileInboxDocumentUploader.execute({
+        fileInboxRecordId: pending.existingRecordId
+      });
+
+      if (upload.status === "not_found") {
+        return {
+          chatId: context.chat.id,
+          text: `Не могу сохранить ${pending.fileName} в Google Drive: локальная запись не найдена. Пришли файл еще раз.`
+        };
+      }
+
+      const placementSuggested =
+        await this.savePendingDocumentPlacementSuggestion(context, [
+          upload.document
+        ]);
+
+      return {
+        chatId: context.chat.id,
+        text: [
+          formatUploadedDocumentsReply([upload.document]),
+          ...(placementSuggested
+            ? formatPlacementSuggestionLines(upload.document)
+            : [])
+        ].join("\n")
+      };
+    }
+
     if (!pending.provider || !pending.receivedAt || !pending.sourceAttachment) {
       return {
         chatId: context.chat.id,
@@ -1950,6 +1995,21 @@ function parseModelFileUploadDestination(
   intent: Extract<InboundIntent, { readonly kind: "store_file" }> | undefined
 ): FileUploadDestination | undefined {
   return intent?.destination;
+}
+
+function resolveFileUploadDestinationForModelIntent(
+  text: string,
+  intent: Extract<InboundIntent, { readonly kind: "store_file" }> | undefined
+): FileUploadDestination | undefined {
+  const deterministicDestination = parseFileUploadDestination(text);
+
+  if (deterministicDestination) {
+    return deterministicDestination;
+  }
+
+  const modelDestination = parseModelFileUploadDestination(intent);
+
+  return modelDestination === "google_drive" ? modelDestination : undefined;
 }
 
 function parseModelDocumentMetadata(

@@ -1,8 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type {
+  FileStorageReaderPort,
   FileStoragePort,
+  ReadFileInput,
   StoreFileInput,
   StoredFile
 } from "../../../ports/file-storage-port.js";
@@ -12,7 +14,7 @@ export interface LocalFileStorageOptions {
   readonly generateId: () => string;
 }
 
-export class LocalFileStorage implements FileStoragePort {
+export class LocalFileStorage implements FileStoragePort, FileStorageReaderPort {
   constructor(private readonly options: LocalFileStorageOptions) {}
 
   async storeFile(input: StoreFileInput): Promise<StoredFile> {
@@ -29,6 +31,10 @@ export class LocalFileStorage implements FileStoragePort {
       path,
       sizeBytes: input.bytes.byteLength
     };
+  }
+
+  async readFile(input: ReadFileInput): Promise<Uint8Array> {
+    return readFile(input.path);
   }
 }
 

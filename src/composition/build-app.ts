@@ -15,6 +15,7 @@ import { RegisterDocumentUseCase } from "../application/use-cases/documents/regi
 import { FindDocumentsUseCase } from "../application/use-cases/documents/find-documents.js";
 import { ManageDocumentRecordUseCase } from "../application/use-cases/documents/manage-document-record.js";
 import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases/documents/store-message-document-attachments.js";
+import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -159,6 +160,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
           now: () => new Date()
         })
       : undefined;
+  const fileInboxDocumentUploader = documentStorage
+    ? new UploadFileInboxDocumentUseCase({
+        fileInboxRepository,
+        fileStorage,
+        documentStorage,
+        documentRepository,
+        generateId,
+        now: () => new Date()
+      })
+    : undefined;
   const documentLookup = new FindDocumentsUseCase({
     repository: documentRepository,
     limit: 10
@@ -210,6 +221,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     eventLog,
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(documentAttachmentStore ? { documentAttachmentStore } : {}),
+    ...(fileInboxDocumentUploader ? { fileInboxDocumentUploader } : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,
