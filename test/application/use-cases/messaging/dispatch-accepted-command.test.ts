@@ -408,6 +408,70 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("uploads Russian Google personal id requests to Drive with identity metadata", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      pendingDocumentDecisions,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "сохрани файл в гугл. это личная карта",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "GoryainovAV-lična karta.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf (identity)",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Предлагаю папку: Family Documents/family/identity",
+        "Переместить файл туда? Ответь yes или skip."
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "GoryainovAV-lična karta.pdf"
+        }
+      ],
+      documentType: "identity"
+    });
+    expect(pendingDocumentDecisions.saved).toBeUndefined();
+    expect(pendingDocumentPlacementDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      document: {
+        ...uploadedDocumentRecord(),
+        documentType: "identity"
+      },
+      targetFolderPath: "Family Documents/family/identity",
+      createdAt: new Date("2026-07-02T20:05:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+    });
+  });
+
   it("saves a target folder id when a placement folder mapping exists", async () => {
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
     const pendingDocumentPlacementDecisions =

@@ -1623,7 +1623,7 @@ function parseFileUploadDestination(
 
   if (
     /\b(google\s*drive|drive)\b/.test(normalized) ||
-    /гугл\s*диск|google\s*диск|диск/.test(normalized)
+    /гугл\s*диск|google\s*диск|диск|гугл/.test(normalized)
   ) {
     return "google_drive";
   }
@@ -1688,7 +1688,12 @@ function parseDocumentType(tokens: readonly string[]): DocumentType | undefined 
       return token as DocumentType;
     }
 
-    if (token === "passport" || token === "id") {
+    if (
+      token === "passport" ||
+      token === "id" ||
+      token === "карта" ||
+      token === "удостоверение"
+    ) {
       return "identity";
     }
 
@@ -1720,6 +1725,9 @@ function parseDocumentSubject(tokens: readonly string[]): string | undefined {
     "for",
     "passport",
     "id",
+    "карта",
+    "личная",
+    "удостоверение",
     "visa",
     "ticket",
     "гугл",
@@ -1729,7 +1737,9 @@ function parseDocumentSubject(tokens: readonly string[]): string | undefined {
     "сохрани",
     "загрузи",
     "для",
-    "как"
+    "как",
+    "это",
+    "в"
   ]);
 
   return tokens.find(
