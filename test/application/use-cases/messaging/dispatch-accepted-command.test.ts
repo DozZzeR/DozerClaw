@@ -749,6 +749,134 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ]);
   });
 
+  it("lets a safe pending document placement be interrupted by a new memory command", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = {
+      ...pendingDocumentPlacementDecision(),
+      targetFolderId: "folder-max-identity"
+    };
+    const pendingChoiceClassifier = new FakePendingChoiceClassifier(undefined);
+    const factRecorder = new FakeFamilyFactRecorder();
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "record_fact",
+      summary: "Max needs a new passport photo.",
+      category: "event",
+      subjectId: "max"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      familyFactRecorder: factRecorder,
+      intentClassifier,
+      pendingChoiceClassifier,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "запомни что Максу нужно новое фото на паспорт"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family fact: Max needs a new passport photo."
+    });
+    expect(pendingChoiceClassifier.seenInput).toEqual({
+      prompt: [
+        "Я жду решение по размещению passport.pdf.",
+        "Предлагаемая папка: Family Documents/max/identity",
+        "Можно ответить yes или skip."
+      ].join("\n"),
+      userReply: "запомни что Максу нужно новое фото на паспорт",
+      options: [
+        {
+          value: "accept",
+          label: "переместить файл",
+          description: "Move the document to the suggested folder."
+        },
+        {
+          value: "skip",
+          label: "оставить как есть",
+          description: "Leave the document in its current folder."
+        }
+      ]
+    });
+    expect(intentClassifier.seenInput).toEqual({
+      text: [
+        "Pending operation: decide whether to move document passport.pdf.",
+        "Suggested folder: Family Documents/max/identity.",
+        "The user can continue it by accepting the move or skipping it.",
+        "If the current reply is a separate command, classify that command normally.",
+        "User reply: запомни что Максу нужно новое фото на паспорт"
+      ].join("\n"),
+      attachments: []
+    });
+    expect(factRecorder.seenInput).toEqual({
+      summary: "Max needs a new passport photo.",
+      category: "event",
+      subjectId: "max",
+      sourceActorId: "actor-owner",
+      sourceChatId: "chat-owner",
+      sourceMessageText: "запомни что Максу нужно новое фото на паспорт"
+    });
+    expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("keeps a safe pending document placement when model fallback still sees a file command", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = {
+      ...pendingDocumentPlacementDecision(),
+      targetFolderId: "folder-max-identity"
+    };
+    const pendingChoiceClassifier = new FakePendingChoiceClassifier(undefined);
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "store_file",
+      summary: "passport scan"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      pendingChoiceClassifier,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "это все еще паспорт Макса"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Я жду решение по размещению passport.pdf.",
+        "Предлагаемая папка: Family Documents/max/identity",
+        "Можно ответить yes или skip."
+      ].join("\n")
+    });
+    expect(intentClassifier.seenInput).toEqual({
+      text: [
+        "Pending operation: decide whether to move document passport.pdf.",
+        "Suggested folder: Family Documents/max/identity.",
+        "The user can continue it by accepting the move or skipping it.",
+        "If the current reply is a separate command, classify that command normally.",
+        "User reply: это все еще паспорт Макса"
+      ].join("\n"),
+      attachments: []
+    });
+    expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([]);
+  });
+
   it("cancels pending document placement", async () => {
     const pendingDocumentPlacementDecisions =
       new FakePendingDocumentPlacementDecisions();

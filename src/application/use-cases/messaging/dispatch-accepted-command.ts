@@ -1164,7 +1164,7 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply> {
     const decision = await resolvePendingDecision<PlacementDecision>({
-      policy: "choice_only",
+      policy: documentPlacementDecisionPolicy,
       prompt: placementDecisionPrompt(pending),
       userReply: context.text,
       options: placementDecisionOptions,
@@ -1175,6 +1175,15 @@ export class DispatchAcceptedCommandUseCase {
     });
 
     if (!decision) {
+      const interrupted = await this.dispatchSafePendingDocumentPlacementInterruption(
+        context,
+        pending
+      );
+
+      if (interrupted) {
+        return interrupted;
+      }
+
       return {
         chatId: context.chat.id,
         text: placementDecisionPrompt(pending)
@@ -1211,6 +1220,46 @@ export class DispatchAcceptedCommandUseCase {
       chatId: context.chat.id,
       text: `Готово: переместил ${pending.document.name} в ${pending.targetFolderPath}.`
     };
+  }
+
+  private async dispatchSafePendingDocumentPlacementInterruption(
+    context: AcceptedMessageContext,
+    pending: PendingDocumentPlacementDecision
+  ): Promise<OutboundReply | undefined> {
+    if (
+      !allowsFreeFormPendingInterruption(documentPlacementDecisionPolicy) ||
+      !this.dependencies.intentClassifier
+    ) {
+      return undefined;
+    }
+
+    let intent: InboundIntent;
+    try {
+      intent = await this.dependencies.intentClassifier.execute({
+        text: buildPendingDocumentPlacementInterruptionClassifierText(
+          pending,
+          context.text
+        ),
+        attachments: []
+      });
+    } catch {
+      return undefined;
+    }
+
+    if (intent.kind === "ask_clarification" || intent.kind === "store_file") {
+      return undefined;
+    }
+
+    await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    return this.dispatchClassifiedModelIntent({
+      context,
+      intent,
+      attachments: [],
+      allowFileOrClarification: false
+    });
   }
 
   private async registerDocument(
@@ -1671,6 +1720,19 @@ function buildPendingFileDestinationInterruptionClassifierText(
   ].join("\n");
 }
 
+function buildPendingDocumentPlacementInterruptionClassifierText(
+  pending: PendingDocumentPlacementDecision,
+  followUpText: string
+): string {
+  return [
+    `Pending operation: decide whether to move document ${pending.document.name}.`,
+    `Suggested folder: ${pending.targetFolderPath}.`,
+    "The user can continue it by accepting the move or skipping it.",
+    "If the current reply is a separate command, classify that command normally.",
+    `User reply: ${followUpText}`
+  ].join("\n");
+}
+
 function mergeAttachments(
   previous: readonly MessageAttachment[],
   current: readonly MessageAttachment[]
@@ -1727,6 +1789,8 @@ export type DuplicateDecision = "copy" | "overwrite" | "skip";
 type FileUploadDestination = "local_inbox" | "google_drive";
 type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision | PlacementDecision;
 const fileDestinationDecisionPolicy =
+  "safe_interruptible" satisfies PendingDecisionPolicy;
+const documentPlacementDecisionPolicy =
   "safe_interruptible" satisfies PendingDecisionPolicy;
 
 const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[] = [
