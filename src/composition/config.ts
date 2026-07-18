@@ -39,7 +39,6 @@ export interface MemoryConfig {
 
 export interface GoogleDriveConfig {
   readonly accessToken?: string;
-  readonly serviceAccountKeyPath?: string;
   readonly oauth?: GoogleOAuthConfig;
   readonly apiBaseUrl: string;
   readonly uploadFolderId?: string;
@@ -102,19 +101,16 @@ function googleDriveConfig(
   env: NodeJS.ProcessEnv
 ): { readonly googleDrive?: GoogleDriveConfig } {
   const accessToken = env.DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN?.trim();
-  const serviceAccountKeyPath =
-    env.DOZERCLAW_GOOGLE_SERVICE_ACCOUNT_KEY_PATH?.trim();
   const oauth = googleOAuthConfig(env);
   const uploadFolderId = env.DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID?.trim();
 
-  if (!accessToken && !serviceAccountKeyPath && !oauth) {
+  if (!accessToken && !oauth) {
     return {};
   }
 
   return {
     googleDrive: {
       ...(accessToken ? { accessToken } : {}),
-      ...(serviceAccountKeyPath ? { serviceAccountKeyPath } : {}),
       ...(oauth ? { oauth } : {}),
       apiBaseUrl:
         env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||

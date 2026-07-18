@@ -76,22 +76,6 @@ describe("loadConfig", () => {
     });
   });
 
-  it("loads Google Drive service account config without a static access token", () => {
-    expect(
-      loadConfig({
-        DOZERCLAW_GOOGLE_SERVICE_ACCOUNT_KEY_PATH: "setting_key.json",
-        DOZERCLAW_DRIVE_FOLDER_MAP_JSON:
-          '{"Family Documents/max/identity":"folder-max-identity"}'
-      }).googleDrive
-    ).toEqual({
-      serviceAccountKeyPath: "setting_key.json",
-      apiBaseUrl: "https://www.googleapis.com",
-      folderIdByPath: {
-        "Family Documents/max/identity": "folder-max-identity"
-      }
-    });
-  });
-
   it("loads Google Drive user OAuth refresh token config", () => {
     expect(
       loadConfig({
