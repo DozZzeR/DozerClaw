@@ -207,6 +207,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     : undefined;
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
+    eventLog,
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(documentAttachmentStore ? { documentAttachmentStore } : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),

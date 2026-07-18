@@ -256,6 +256,102 @@ describe("buildApp", () => {
     }
   });
 
+  it("records pending routing events through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "store_file",
+        question: null,
+        summary: "passport scan",
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "record_fact",
+        question: null,
+        summary: "Max needs a new passport photo.",
+        category: "event",
+        subjectId: "max",
+        query: null,
+        reason: null
+      })
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        displayName: "Owner"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-file",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "save this file",
+        attachments: [
+          {
+            id: "attachment-1",
+            providerFileId: "telegram-file-1",
+            fileName: "passport.pdf"
+          }
+        ],
+        receivedAt: new Date("2026-07-07T10:00:00.000Z"),
+        now: new Date("2026-07-07T10:00:00.000Z")
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-fact",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner-chat",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "remember Max needs a new passport photo",
+        attachments: [],
+        receivedAt: new Date("2026-07-07T10:01:00.000Z"),
+        now: new Date("2026-07-07T10:01:00.000Z")
+      });
+
+      expect(reply.text).toBe(
+        "Saved family fact: Max needs a new passport photo."
+      );
+
+      const database = createSqliteDatabase({ path: databasePath });
+      const row = database
+        .prepare(
+          "select type, attributes_json as attributesJson from operational_events where type = ?"
+        )
+        .get("messaging.pending_routing") as
+        | { readonly type: string; readonly attributesJson: string }
+        | undefined;
+      database.close();
+
+      expect(row?.type).toBe("messaging.pending_routing");
+      expect(JSON.parse(row?.attributesJson ?? "{}")).toEqual({
+        pending_kind: "file_destination",
+        policy: "safe_interruptible",
+        choice_result: "unclear",
+        interruption_intent: "record_fact",
+        pending_cleared: true
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("recalls a stored family fact through composition", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");

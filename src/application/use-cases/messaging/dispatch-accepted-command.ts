@@ -70,6 +70,10 @@ import type { StoreMessageAttachmentsInput } from "../file-inbox/store-message-a
 import type { HandleSystemHealthCommandInput } from "../health/handle-system-health-command.js";
 import type { AcceptedMessageContext } from "./process-inbound-message.js";
 import type { CommandRoute } from "./route-command.js";
+import type {
+  EventLogPort,
+  OperationalEvent
+} from "../../../ports/event-log-port.js";
 
 export interface SystemHealthCommandHandler {
   execute(input: HandleSystemHealthCommandInput): Promise<OutboundReply>;
@@ -216,6 +220,7 @@ export interface DispatchAcceptedCommandInput {
 
 export interface DispatchAcceptedCommandDependencies {
   readonly systemHealthHandler: SystemHealthCommandHandler;
+  readonly eventLog?: Pick<EventLogPort, "record">;
   readonly attachmentStore?: MessageAttachmentStore;
   readonly documentAttachmentStore?: MessageDocumentAttachmentStore;
   readonly familyFactRecorder?: FamilyFactRecorder;
@@ -919,6 +924,12 @@ export class DispatchAcceptedCommandUseCase {
     await this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
       context.chat.id
     );
+    await this.recordPendingRoutingEvent({
+      pendingKind: "file_destination",
+      policy: fileDestinationDecisionPolicy,
+      choiceResult: destination,
+      pendingCleared: true
+    });
 
     return this.storeFamilyMessageAttachments(
       {
@@ -937,6 +948,7 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingFileDestinationDecision
   ): Promise<OutboundReply | undefined> {
     return this.dispatchSafePendingInterruption({
+      pendingKind: "file_destination",
       context,
       policy: fileDestinationDecisionPolicy,
       classifierText: buildPendingFileDestinationInterruptionClassifierText(
@@ -1067,6 +1079,13 @@ export class DispatchAcceptedCommandUseCase {
     });
 
     if (decision === undefined) {
+      await this.recordPendingRoutingEvent({
+        pendingKind: "file_duplicate",
+        policy: "choice_only",
+        choiceResult: "unclear",
+        pendingCleared: false
+      });
+
       return {
         chatId: context.chat.id,
         text: [
@@ -1079,6 +1098,12 @@ export class DispatchAcceptedCommandUseCase {
     await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
       context.chat.id
     );
+    await this.recordPendingRoutingEvent({
+      pendingKind: "file_duplicate",
+      policy: "choice_only",
+      choiceResult: decision,
+      pendingCleared: true
+    });
 
     if (decision === "skip") {
       return {
@@ -1171,6 +1196,12 @@ export class DispatchAcceptedCommandUseCase {
     await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
       context.chat.id
     );
+    await this.recordPendingRoutingEvent({
+      pendingKind: "document_placement",
+      policy: documentPlacementDecisionPolicy,
+      choiceResult: decision,
+      pendingCleared: true
+    });
 
     if (decision === "skip") {
       return {
@@ -1205,6 +1236,7 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply | undefined> {
     return this.dispatchSafePendingInterruption({
+      pendingKind: "document_placement",
       context,
       policy: documentPlacementDecisionPolicy,
       classifierText: buildPendingDocumentPlacementInterruptionClassifierText(
@@ -1219,6 +1251,7 @@ export class DispatchAcceptedCommandUseCase {
   }
 
   private async dispatchSafePendingInterruption(input: {
+    readonly pendingKind: PendingRoutingEventAttributes["pendingKind"];
     readonly context: AcceptedMessageContext;
     readonly policy: PendingDecisionPolicy;
     readonly classifierText: string;
@@ -1238,14 +1271,37 @@ export class DispatchAcceptedCommandUseCase {
         attachments: []
       });
     } catch {
+      await this.recordPendingRoutingEvent({
+        pendingKind: input.pendingKind,
+        policy: input.policy,
+        choiceResult: "unclear",
+        interruptionIntent: "model_error",
+        pendingCleared: false
+      });
+
       return undefined;
     }
 
     if (intent.kind === "ask_clarification" || intent.kind === "store_file") {
+      await this.recordPendingRoutingEvent({
+        pendingKind: input.pendingKind,
+        policy: input.policy,
+        choiceResult: "unclear",
+        interruptionIntent: intent.kind,
+        pendingCleared: false
+      });
+
       return undefined;
     }
 
     await input.clearPending();
+    await this.recordPendingRoutingEvent({
+      pendingKind: input.pendingKind,
+      policy: input.policy,
+      choiceResult: "unclear",
+      interruptionIntent: intent.kind,
+      pendingCleared: true
+    });
 
     return this.dispatchClassifiedModelIntent({
       context: input.context,
@@ -1677,6 +1733,34 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
+  private async recordPendingRoutingEvent(
+    attributes: PendingRoutingEventAttributes
+  ): Promise<void> {
+    if (!this.dependencies.eventLog) {
+      return;
+    }
+
+    const event: OperationalEvent = {
+      type: "messaging.pending_routing",
+      occurredAt: this.dependencies.now?.() ?? new Date(),
+      attributes: {
+        pending_kind: attributes.pendingKind,
+        policy: attributes.policy,
+        choice_result: attributes.choiceResult,
+        pending_cleared: attributes.pendingCleared,
+        ...(attributes.interruptionIntent
+          ? { interruption_intent: attributes.interruptionIntent }
+          : {})
+      }
+    };
+
+    try {
+      await this.dependencies.eventLog.record(event);
+    } catch {
+      // Pending routing observability must not change user-visible behavior.
+    }
+  }
+
 }
 
 function parseActorId(text: string): string | undefined {
@@ -1781,6 +1865,16 @@ function suggestCopyName(fileName: string): string {
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
 type FileUploadDestination = "local_inbox" | "google_drive";
 type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision | PlacementDecision;
+type PendingRoutingEventAttributes = {
+  readonly pendingKind:
+    | "file_destination"
+    | "file_duplicate"
+    | "document_placement";
+  readonly policy: PendingDecisionPolicy;
+  readonly choiceResult: string;
+  readonly interruptionIntent?: string;
+  readonly pendingCleared: boolean;
+};
 const fileDestinationDecisionPolicy =
   "safe_interruptible" satisfies PendingDecisionPolicy;
 const documentPlacementDecisionPolicy =

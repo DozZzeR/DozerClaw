@@ -12,6 +12,7 @@ import type { AcceptedMessageContext } from "../../../../src/application/use-cas
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
 import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
+import type { OperationalEvent } from "../../../../src/ports/event-log-port.js";
 import type {
   PendingDocumentDecision,
   PendingDocumentPlacementDecision,
@@ -826,6 +827,84 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
       "chat-owner"
     ]);
+  });
+
+  it("records pending routing events for safe interruptions", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = {
+      ...pendingDocumentPlacementDecision(),
+      targetFolderId: "folder-max-identity"
+    };
+    const eventLog = new FakeEventLog();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      eventLog,
+      familyFactRecorder: new FakeFamilyFactRecorder(),
+      intentClassifier: new RecordingIntentClassifier({
+        kind: "record_fact",
+        summary: "Max needs a new passport photo."
+      }),
+      pendingChoiceClassifier: new FakePendingChoiceClassifier(undefined),
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "запомни что Максу нужно новое фото на паспорт"
+      }
+    });
+
+    expect(eventLog.events).toEqual([
+      {
+        type: "messaging.pending_routing",
+        occurredAt: new Date("2026-07-02T20:12:00.000Z"),
+        attributes: {
+          pending_kind: "document_placement",
+          policy: "safe_interruptible",
+          choice_result: "unclear",
+          interruption_intent: "record_fact",
+          pending_cleared: true
+        }
+      }
+    ]);
+  });
+
+  it("keeps pending routing event logging best-effort", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = {
+      ...pendingDocumentPlacementDecision(),
+      targetFolderId: "folder-max-identity"
+    };
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      eventLog: new ThrowingEventLog(),
+      familyFactRecorder: new FakeFamilyFactRecorder(),
+      intentClassifier: new RecordingIntentClassifier({
+        kind: "record_fact",
+        summary: "Max needs a new passport photo."
+      }),
+      pendingChoiceClassifier: new FakePendingChoiceClassifier(undefined),
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "запомни что Максу нужно новое фото на паспорт"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family fact: Max needs a new passport photo."
+    });
   });
 
   it("keeps a safe pending document placement when model fallback still sees a file command", async () => {
@@ -3111,6 +3190,20 @@ class RecordingIntentClassifier extends FakeIntentClassifier {
     this.seenInput = input;
 
     return super.execute(input);
+  }
+}
+
+class FakeEventLog {
+  readonly events: OperationalEvent[] = [];
+
+  async record(event: OperationalEvent): Promise<void> {
+    this.events.push(event);
+  }
+}
+
+class ThrowingEventLog {
+  async record(): Promise<void> {
+    throw new Error("event log unavailable");
   }
 }
 
