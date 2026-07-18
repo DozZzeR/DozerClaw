@@ -271,6 +271,103 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ]);
   });
 
+  it("lets a safe pending file destination be interrupted by a new memory command", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const factRecorder = new FakeFamilyFactRecorder();
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "record_fact",
+      summary: "Max likes tea before bedtime.",
+      category: "preference",
+      subjectId: "max"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      familyFactRecorder: factRecorder,
+      intentClassifier,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "запомни что Макс любит чай перед сном"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family fact: Max likes tea before bedtime."
+    });
+    expect(intentClassifier.seenInput).toEqual({
+      text: [
+        "Pending operation: choose where to save uploaded file(s): passport.pdf.",
+        "The user can continue it by choosing local inbox or Google Drive.",
+        "If the current reply is a separate command, classify that command normally.",
+        "User reply: запомни что Макс любит чай перед сном"
+      ].join("\n"),
+      attachments: []
+    });
+    expect(factRecorder.seenInput).toEqual({
+      summary: "Max likes tea before bedtime.",
+      category: "preference",
+      subjectId: "max",
+      sourceActorId: "actor-owner",
+      sourceChatId: "chat-owner",
+      sourceMessageText: "запомни что Макс любит чай перед сном"
+    });
+    expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("keeps a safe pending file destination when model fallback still sees a file command", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "store_file",
+      summary: "passport scan"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "это паспорт Макса"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Куда сохранить файл: passport.pdf?",
+        "Можно ответить:",
+        "- local inbox",
+        "- Google Drive"
+      ].join("\n")
+    });
+    expect(intentClassifier.seenInput).toEqual({
+      text: [
+        "Pending operation: choose where to save uploaded file(s): passport.pdf.",
+        "The user can continue it by choosing local inbox or Google Drive.",
+        "If the current reply is a separate command, classify that command normally.",
+        "User reply: это паспорт Макса"
+      ].join("\n"),
+      attachments: []
+    });
+    expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([]);
+  });
+
   it("updates pending uploaded document metadata from a follow-up reply", async () => {
     const pendingDocumentDecisions = new FakePendingDocumentDecisions();
     const pendingDocumentPlacementDecisions =

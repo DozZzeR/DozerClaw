@@ -57,7 +57,11 @@ import type {
   PendingChoiceClassifier,
   PendingChoiceOption
 } from "./classify-pending-choice.js";
-import { resolvePendingDecision } from "./resolve-pending-decision.js";
+import {
+  allowsFreeFormPendingInterruption,
+  resolvePendingDecision
+} from "./resolve-pending-decision.js";
+import type { PendingDecisionPolicy } from "./resolve-pending-decision.js";
 import type {
   PendingIdentityDecision,
   ReviewPendingIdentityResult
@@ -964,6 +968,15 @@ export class DispatchAcceptedCommandUseCase {
     const destination = parseFileUploadDestination(context.text);
 
     if (!destination) {
+      const interrupted = await this.dispatchSafePendingFileDestinationInterruption(
+        context,
+        pending
+      );
+
+      if (interrupted) {
+        return interrupted;
+      }
+
       return {
         chatId: context.chat.id,
         text: fileDestinationPrompt(pending.attachments)
@@ -986,11 +999,93 @@ export class DispatchAcceptedCommandUseCase {
     );
   }
 
+  private async dispatchSafePendingFileDestinationInterruption(
+    context: AcceptedMessageContext,
+    pending: PendingFileDestinationDecision
+  ): Promise<OutboundReply | undefined> {
+    if (
+      !allowsFreeFormPendingInterruption(fileDestinationDecisionPolicy) ||
+      !this.dependencies.intentClassifier
+    ) {
+      return undefined;
+    }
+
+    let intent: InboundIntent;
+    try {
+      intent = await this.dependencies.intentClassifier.execute({
+        text: buildPendingFileDestinationInterruptionClassifierText(
+          pending,
+          context.text
+        ),
+        attachments: []
+      });
+    } catch {
+      return undefined;
+    }
+
+    if (intent.kind === "ask_clarification" || intent.kind === "store_file") {
+      return undefined;
+    }
+
+    await this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    return this.dispatchInterruptingModelIntent(context, intent);
+  }
+
+  private dispatchInterruptingModelIntent(
+    context: AcceptedMessageContext,
+    intent: Exclude<
+      InboundIntent,
+      { readonly kind: "ask_clarification" } | { readonly kind: "store_file" }
+    >
+  ): Promise<OutboundReply> {
+    if (intent.kind === "record_fact") {
+      return this.recordFamilyFact(context, intent);
+    }
+
+    if (intent.kind === "answer_from_memory") {
+      return this.recallFamilyFacts(context, intent);
+    }
+
+    if (intent.kind === "archive_fact") {
+      return this.archiveFamilyFact(context, intent);
+    }
+
+    if (intent.kind === "register_document") {
+      return this.registerDocument(context, intent);
+    }
+
+    if (intent.kind === "find_document") {
+      return this.findDocuments(context, intent);
+    }
+
+    if (intent.kind === "update_document" || intent.kind === "archive_document") {
+      return this.manageDocument(context, intent);
+    }
+
+    if (
+      intent.kind === "save_subject_alias" ||
+      intent.kind === "list_subject_aliases" ||
+      intent.kind === "delete_subject_alias" ||
+      intent.kind === "diagnose_subject_aliases"
+    ) {
+      return this.manageSubjectAliases(context, intent);
+    }
+
+    return Promise.resolve({
+      chatId: context.chat.id,
+      text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+    });
+  }
+
   private async dispatchPendingDuplicateDecision(
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision
   ): Promise<OutboundReply> {
     const decision = await resolvePendingDecision<DuplicateDecision>({
+      policy: "choice_only",
       prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
       userReply: context.text,
       options: duplicateDecisionOptions,
@@ -1076,6 +1171,7 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply> {
     const decision = await resolvePendingDecision<PlacementDecision>({
+      policy: "choice_only",
       prompt: placementDecisionPrompt(pending),
       userReply: context.text,
       options: placementDecisionOptions,
@@ -1406,6 +1502,7 @@ export class DispatchAcceptedCommandUseCase {
     const modelDecision = deterministicDecision
       ? undefined
       : await resolvePendingDecision<FamilyFactDecision>({
+          policy: "choice_only",
           prompt: familyFactDecisionPrompt(pending),
           userReply: context.text,
           options: familyFactDecisionOptions,
@@ -1564,6 +1661,23 @@ function buildClarificationClassifierText(
   ].join("\n");
 }
 
+function buildPendingFileDestinationInterruptionClassifierText(
+  pending: PendingFileDestinationDecision,
+  followUpText: string
+): string {
+  const names = pending.attachments
+    .map((attachment) => attachment.fileName)
+    .filter((value): value is string => Boolean(value));
+  const fileList = names.length > 0 ? names.join(", ") : "uploaded attachment(s)";
+
+  return [
+    `Pending operation: choose where to save uploaded file(s): ${fileList}.`,
+    "The user can continue it by choosing local inbox or Google Drive.",
+    "If the current reply is a separate command, classify that command normally.",
+    `User reply: ${followUpText}`
+  ].join("\n");
+}
+
 function mergeAttachments(
   previous: readonly MessageAttachment[],
   current: readonly MessageAttachment[]
@@ -1619,6 +1733,8 @@ function suggestCopyName(fileName: string): string {
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
 type FileUploadDestination = "local_inbox" | "google_drive";
 type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision | PlacementDecision;
+const fileDestinationDecisionPolicy =
+  "safe_interruptible" satisfies PendingDecisionPolicy;
 
 const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[] = [
   {
