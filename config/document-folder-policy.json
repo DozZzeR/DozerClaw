@@ -1,21 +1,736 @@
 {
   "version": 1,
+  "defaults": {
+    "storage": "google_drive",
+    "rootFolderEnv": "DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID",
+    "placementConfirmation": "disabled"
+  },
+  "modelGuidance": {
+    "languagePolicy": [
+      "Keep path, description, examples, and aliases in the user language because they are user-facing Drive and search signals.",
+      "Keep slug, documentTypes, subjects, and future technical keys in English snake_case because they are stable machine identifiers."
+    ],
+    "folderSelection": [
+      "Prefer the deepest existing folder whose description, aliases, examples, documentTypes, and subjects match the file and the user message.",
+      "Use documentTypes and subjects as structured hints, not as the only source of truth.",
+      "When confidence is low, upload to the configured Drive root and record search metadata instead of forcing a weak folder choice.",
+      "For normal uploads, do not ask placement confirmation while placementConfirmation is disabled."
+    ],
+    "newFolderProposal": [
+      "Do not create new policy folders during normal single-file upload unless the owner explicitly asks to create that folder.",
+      "During legacy Drive cleanup, propose a new folder when several files form a recurring cluster that does not fit existing folders.",
+      "A proposal must include parentPath, proposed path in Russian, slug in English snake_case, description, documentTypes, subjects, aliases, examples, confidence, and rationale.",
+      "If the file belongs to a temporary one-off topic, prefer Разное_и_Архив or the closest existing archive folder over adding a new folder."
+    ],
+    "cleanupMode": [
+      "First register and describe existing Drive files without moving them.",
+      "Infer candidate folders and confidence for each file, then group uncertain files for owner review.",
+      "Only after the policy is updated should a later migration step move files into created folders."
+    ]
+  },
   "folders": [
     {
-      "path": "",
-      "driveFolderId": "",
-      "description": "",
-      "documentTypes": [],
-      "subjects": [],
-      "examples": []
+      "path": "01_Личные_документы",
+      "slug": "personal_documents",
+      "driveFolderId": "1mrp6_76FBV5Rxv_pXeVclgf-CvyhioxD",
+      "description": "Актуальные документы, удостоверяющие личность, ВНЖ, гражданство и доверенности",
+      "documentTypes": [
+        "passport",
+        "id_card",
+        "visa",
+        "birth_certificate",
+        "power_of_attorney"
+      ],
+      "subjects": [
+        "alexey",
+        "victoria",
+        "sofia",
+        "natalia",
+        "olga"
+      ],
+      "aliases": [
+        "личные документы",
+        "документы личности",
+        "паспорт",
+        "личная карта",
+        "id",
+        "внж",
+        "пмж",
+        "доверенность"
+      ],
+      "examples": [
+        "Горяйновы А и В .lićna karta.pdf",
+        "Паспорт Бабули.PDF",
+        "Майя и Таня. Св-во о рождении.png",
+        "Посольство РФ"
+      ],
+      "folders": [
+        {
+          "path": "01_Личные_документы/Alexey",
+          "slug": "personal_alexey",
+          "driveFolderId": "1kk7bc2WhYfPmZfMpFEYJcjpIyqGiEqxZ",
+          "description": "Личные документы Алексея",
+          "documentTypes": [
+            "passport",
+            "id_card",
+            "driver_license"
+          ],
+          "subjects": [
+            "alexey"
+          ],
+          "aliases": [
+            "алексей",
+            "алеша",
+            "а.горяйнов",
+            "горяйнов алексей",
+            "личные документы алексея"
+          ],
+          "examples": [
+            "А.Горяйнов"
+          ]
+        },
+        {
+          "path": "01_Личные_документы/Victoria",
+          "slug": "personal_victoria",
+          "driveFolderId": "19jMn_eTDPh9a6gOI5iQ7FVdYXPrbYWId",
+          "description": "Личные документы Виктории",
+          "documentTypes": [
+            "passport",
+            "id_card"
+          ],
+          "subjects": [
+            "victoria"
+          ],
+          "aliases": [
+            "виктория",
+            "вика",
+            "в.горяйнова",
+            "горяйнова виктория",
+            "личные документы виктории"
+          ],
+          "examples": [
+            "В.Горяйнова"
+          ]
+        },
+        {
+          "path": "01_Личные_документы/Sofia",
+          "slug": "personal_sofia",
+          "driveFolderId": "17i2PgzHwr7rGW88GrO0uYxUDay0OVWcN",
+          "description": "Личные документы Софии",
+          "documentTypes": [
+            "birth_certificate",
+            "id_card"
+          ],
+          "subjects": [
+            "sofia"
+          ],
+          "aliases": [
+            "софия",
+            "соня",
+            "с.горяйнова",
+            "свидетельство о рождении",
+            "личные документы софии"
+          ],
+          "examples": [
+            "С.Горяйнова"
+          ]
+        },
+        {
+          "path": "01_Личные_документы/Родственники_и_Доверенности",
+          "slug": "relatives_powers_of_attorney",
+          "driveFolderId": "1IqU6LE36Ch1iJhC2r7yJIwMlOuIwIeGv",
+          "description": "Документы родственников и оформленные доверенности",
+          "documentTypes": [
+            "passport",
+            "power_of_attorney"
+          ],
+          "subjects": [
+            "natalia",
+            "olga"
+          ],
+          "aliases": [
+            "родственники",
+            "бабуля",
+            "мама",
+            "оля",
+            "наталья",
+            "доверенность",
+            "доверенности"
+          ],
+          "examples": [
+            "!Доверенность на Олю",
+            "Н.Чуксина",
+            "О.Загорская",
+            "!!!Дом маме и Оле"
+          ]
+        },
+        {
+          "path": "01_Личные_документы/Сербия_ВНЖ_ПМЖ",
+          "slug": "serbia_residence",
+          "driveFolderId": "15JkPDEji3e7fOcGj--8OSmrgKmQbveYB",
+          "description": "Документы для легализации в Сербии",
+          "documentTypes": [
+            "application",
+            "confirmation",
+            "certificate"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria",
+            "sofia"
+          ],
+          "aliases": [
+            "сербия",
+            "внж",
+            "пмж",
+            "боравак",
+            "boravak",
+            "легализация",
+            "сербские документы"
+          ],
+          "examples": [
+            "!!! 2025 Боровак Документы",
+            "ПМЖ",
+            "ВНЖ",
+            "документы сербские"
+          ]
+        }
+      ]
     },
     {
-      "path": "",
-      "driveFolderId": "",
-      "description": "",
-      "documentTypes": [],
-      "subjects": [],
-      "examples": []
+      "path": "02_Недвижимость",
+      "slug": "real_estate",
+      "driveFolderId": "1FjaupuZTtvOOLD_2v_yZC_A817X5pnvJ",
+      "description": "Документы на недвижимость, аренда, покупка, счета за коммуналку",
+      "documentTypes": [
+        "contract",
+        "utility_bill",
+        "cadaster_extract"
+      ],
+      "subjects": [
+        "alexey",
+        "victoria"
+      ],
+      "aliases": [
+        "недвижимость",
+        "квартира",
+        "дом",
+        "аренда",
+        "коммуналка",
+        "кадастр"
+      ],
+      "examples": [
+        "Аренда Нови Сад",
+        "Ветерник. Свой дом"
+      ],
+      "folders": [
+        {
+          "path": "02_Недвижимость/Актуальное_Сербия",
+          "slug": "serbia_current_real_estate",
+          "driveFolderId": "1TDdLnNTn15UapTILHaoEwfQ8Ukcwf1bN",
+          "description": "Текущая недвижимость: дом в Ветернике и аренда в Нови Саде",
+          "documentTypes": [
+            "contract",
+            "invoice"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "сербия недвижимость",
+            "ветерник",
+            "нови сад",
+            "аренда нови сад",
+            "дом в ветернике"
+          ],
+          "examples": [
+            "! SR Квартира Нови сад",
+            "Ветерник. Свой дом",
+            "Аренда Нови Сад"
+          ]
+        },
+        {
+          "path": "02_Недвижимость/Архив_РФ",
+          "slug": "russia_real_estate_archive",
+          "driveFolderId": "1buzJWZkgqDOQxN1QE8Pd8jAQWEsC1FdE",
+          "description": "Архивные документы по квартирам в РФ и старой аренде",
+          "documentTypes": [
+            "contract",
+            "archive"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "архив рф",
+            "россия недвижимость",
+            "первомайская",
+            "митино",
+            "тамбов",
+            "старая аренда"
+          ],
+          "examples": [
+            "!!Квартира на Первомайской",
+            "!Квартира Митино О2",
+            "!Квартира Тамбов",
+            "!Rent Serbia"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Финансы_и_Бизнес",
+      "slug": "finance_business",
+      "driveFolderId": "1wYr_8rCM4aUPE5dv3-LJ3Y3LQNKY4PJ_",
+      "description": "Налоги, ИП, инвойсы, банковские реквизиты, инвестиции и чеки",
+      "documentTypes": [
+        "invoice",
+        "tax_return",
+        "bank_statement",
+        "receipt"
+      ],
+      "subjects": [
+        "alexey",
+        "victoria"
+      ],
+      "aliases": [
+        "финансы",
+        "бизнес",
+        "налоги",
+        "ип",
+        "инвойс",
+        "банк",
+        "чеки",
+        "инвестиции"
+      ],
+      "examples": [
+        "ИП Сербия",
+        "НАЛОГИ и ВЫЧЕТ",
+        "!Сбер реквизиты"
+      ],
+      "folders": [
+        {
+          "path": "03_Финансы_и_Бизнес/ИП_и_Налоги",
+          "slug": "sole_proprietor_taxes",
+          "driveFolderId": "1CgUgrgPwX3FKc5TifNsRiA7-oI9lSp1E",
+          "description": "Организационные документы ИП и налоговые вычеты",
+          "documentTypes": [
+            "registration",
+            "tax_form",
+            "invoice"
+          ],
+          "subjects": [
+            "alexey"
+          ],
+          "aliases": [
+            "ип",
+            "налоги",
+            "налоговый вычет",
+            "отчетные документы",
+            "регистрация ип"
+          ],
+          "examples": [
+            "ИП Сербия",
+            "НАЛОГИ и ВЫЧЕТ",
+            "Отчетные документы"
+          ]
+        },
+        {
+          "path": "03_Финансы_и_Бизнес/Банки_и_Переводы",
+          "slug": "banks_transfers",
+          "driveFolderId": "1TKEcwyqpChz_mWXgiSTx3o9uVC-3ivRH",
+          "description": "Реквизиты, выписки и денежные переводы",
+          "documentTypes": [
+            "bank_statement",
+            "transfer_receipt"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "банк",
+            "банки",
+            "реквизиты",
+            "выписка",
+            "перевод",
+            "денежные переводы",
+            "сбер"
+          ],
+          "examples": [
+            "!Сбер реквизиты",
+            "! денежные Переводы"
+          ]
+        },
+        {
+          "path": "03_Финансы_и_Бизнес/Инвестиции_и_Чеки",
+          "slug": "investments_receipts",
+          "driveFolderId": "1i-AzoWoM8UfWkbNXFy5uwnfQd2tL7J2t",
+          "description": "Брокерские отчеты и бытовые чеки",
+          "documentTypes": [
+            "broker_report",
+            "receipt"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "инвестиции",
+            "брокер",
+            "брокерский отчет",
+            "чеки",
+            "расходы",
+            "receipt"
+          ],
+          "examples": [
+            "!!Инвестиции",
+            "Чеки",
+            "Расходы"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "04_Здоровье",
+      "slug": "health",
+      "driveFolderId": "1jHmOvlZXBUrM1KrmstUgn7-ke2jt0mwG",
+      "description": "Медицинские документы, страховки, анализы",
+      "documentTypes": [
+        "medical_record",
+        "insurance",
+        "test_result"
+      ],
+      "subjects": [
+        "alexey",
+        "victoria",
+        "sofia"
+      ],
+      "aliases": [
+        "здоровье",
+        "медицина",
+        "медицинские документы",
+        "страховка",
+        "анализы"
+      ],
+      "examples": [
+        "Беременность НС",
+        "Полис 2021",
+        "qr-code_kovid.pdf",
+        "Анализы"
+      ],
+      "folders": [
+        {
+          "path": "04_Здоровье/Анализы_и_Обследования",
+          "slug": "medical_tests_exams",
+          "driveFolderId": "16aJKDGCc8xUS7KnZmMA2mTVFFViX5y3k",
+          "description": "Результаты анализов, приемов врачей и ведение беременности",
+          "documentTypes": [
+            "test_result",
+            "prescription",
+            "scan"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria",
+            "sofia"
+          ],
+          "aliases": [
+            "анализы",
+            "обследования",
+            "врач",
+            "рецепт",
+            "снимок",
+            "стоматолог",
+            "беременность"
+          ],
+          "examples": [
+            "Анализы",
+            "Медицина",
+            "Стоматолог Тамбов",
+            "Беременность НС",
+            "Декрет контур Чек-лист выхода"
+          ]
+        },
+        {
+          "path": "04_Здоровье/Страховки_и_Полисы",
+          "slug": "insurance_policies",
+          "driveFolderId": "1Qxk6fzRpsQrNVd7hiVqAHpnPICwp3gzi",
+          "description": "Действующие и архивные полисы ДМС/ОМС",
+          "documentTypes": [
+            "insurance_policy"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria",
+            "sofia"
+          ],
+          "aliases": [
+            "страховка",
+            "полис",
+            "дмс",
+            "омс",
+            "insurance policy"
+          ],
+          "examples": [
+            "!! Страховка",
+            "Полис 2021"
+          ]
+        },
+        {
+          "path": "04_Здоровье/Фитнес_и_Нутрициология",
+          "slug": "fitness_nutrition",
+          "driveFolderId": "1rKgKhHCst2-atj0wVkUD4JFIuADClL23",
+          "description": "Планы тренировок, диеты, программы",
+          "documentTypes": [
+            "plan",
+            "note"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "фитнес",
+            "нутрициолог",
+            "питание",
+            "диета",
+            "тренировки"
+          ],
+          "examples": [
+            "Фитнес",
+            "!Нутрициолог"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "05_Карьера_и_Обучение",
+      "slug": "career_education",
+      "driveFolderId": "19yIzU5FyW1HFfE2YqWbsAr5SnTHihuQ6",
+      "description": "Работа, резюме, обучение, курсы",
+      "documentTypes": [
+        "resume",
+        "certificate",
+        "study_material",
+        "license"
+      ],
+      "subjects": [
+        "alexey",
+        "victoria"
+      ],
+      "aliases": [
+        "карьера",
+        "работа",
+        "обучение",
+        "курсы",
+        "резюме",
+        "лицензии"
+      ],
+      "examples": [
+        "Резюме",
+        "Работа",
+        "AI Universitet",
+        "!ЛИЦЕНЗИИ на проги"
+      ],
+      "folders": [
+        {
+          "path": "05_Карьера_и_Обучение/Работа_и_Резюме",
+          "slug": "work_resume",
+          "driveFolderId": "1B3YqiqX3qTVGwb9kF46c32Y3L_ByGIGe",
+          "description": "Актуальные CV и рабочие материалы",
+          "documentTypes": [
+            "resume",
+            "portfolio"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "работа",
+            "резюме",
+            "cv",
+            "портфолио",
+            "карьера"
+          ],
+          "examples": [
+            "Резюме",
+            "Работа"
+          ]
+        },
+        {
+          "path": "05_Карьера_и_Обучение/Образование_и_Материалы",
+          "slug": "education_materials",
+          "driveFolderId": "1Pjhh_Od4RtMxwkma8vPNVAN7vJzUcPX1",
+          "description": "Материалы курсов, книги, лицензии",
+          "documentTypes": [
+            "book",
+            "coursework",
+            "license"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "образование",
+            "курсы",
+            "учеба",
+            "книги",
+            "лицензии",
+            "ai universitet"
+          ],
+          "examples": [
+            "AI Universitet",
+            "книги",
+            "!ЛИЦЕНЗИИ на проги"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "06_Семья_и_Быт",
+      "slug": "family_household",
+      "driveFolderId": "1UNJyL_51Zy43mcVa78t06_ejGPIax59u",
+      "description": "Машина, детсад, путешествия, рецепты и прочее",
+      "documentTypes": [
+        "ticket",
+        "manual",
+        "note",
+        "contract"
+      ],
+      "subjects": [
+        "alexey",
+        "victoria",
+        "sofia"
+      ],
+      "aliases": [
+        "семья",
+        "быт",
+        "машина",
+        "детсад",
+        "путешествия",
+        "рецепты",
+        "архив"
+      ],
+      "examples": [
+        "!Дет сад",
+        "Машина",
+        "Билеты",
+        "Еда рецепты соусы"
+      ],
+      "folders": [
+        {
+          "path": "06_Семья_и_Быт/София_Детсад",
+          "slug": "sofia_kindergarten",
+          "driveFolderId": "1ZRIBTYJlV4vB6KABZqP6ZuFfzsze9_6o",
+          "description": "Документы и договора для детского сада и школы",
+          "documentTypes": [
+            "contract",
+            "application"
+          ],
+          "subjects": [
+            "sofia"
+          ],
+          "aliases": [
+            "софия детсад",
+            "детский сад",
+            "дет сад",
+            "школа",
+            "сербская школа"
+          ],
+          "examples": [
+            "!Дет сад",
+            "Сербский школа"
+          ]
+        },
+        {
+          "path": "06_Семья_и_Быт/Автомобиль",
+          "slug": "car",
+          "driveFolderId": "1e344RR98YaAlYgmjroY5IhpafCwFWTJS",
+          "description": "Документы на машину, страховки, ТО",
+          "documentTypes": [
+            "vehicle_registration",
+            "insurance",
+            "receipt"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "машина",
+            "автомобиль",
+            "регистрация авто",
+            "страховка авто",
+            "то"
+          ],
+          "examples": [
+            "Машина"
+          ]
+        },
+        {
+          "path": "06_Семья_и_Быт/Путешествия",
+          "slug": "travel",
+          "driveFolderId": "1GczeEFTcjsP_pBvCy2D72HM32MLodrVf",
+          "description": "Авиабилеты, брони отелей",
+          "documentTypes": [
+            "ticket",
+            "booking"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria",
+            "sofia"
+          ],
+          "aliases": [
+            "путешествия",
+            "билеты",
+            "авиабилеты",
+            "бронь",
+            "отель",
+            "booking"
+          ],
+          "examples": [
+            "Билеты"
+          ]
+        },
+        {
+          "path": "06_Семья_и_Быт/Разное_и_Архив",
+          "slug": "miscellaneous_archive",
+          "driveFolderId": "1AzThrjaadH64W-MS7UJlgRRclYgdnL7c",
+          "description": "Хобби, рецепты, генеалогия, связь, старые бэкапы",
+          "documentTypes": [
+            "note",
+            "image",
+            "archive"
+          ],
+          "subjects": [
+            "alexey",
+            "victoria"
+          ],
+          "aliases": [
+            "разное",
+            "архив",
+            "рецепты",
+            "еда",
+            "семейное дерево",
+            "связь",
+            "почта",
+            "бэкапы"
+          ],
+          "examples": [
+            "Еда рецепты соусы",
+            "Семейное дерево",
+            "Теле2 Корп обслуживание",
+            "!архив",
+            "Почта"
+          ]
+        }
+      ]
     }
   ]
 }
