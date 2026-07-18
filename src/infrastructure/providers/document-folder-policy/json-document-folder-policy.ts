@@ -26,6 +26,7 @@ interface FlatPolicyEntry {
   readonly folderId: string;
   readonly depth: number;
   readonly searchText: string;
+  readonly phrases: readonly string[];
   readonly documentTypes: readonly string[];
   readonly subjects: readonly string[];
 }
@@ -84,6 +85,11 @@ function flattenEntries(
         depth: entry.path.split("/").length,
         documentTypes: normalizeList(entry.documentTypes),
         subjects: normalizeList(entry.subjects),
+        phrases: normalizePhrases([
+          entry.description,
+          ...(entry.aliases ?? []),
+          ...(entry.examples ?? [])
+        ]),
         searchText: normalizeText(
           [
             entry.path,
@@ -125,6 +131,12 @@ function scoreEntry(
   for (const token of tokens(haystack)) {
     if (token.length >= 3 && entry.searchText.includes(token)) {
       score += 1;
+    }
+  }
+
+  for (const phrase of entry.phrases) {
+    if (phrase.length >= 3 && haystack.includes(phrase)) {
+      score += phrase.includes(" ") ? 3 : 1;
     }
   }
 
@@ -175,6 +187,10 @@ function documentTypeMatches(policyType: string, documentType: string): boolean 
 
 function normalizeList(values: readonly string[] | undefined): readonly string[] {
   return (values ?? []).map(normalizeToken).filter(Boolean);
+}
+
+function normalizePhrases(values: readonly (string | undefined)[]): readonly string[] {
+  return values.map((value) => normalizeText(value ?? "").trim()).filter(Boolean);
 }
 
 function normalizeToken(value: string): string {

@@ -71,4 +71,55 @@ describe("JsonDocumentFolderPolicy", () => {
       })
     ).toBeUndefined();
   });
+
+  it("uses personal subfolder aliases instead of broad parent folder for Russian passport names", () => {
+    const policy = JsonDocumentFolderPolicy.fromJson(
+      JSON.stringify({
+        folders: [
+          {
+            path: "01_Личные_документы",
+            driveFolderId: "folder-personal",
+            description: "Актуальные документы, удостоверяющие личность",
+            documentTypes: ["passport", "id_card"],
+            subjects: ["alexey", "victoria"],
+            aliases: ["личные документы", "паспорт"],
+            examples: [],
+            folders: [
+              {
+                path: "01_Личные_документы/Alexey",
+                driveFolderId: "folder-personal-alexey",
+                description: "Личные документы Алексея",
+                documentTypes: ["passport", "id_card"],
+                subjects: ["alexey"],
+                aliases: ["алексей", "а.горяйнов", "горяйнов а", "паспорт горяйнов а"],
+                examples: []
+              },
+              {
+                path: "01_Личные_документы/Victoria",
+                driveFolderId: "folder-personal-victoria",
+                description: "Личные документы Виктории",
+                documentTypes: ["passport", "id_card"],
+                subjects: ["victoria"],
+                aliases: ["виктория", "в.горяйнова", "горяйнова в"],
+                examples: []
+              }
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(
+      policy.resolveUploadFolder({
+        fileName: "паспорт Горяйнов А В.pdf",
+        userText: "сохрани файл в гугл. это паспорт",
+        documentType: "identity"
+      })
+    ).toEqual(
+      expect.objectContaining({
+        path: "01_Личные_документы/Alexey",
+        folderId: "folder-personal-alexey"
+      })
+    );
+  });
 });
