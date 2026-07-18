@@ -399,80 +399,13 @@ export class DispatchAcceptedCommandUseCase {
       return this.dispatchModelFailure(context, classifierInput.attachments);
     }
 
-    if (intent.kind === "ask_clarification") {
-      await this.dependencies.pendingClarifications?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        originalText: pending?.originalText ?? context.text,
-        originalAttachments: pending?.originalAttachments ?? context.attachments,
-        question: intent.question,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: intent.question
-      };
-    }
-
-    if (intent.kind === "store_file") {
-      await this.dependencies.pendingClarifications?.clearByChatId(
-        context.chat.id
-      );
-
-      return this.storeFamilyMessageAttachments(
-        {
-          ...context,
-          attachments: classifierInput.attachments
-        },
-        intent,
-        parseFileUploadDestination(context.text) ??
-          parseModelFileUploadDestination(intent)
-      );
-    }
-
-    await this.dependencies.pendingClarifications?.clearByChatId(
-      context.chat.id
-    );
-
-    if (intent.kind === "record_fact") {
-      return this.recordFamilyFact(context, intent);
-    }
-
-    if (intent.kind === "answer_from_memory") {
-      return this.recallFamilyFacts(context, intent);
-    }
-
-    if (intent.kind === "archive_fact") {
-      return this.archiveFamilyFact(context, intent);
-    }
-
-    if (intent.kind === "register_document") {
-      return this.registerDocument(context, intent);
-    }
-
-    if (intent.kind === "find_document") {
-      return this.findDocuments(context, intent);
-    }
-
-    if (intent.kind === "update_document" || intent.kind === "archive_document") {
-      return this.manageDocument(context, intent);
-    }
-
-    if (
-      intent.kind === "save_subject_alias" ||
-      intent.kind === "list_subject_aliases" ||
-      intent.kind === "delete_subject_alias" ||
-      intent.kind === "diagnose_subject_aliases"
-    ) {
-      return this.manageSubjectAliases(context, intent);
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-    };
+    return this.dispatchClassifiedModelIntent({
+      context,
+      intent,
+      pendingClarification: pending,
+      attachments: classifierInput.attachments,
+      allowFileOrClarification: true
+    });
   }
 
   private async dispatchFamilyMessageWithoutModel(
@@ -1031,16 +964,76 @@ export class DispatchAcceptedCommandUseCase {
       context.chat.id
     );
 
-    return this.dispatchInterruptingModelIntent(context, intent);
+    return this.dispatchClassifiedModelIntent({
+      context,
+      intent,
+      attachments: [],
+      allowFileOrClarification: false
+    });
   }
 
-  private dispatchInterruptingModelIntent(
-    context: AcceptedMessageContext,
-    intent: Exclude<
-      InboundIntent,
-      { readonly kind: "ask_clarification" } | { readonly kind: "store_file" }
-    >
-  ): Promise<OutboundReply> {
+  private async dispatchClassifiedModelIntent(input: {
+    readonly context: AcceptedMessageContext;
+    readonly intent: InboundIntent;
+    readonly pendingClarification?: PendingClarification | undefined;
+    readonly attachments: readonly MessageAttachment[];
+    readonly allowFileOrClarification: boolean;
+  }): Promise<OutboundReply> {
+    const { context, intent } = input;
+
+    if (intent.kind === "ask_clarification") {
+      if (!input.allowFileOrClarification) {
+        return {
+          chatId: context.chat.id,
+          text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+        };
+      }
+
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingClarifications?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        originalText: input.pendingClarification?.originalText ?? context.text,
+        originalAttachments:
+          input.pendingClarification?.originalAttachments ?? context.attachments,
+        question: intent.question,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: intent.question
+      };
+    }
+
+    if (intent.kind === "store_file") {
+      if (!input.allowFileOrClarification) {
+        return {
+          chatId: context.chat.id,
+          text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+        };
+      }
+
+      await this.dependencies.pendingClarifications?.clearByChatId(
+        context.chat.id
+      );
+
+      return this.storeFamilyMessageAttachments(
+        {
+          ...context,
+          attachments: input.attachments
+        },
+        intent,
+        parseFileUploadDestination(context.text) ??
+          parseModelFileUploadDestination(intent)
+      );
+    }
+
+    await this.dependencies.pendingClarifications?.clearByChatId(
+      context.chat.id
+    );
+
     if (intent.kind === "record_fact") {
       return this.recordFamilyFact(context, intent);
     }
