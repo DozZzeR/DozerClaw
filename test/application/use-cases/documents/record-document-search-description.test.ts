@@ -94,6 +94,10 @@ class RecordingDocumentRepository {
     throw new Error("should not be called");
   }
 
+  async findDocumentsByIds(): Promise<readonly DocumentRecord[]> {
+    throw new Error("should not be called");
+  }
+
   async searchDocuments(): Promise<readonly DocumentRecord[]> {
     throw new Error("should not be called");
   }

@@ -58,6 +58,9 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
         async findDocumentByExternalId() {
           return undefined;
         },
+        async findDocumentsByIds() {
+          return [];
+        },
         async searchDocuments() {
           return [];
         }

@@ -157,4 +157,42 @@ describe("SqliteDocumentRepository", () => {
 
     database.close();
   });
+
+  it("finds registered documents by ids", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteDocumentRepository(database);
+
+    await repository.saveDocument({
+      id: "document-passport",
+      provider: "google_drive",
+      externalId: "drive-passport",
+      name: "Max Passport.pdf",
+      url: "https://drive.google.com/file/d/passport",
+      semanticMemoryEntryId: "drawer-document-passport",
+      status: "registered",
+      createdAt: new Date("2026-07-14T08:00:00.000Z"),
+      updatedAt: new Date("2026-07-14T08:00:00.000Z")
+    });
+    await repository.saveDocument({
+      id: "document-archived",
+      provider: "google_drive",
+      externalId: "drive-old",
+      name: "Old Passport.pdf",
+      url: "https://drive.google.com/file/d/old",
+      status: "archived",
+      createdAt: new Date("2026-07-14T08:20:00.000Z"),
+      updatedAt: new Date("2026-07-14T08:20:00.000Z")
+    });
+
+    await expect(
+      repository.findDocumentsByIds(["document-archived", "document-passport"])
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "document-passport",
+        semanticMemoryEntryId: "drawer-document-passport"
+      })
+    ]);
+
+    database.close();
+  });
 });

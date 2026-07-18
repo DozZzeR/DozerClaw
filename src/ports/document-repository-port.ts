@@ -14,6 +14,7 @@ export interface DocumentRepositoryPort {
     provider: DocumentRecord["provider"],
     externalId: string
   ): Promise<DocumentRecord | undefined>;
+  findDocumentsByIds(ids: readonly string[]): Promise<readonly DocumentRecord[]>;
   searchDocuments(
     input: SearchDocumentsInput
   ): Promise<readonly DocumentRecord[]>;

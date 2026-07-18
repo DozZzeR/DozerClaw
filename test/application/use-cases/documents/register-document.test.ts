@@ -193,6 +193,10 @@ class RecordingDocumentRepository implements DocumentRepositoryPort {
     return undefined;
   }
 
+  async findDocumentsByIds(): Promise<readonly DocumentRecord[]> {
+    throw new Error("should not find by ids");
+  }
+
   async searchDocuments(): Promise<readonly DocumentRecord[]> {
     throw new Error("should not search documents");
   }

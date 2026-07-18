@@ -105,6 +105,40 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
     return row ? toDocumentRecord(row) : undefined;
   }
 
+  async findDocumentsByIds(ids: readonly string[]): Promise<readonly DocumentRecord[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const placeholders = ids.map((_, index) => `@id${index}`).join(", ");
+    const parameters = Object.fromEntries(
+      ids.map((id, index) => [`id${index}`, id])
+    );
+    const rows = this.database
+      .prepare(
+        `
+          select
+            id,
+            provider,
+            external_id,
+            name,
+            url,
+            document_type,
+            subject_id,
+            semantic_memory_entry_id,
+            status,
+            created_at,
+            updated_at
+          from documents
+          where id in (${placeholders}) and status = 'registered'
+          order by updated_at desc, created_at desc
+        `
+      )
+      .all(parameters) as DocumentRecordRow[];
+
+    return rows.map(toDocumentRecord);
+  }
+
   async searchDocuments(
     input: SearchDocumentsInput
   ): Promise<readonly DocumentRecord[]> {

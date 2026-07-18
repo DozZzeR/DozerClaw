@@ -145,6 +145,10 @@ class RecordingDocumentRepository implements DocumentRepositoryPort {
     throw new Error("should not find by external id");
   }
 
+  async findDocumentsByIds(): Promise<readonly DocumentRecord[]> {
+    throw new Error("should not find by ids");
+  }
+
   async searchDocuments(
     input: SearchDocumentsInput
   ): Promise<readonly DocumentRecord[]> {

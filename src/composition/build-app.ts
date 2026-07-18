@@ -173,6 +173,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     : undefined;
   const documentLookup = new FindDocumentsUseCase({
     repository: documentRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     limit: 10
   });
   const documentManager = new ManageDocumentRecordUseCase({
