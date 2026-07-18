@@ -21,6 +21,7 @@ export interface DocumentRecord {
   readonly url: string;
   readonly documentType?: DocumentType;
   readonly subjectId?: string;
+  readonly semanticMemoryEntryId?: string;
   readonly status: DocumentStatus;
   readonly createdAt: Date;
   readonly updatedAt: Date;

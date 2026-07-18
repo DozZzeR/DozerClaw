@@ -14,6 +14,7 @@ import { StoreMessageAttachmentsUseCase } from "../application/use-cases/file-in
 import { RegisterDocumentUseCase } from "../application/use-cases/documents/register-document.js";
 import { FindDocumentsUseCase } from "../application/use-cases/documents/find-documents.js";
 import { ManageDocumentRecordUseCase } from "../application/use-cases/documents/manage-document-record.js";
+import { RecordDocumentSearchDescriptionUseCase } from "../application/use-cases/documents/record-document-search-description.js";
 import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases/documents/store-message-document-attachments.js";
 import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
@@ -178,6 +179,13 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     repository: documentRepository,
     now: () => new Date()
   });
+  const documentSearchDescriptionRecorder = semanticMemory
+    ? new RecordDocumentSearchDescriptionUseCase({
+        repository: documentRepository,
+        semanticMemory,
+        now: () => new Date()
+      })
+    : undefined;
   const modelProvider = options.modelProvider
     ? options.modelProvider
     : config.codex.modelRoutingEnabled
@@ -222,6 +230,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(documentAttachmentStore ? { documentAttachmentStore } : {}),
     ...(fileInboxDocumentUploader ? { fileInboxDocumentUploader } : {}),
+    ...(documentSearchDescriptionRecorder
+      ? { documentSearchDescriptionRecorder }
+      : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,

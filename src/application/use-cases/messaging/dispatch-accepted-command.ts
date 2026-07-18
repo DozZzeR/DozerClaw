@@ -17,6 +17,10 @@ import type {
   StoreMessageDocumentAttachmentsInput
 } from "../documents/store-message-document-attachments.js";
 import type {
+  RecordDocumentSearchDescriptionInput,
+  RecordDocumentSearchDescriptionResult
+} from "../documents/record-document-search-description.js";
+import type {
   UploadFileInboxDocumentInput,
   UploadFileInboxDocumentResult
 } from "../documents/upload-file-inbox-document.js";
@@ -99,6 +103,12 @@ export interface FileInboxDocumentUploader {
   execute(
     input: UploadFileInboxDocumentInput
   ): Promise<UploadFileInboxDocumentResult>;
+}
+
+export interface DocumentSearchDescriptionRecorder {
+  execute(
+    input: RecordDocumentSearchDescriptionInput
+  ): Promise<RecordDocumentSearchDescriptionResult>;
 }
 
 export interface FamilyFactRecorder {
@@ -234,6 +244,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly attachmentStore?: MessageAttachmentStore;
   readonly documentAttachmentStore?: MessageDocumentAttachmentStore;
   readonly fileInboxDocumentUploader?: FileInboxDocumentUploader;
+  readonly documentSearchDescriptionRecorder?: DocumentSearchDescriptionRecorder;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
   readonly familyFactArchiver?: FamilyFactArchiver;
@@ -882,6 +893,31 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    if (
+      !metadata.documentType &&
+      !metadata.subjectId &&
+      this.dependencies.documentSearchDescriptionRecorder
+    ) {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingDocumentDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        action: { kind: "describe_for_search" },
+        candidates: uploadedDocuments,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: [
+          formatUploadedDocumentsReply(uploadedDocuments),
+          "Как описать этот файл для поиска?",
+          "Можно ответить коротко, например: личная карта Алекса, или skip."
+        ].join("\n")
+      };
+    }
+
     if (!metadata.documentType && !metadata.subjectId) {
       const now = this.dependencies.now?.() ?? new Date();
       await this.dependencies.pendingDocumentDecisions?.save({
@@ -1472,6 +1508,10 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
+    if (pending.action.kind === "describe_for_search") {
+      return this.dispatchPendingDocumentSearchDescription(context, pending);
+    }
+
     if (isUploadedDocumentMetadataDecision(pending)) {
       return this.dispatchPendingUploadedDocumentMetadata(context, pending);
     }
@@ -1538,6 +1578,46 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: result.text
+    };
+  }
+
+  private async dispatchPendingDocumentSearchDescription(
+    context: AcceptedMessageContext,
+    pending: PendingDocumentDecision
+  ): Promise<OutboundReply> {
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    if (parseSkipDocumentMetadata(context.text)) {
+      return {
+        chatId: context.chat.id,
+        text: "Ок, оставляю документ без описания для поиска."
+      };
+    }
+
+    if (!this.dependencies.documentSearchDescriptionRecorder) {
+      return {
+        chatId: context.chat.id,
+        text: "Semantic document search storage is not configured."
+      };
+    }
+
+    const updated: string[] = [];
+
+    for (const document of pending.candidates) {
+      const result =
+        await this.dependencies.documentSearchDescriptionRecorder.execute({
+          document,
+          description: context.text
+        });
+
+      updated.push(formatDocumentSearchDescriptionResult(result.document, result));
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: updated.join("\n")
     };
   }
 
@@ -2219,6 +2299,15 @@ function formatUploadedDocumentLine(
     : document.name;
 
   return `- ${name}\n  ${document.url}`;
+}
+
+function formatDocumentSearchDescriptionResult(
+  document: RegisterDocumentResult["document"],
+  result: RecordDocumentSearchDescriptionResult
+): string {
+  return result.status === "stored"
+    ? `Сохранил описание для поиска: ${document.name}.`
+    : `Документ сохранен, но описание для поиска пока не записано: ${document.name}.`;
 }
 
 function canonicalDocumentFolderPath(

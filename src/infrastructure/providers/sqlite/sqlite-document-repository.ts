@@ -11,6 +11,7 @@ interface DocumentRecordRow {
   readonly url: string;
   readonly document_type: DocumentRecord["documentType"] | null;
   readonly subject_id: string | null;
+  readonly semantic_memory_entry_id: string | null;
   readonly status: DocumentRecord["status"];
   readonly created_at: string;
   readonly updated_at: string;
@@ -31,6 +32,7 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
             url,
             document_type,
             subject_id,
+            semantic_memory_entry_id,
             status,
             created_at,
             updated_at
@@ -43,6 +45,7 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
             @url,
             @documentType,
             @subjectId,
+            @semanticMemoryEntryId,
             @status,
             @createdAt,
             @updatedAt
@@ -54,6 +57,7 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
             url = excluded.url,
             document_type = excluded.document_type,
             subject_id = excluded.subject_id,
+            semantic_memory_entry_id = excluded.semantic_memory_entry_id,
             status = excluded.status,
             updated_at = excluded.updated_at
         `
@@ -66,6 +70,7 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
         url: document.url,
         documentType: document.documentType ?? null,
         subjectId: document.subjectId ?? null,
+        semanticMemoryEntryId: document.semanticMemoryEntryId ?? null,
         status: document.status,
         createdAt: document.createdAt.toISOString(),
         updatedAt: document.updatedAt.toISOString()
@@ -87,6 +92,7 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
             url,
             document_type,
             subject_id,
+            semantic_memory_entry_id,
             status,
             created_at,
             updated_at
@@ -141,6 +147,7 @@ export class SqliteDocumentRepository implements DocumentRepositoryPort {
             url,
             document_type,
             subject_id,
+            semantic_memory_entry_id,
             status,
             created_at,
             updated_at
@@ -165,6 +172,9 @@ function toDocumentRecord(row: DocumentRecordRow): DocumentRecord {
     url: row.url,
     ...(row.document_type ? { documentType: row.document_type } : {}),
     ...(row.subject_id ? { subjectId: row.subject_id } : {}),
+    ...(row.semantic_memory_entry_id
+      ? { semanticMemoryEntryId: row.semantic_memory_entry_id }
+      : {}),
     status: row.status,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)

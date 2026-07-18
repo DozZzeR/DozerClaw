@@ -124,6 +124,7 @@ function ensureDocumentsTable(database: SqliteDatabase): void {
         )
       ),
       subject_id text,
+      semantic_memory_entry_id text,
       status text not null check (status in ('registered', 'archived')),
       created_at text not null,
       updated_at text not null,
@@ -138,6 +139,12 @@ function ensureDocumentsTable(database: SqliteDatabase): void {
     "document_type text"
   );
   ensureColumn(database, "documents", "subject_id", "subject_id text");
+  ensureColumn(
+    database,
+    "documents",
+    "semantic_memory_entry_id",
+    "semantic_memory_entry_id text"
+  );
 }
 
 function ensureFileInboxRecordsTable(database: SqliteDatabase): void {

@@ -759,6 +759,9 @@ function parseDocumentRecords(json: string): readonly DocumentRecord[] {
       externalId: value.externalId,
       name: value.name,
       url: value.url,
+      ...(typeof value.semanticMemoryEntryId === "string"
+        ? { semanticMemoryEntryId: value.semanticMemoryEntryId }
+        : {}),
       status: value.status as DocumentRecord["status"],
       createdAt: new Date(value.createdAt),
       updatedAt: new Date(value.updatedAt)

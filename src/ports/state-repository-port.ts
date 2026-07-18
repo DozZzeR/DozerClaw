@@ -122,6 +122,9 @@ export type PendingDocumentDecisionAction =
     }
   | {
       readonly kind: "archive";
+    }
+  | {
+      readonly kind: "describe_for_search";
     };
 
 export interface PendingDocumentDecision {

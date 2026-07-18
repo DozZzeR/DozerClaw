@@ -372,7 +372,11 @@ describe("SqliteStateRepository", () => {
         subjectId: "max"
       },
       candidates: [
-        documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+        documentRecord({
+          id: "document-1",
+          name: "Max Passport.pdf",
+          semanticMemoryEntryId: "drawer-document-1"
+        }),
         documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
       ],
       createdAt: new Date("2026-07-14T07:00:00.000Z"),
@@ -393,7 +397,11 @@ describe("SqliteStateRepository", () => {
         subjectId: "max"
       },
       candidates: [
-        documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+        documentRecord({
+          id: "document-1",
+          name: "Max Passport.pdf",
+          semanticMemoryEntryId: "drawer-document-1"
+        }),
         documentRecord({ id: "document-2", name: "Sofia Passport.pdf" })
       ],
       createdAt: new Date("2026-07-14T07:00:00.000Z"),
@@ -467,7 +475,8 @@ describe("SqliteStateRepository", () => {
 });
 
 function documentRecord(
-  input: Pick<DocumentRecord, "id" | "name">
+  input: Pick<DocumentRecord, "id" | "name"> &
+    Pick<Partial<DocumentRecord>, "semanticMemoryEntryId">
 ): DocumentRecord {
   return {
     id: input.id,
@@ -477,6 +486,9 @@ function documentRecord(
     url: `https://drive.google.com/file/d/${input.id}`,
     documentType: "identity",
     subjectId: "max",
+    ...(input.semanticMemoryEntryId
+      ? { semanticMemoryEntryId: input.semanticMemoryEntryId }
+      : {}),
     status: "registered",
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     updatedAt: new Date("2026-07-14T07:00:00.000Z")

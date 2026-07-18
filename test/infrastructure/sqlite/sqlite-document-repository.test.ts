@@ -16,6 +16,7 @@ describe("SqliteDocumentRepository", () => {
       url: "https://drive.google.com/file/d/abc",
       documentType: "identity",
       subjectId: "max",
+      semanticMemoryEntryId: "drawer-document-1",
       status: "registered",
       createdAt: new Date("2026-07-14T08:00:00.000Z"),
       updatedAt: new Date("2026-07-14T08:00:00.000Z")
@@ -31,6 +32,7 @@ describe("SqliteDocumentRepository", () => {
       url: "https://drive.google.com/file/d/abc",
       documentType: "identity",
       subjectId: "max",
+      semanticMemoryEntryId: "drawer-document-1",
       status: "registered",
       createdAt: new Date("2026-07-14T08:00:00.000Z"),
       updatedAt: new Date("2026-07-14T08:00:00.000Z")

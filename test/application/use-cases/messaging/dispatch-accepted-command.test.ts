@@ -121,10 +121,13 @@ describe("DispatchAcceptedCommandUseCase", () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
     const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const documentSearchDescriptionRecorder =
+      new FakeDocumentSearchDescriptionRecorder();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       attachmentStore,
       documentAttachmentStore,
+      documentSearchDescriptionRecorder,
       pendingDocumentDecisions,
       pendingFileDestinationDecisions,
       now: () => new Date("2026-07-02T20:00:00.000Z")
@@ -151,8 +154,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
         "Uploaded 1 document(s) to Google Drive:",
         "- passport.pdf",
         "  https://drive.google.com/file/d/drive-passport",
-        "Какой это документ?",
-        "Можно ответить тип и subject, например: identity max, или skip."
+        "Как описать этот файл для поиска?",
+        "Можно ответить коротко, например: личная карта Алекса, или skip."
       ].join("\n")
     });
     expect(documentAttachmentStore.seenInput).toEqual({
@@ -171,7 +174,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingDocumentDecisions.saved).toEqual({
       chatId: "chat-owner",
       actorId: "actor-owner",
-      action: { kind: "update_metadata" },
+      action: { kind: "describe_for_search" },
       candidates: [uploadedDocumentRecord()],
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
@@ -302,9 +305,12 @@ describe("DispatchAcceptedCommandUseCase", () => {
     pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
     const pendingDocumentDecisions = new FakePendingDocumentDecisions();
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const documentSearchDescriptionRecorder =
+      new FakeDocumentSearchDescriptionRecorder();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       documentAttachmentStore,
+      documentSearchDescriptionRecorder,
       pendingDocumentDecisions,
       pendingFileDestinationDecisions,
       now: () => new Date("2026-07-02T20:05:00.000Z")
@@ -324,8 +330,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
         "Uploaded 1 document(s) to Google Drive:",
         "- passport.pdf",
         "  https://drive.google.com/file/d/drive-passport",
-        "Какой это документ?",
-        "Можно ответить тип и subject, например: identity max, или skip."
+        "Как описать этот файл для поиска?",
+        "Можно ответить коротко, например: личная карта Алекса, или skip."
       ].join("\n")
     });
     expect(documentAttachmentStore.seenInput).toEqual({
@@ -342,7 +348,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingDocumentDecisions.saved).toEqual({
       chatId: "chat-owner",
       actorId: "actor-owner",
-      action: { kind: "update_metadata" },
+      action: { kind: "describe_for_search" },
       candidates: [
         uploadedDocumentRecord()
       ],
@@ -1326,12 +1332,15 @@ describe("DispatchAcceptedCommandUseCase", () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
     const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const documentSearchDescriptionRecorder =
+      new FakeDocumentSearchDescriptionRecorder();
     const pendingFileDestinationDecisions =
       new FakePendingFileDestinationDecisions();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       attachmentStore,
       documentAttachmentStore,
+      documentSearchDescriptionRecorder,
       pendingDocumentDecisions,
       pendingFileDestinationDecisions,
       intentClassifier: new FakeIntentClassifier({
@@ -1363,8 +1372,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
         "Uploaded 1 document(s) to Google Drive:",
         "- passport.pdf",
         "  https://drive.google.com/file/d/drive-passport",
-        "Какой это документ?",
-        "Можно ответить тип и subject, например: identity max, или skip."
+        "Как описать этот файл для поиска?",
+        "Можно ответить коротко, например: личная карта Алекса, или skip."
       ].join("\n")
     });
     expect(attachmentStore.seenInput).toBeUndefined();
@@ -1380,6 +1389,44 @@ describe("DispatchAcceptedCommandUseCase", () => {
       ]
     });
     expect(pendingFileDestinationDecisions.saved).toBeUndefined();
+  });
+
+  it("stores a pending document search description in semantic memory", async () => {
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    pendingDocumentDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: { kind: "describe_for_search" },
+      candidates: [uploadedDocumentRecord()],
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const documentSearchDescriptionRecorder =
+      new FakeDocumentSearchDescriptionRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      pendingDocumentDecisions,
+      documentSearchDescriptionRecorder,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "личная карта Алекса для поездок"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Сохранил описание для поиска: passport.pdf."
+    });
+    expect(documentSearchDescriptionRecorder.seenInput).toEqual({
+      document: uploadedDocumentRecord(),
+      description: "личная карта Алекса для поездок"
+    });
+    expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
   it("records a family fact from model record_fact intent", async () => {
@@ -3776,6 +3823,27 @@ class FakeFileInboxDocumentUploader {
         status: "registered" as const,
         createdAt: new Date("2026-07-02T20:05:00.000Z"),
         updatedAt: new Date("2026-07-02T20:05:00.000Z")
+      }
+    };
+  }
+}
+
+class FakeDocumentSearchDescriptionRecorder {
+  seenInput:
+    | {
+        document: DocumentRecord;
+        description: string;
+      }
+    | undefined;
+
+  async execute(input: { document: DocumentRecord; description: string }) {
+    this.seenInput = input;
+
+    return {
+      status: "stored" as const,
+      document: {
+        ...input.document,
+        semanticMemoryEntryId: "drawer-document-1"
       }
     };
   }
