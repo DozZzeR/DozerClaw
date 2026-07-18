@@ -1390,6 +1390,10 @@ class FakeDocumentStorage implements DocumentStoragePort {
       externalId: input.externalId
     };
   }
+
+  async deleteDocument(): Promise<void> {
+    throw new Error("should not delete document");
+  }
 }
 
 function selectFirstMemoryItem(request: ModelTextRequest): string {

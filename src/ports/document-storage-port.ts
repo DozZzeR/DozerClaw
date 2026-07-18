@@ -2,6 +2,7 @@ export interface DocumentStoragePort {
   resolveDocument(input: ResolveDocumentInput): Promise<ResolvedDocument>;
   uploadDocument(input: UploadDocumentInput): Promise<ResolvedDocument>;
   moveDocument(input: MoveDocumentInput): Promise<MovedDocument>;
+  deleteDocument(input: DeleteDocumentInput): Promise<void>;
 }
 
 export interface ResolveDocumentInput {
@@ -17,6 +18,10 @@ export interface UploadDocumentInput {
 export interface MoveDocumentInput {
   readonly externalId: string;
   readonly targetFolderId: string;
+}
+
+export interface DeleteDocumentInput {
+  readonly externalId: string;
 }
 
 export interface ResolvedDocument {

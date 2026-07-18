@@ -25,17 +25,19 @@ describe("runDevGoogleDriveSmoke", () => {
     const lines: string[] = [];
     const app = new FakeSmokeApp([
       "Куда сохранить файл: dozerclaw-drive-smoke.txt?",
-      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt",
+      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/file/d/drive-smoke-id/view",
       "Updated document: dozerclaw-drive-smoke.txt (identity, subject: max)",
       "Готово: переместил dozerclaw-drive-smoke.txt в Family Documents/max/identity."
     ]);
+    const cleanup = new FakeSmokeCleanup();
 
     const exitCode = await runDevGoogleDriveSmoke({
       env: {
         NODE_ENV: "test"
       },
       write: (line) => lines.push(line),
-      buildSmokeApp: async () => app
+      buildSmokeApp: async () => app,
+      buildCleanup: async () => cleanup
     });
 
     expect(exitCode).toBe(0);
@@ -47,7 +49,57 @@ describe("runDevGoogleDriveSmoke", () => {
       "yes"
     ]);
     expect(app.messages[0]?.attachments).toHaveLength(1);
+    expect(cleanup.deletedExternalIds).toEqual(["drive-smoke-id"]);
+    expect(lines).toContain("cleanup result: deleted");
     expect(lines.at(-1)).toBe("smoke result: moved");
+  });
+
+  it("skips cleanup when disabled", async () => {
+    const lines: string[] = [];
+    const app = new FakeSmokeApp([
+      "Куда сохранить файл: dozerclaw-drive-smoke.txt?",
+      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/file/d/drive-smoke-id/view",
+      "Updated document: dozerclaw-drive-smoke.txt (identity, subject: max)",
+      "Готово: переместил dozerclaw-drive-smoke.txt в Family Documents/max/identity."
+    ]);
+    const cleanup = new FakeSmokeCleanup();
+
+    const exitCode = await runDevGoogleDriveSmoke({
+      env: {
+        NODE_ENV: "test",
+        DOZERCLAW_DEV_GOOGLE_DRIVE_SMOKE_CLEANUP: "0"
+      },
+      write: (line) => lines.push(line),
+      buildSmokeApp: async () => app,
+      buildCleanup: async () => cleanup
+    });
+
+    expect(exitCode).toBe(0);
+    expect(cleanup.deletedExternalIds).toEqual([]);
+    expect(lines).not.toContain("cleanup result: deleted");
+  });
+
+  it("returns non-zero when cleanup fails", async () => {
+    const lines: string[] = [];
+    const app = new FakeSmokeApp([
+      "Куда сохранить файл: dozerclaw-drive-smoke.txt?",
+      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/file/d/drive-smoke-id/view",
+      "Updated document: dozerclaw-drive-smoke.txt (identity, subject: max)",
+      "Готово: переместил dozerclaw-drive-smoke.txt в Family Documents/max/identity."
+    ]);
+
+    const exitCode = await runDevGoogleDriveSmoke({
+      env: {
+        NODE_ENV: "test"
+      },
+      write: (line) => lines.push(line),
+      buildSmokeApp: async () => app,
+      buildCleanup: async () => new ThrowingSmokeCleanup()
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines).toContain("cleanup error: cleanup failed");
+    expect(lines.at(-1)).toBe("smoke result: cleanup failed");
   });
 
   it("returns non-zero when final placement did not move", async () => {
@@ -130,5 +182,19 @@ class ThrowingSmokeApp implements DevGoogleDriveSmokeApp {
 
   async handleNormalizedInboundMessage(): Promise<OutboundReply> {
     throw new Error("Google Drive upload failed: HTTP 403");
+  }
+}
+
+class FakeSmokeCleanup {
+  readonly deletedExternalIds: string[] = [];
+
+  async deleteDocument(input: { readonly externalId: string }) {
+    this.deletedExternalIds.push(input.externalId);
+  }
+}
+
+class ThrowingSmokeCleanup {
+  async deleteDocument() {
+    throw new Error("cleanup failed");
   }
 }

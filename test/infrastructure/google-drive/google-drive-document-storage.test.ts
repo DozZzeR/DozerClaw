@@ -124,6 +124,26 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     });
   });
 
+  it("deletes files through Drive API", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      accessToken: "drive-token",
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com"
+    });
+
+    await provider.deleteDocument({
+      externalId: "drive-abc"
+    });
+
+    expect(fetch.requests[0]).toMatchObject({
+      url: "https://www.googleapis.com/drive/v3/files/drive-abc?supportsAllDrives=true",
+      authorization: "Bearer drive-token",
+      method: "DELETE"
+    });
+  });
+
+
   it("exchanges a service account JWT for a Drive access token", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-drive-auth-"));
     const keyPath = join(directory, "service-account.json");
@@ -325,13 +345,15 @@ class RecordingFetch {
     });
 
     return new Response(
-      JSON.stringify({
-        id: "drive-abc",
-        name: "Passport.pdf",
-        webViewLink: "https://drive.google.com/file/d/drive-abc/view"
-      }),
+      init?.method === "DELETE"
+        ? undefined
+        : JSON.stringify({
+            id: "drive-abc",
+            name: "Passport.pdf",
+            webViewLink: "https://drive.google.com/file/d/drive-abc/view"
+          }),
       {
-        status: 200,
+        status: init?.method === "DELETE" ? 204 : 200,
         headers: {
           "content-type": "application/json"
         }

@@ -46,6 +46,9 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
         },
         async moveDocument() {
           throw new Error("should not move document");
+        },
+        async deleteDocument() {
+          throw new Error("should not delete document");
         }
       } satisfies DocumentStoragePort,
       repository: {

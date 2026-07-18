@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import type {
   DocumentStoragePort,
+  DeleteDocumentInput,
   MoveDocumentInput,
   MovedDocument,
   ResolveDocumentInput,
@@ -166,6 +167,27 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     return {
       externalId: metadata.id
     };
+  }
+
+  async deleteDocument(input: DeleteDocumentInput): Promise<void> {
+    const url = new URL(
+      `/drive/v3/files/${encodeURIComponent(input.externalId)}`,
+      this.apiBaseUrl
+    );
+    url.searchParams.set("supportsAllDrives", "true");
+
+    const response = await this.fetchImpl(url.toString(), {
+      method: "DELETE",
+      headers: {
+        authorization: `Bearer ${await this.accessToken()}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Google Drive delete failed: HTTP ${response.status}${await formatGoogleErrorDetail(response)}`
+      );
+    }
   }
 
   private async accessToken(): Promise<string> {

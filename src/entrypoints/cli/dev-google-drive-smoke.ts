@@ -1,7 +1,10 @@
 import { pathToFileURL } from "node:url";
 
 import { buildApp } from "../../composition/build-app.js";
+import { loadConfig } from "../../composition/config.js";
+import { GoogleDriveDocumentStorageProvider } from "../../infrastructure/providers/google-drive/google-drive-document-storage.js";
 import type { AttachmentDownloadPort } from "../../ports/attachment-download-port.js";
+import type { DocumentStoragePort } from "../../ports/document-storage-port.js";
 import type { BootstrapOwnerIdentityInput } from "../../application/use-cases/identity/bootstrap-owner-identity.js";
 import type { HandleNormalizedInboundMessageInput } from "../../application/use-cases/messaging/handle-normalized-inbound-message.js";
 import type { OutboundReply } from "../../core/domain/messaging/reply.js";
@@ -17,6 +20,7 @@ export interface DevGoogleDriveSmokeOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly write: (line: string) => void;
   readonly buildSmokeApp?: () => Promise<DevGoogleDriveSmokeApp>;
+  readonly buildCleanup?: () => Promise<Pick<DocumentStoragePort, "deleteDocument">>;
 }
 
 const DEFAULT_FILE_NAME = "dozerclaw-drive-smoke.txt";
@@ -106,6 +110,32 @@ export async function runDevGoogleDriveSmoke(
   }
 
   const moved = replies.at(-1)?.startsWith("Готово: переместил") ?? false;
+  if (moved && options.env.DOZERCLAW_DEV_GOOGLE_DRIVE_SMOKE_CLEANUP !== "0") {
+    const externalId = parseDriveFileIdFromReplies(replies);
+
+    if (!externalId) {
+      options.write("cleanup error: uploaded Drive file id was not found");
+      options.write("smoke result: cleanup failed");
+
+      return 1;
+    }
+
+    try {
+      const cleanup = options.buildCleanup
+        ? await options.buildCleanup()
+        : buildDefaultCleanup(options.env);
+      await cleanup.deleteDocument({ externalId });
+      options.write("cleanup result: deleted");
+    } catch (error) {
+      options.write(
+        `cleanup error: ${error instanceof Error ? error.message : String(error)}`
+      );
+      options.write("smoke result: cleanup failed");
+
+      return 1;
+    }
+  }
+
   options.write(`smoke result: ${moved ? "moved" : "not moved"}`);
 
   return moved ? 0 : 1;
@@ -116,6 +146,30 @@ function buildDefaultSmokeApp(env: NodeJS.ProcessEnv): DevGoogleDriveSmokeApp {
     env,
     attachmentDownloader: new DevSmokeAttachmentDownloader(env)
   });
+}
+
+function buildDefaultCleanup(
+  env: NodeJS.ProcessEnv
+): Pick<DocumentStoragePort, "deleteDocument"> {
+  const config = loadConfig(env);
+
+  if (!config.googleDrive) {
+    throw new Error("Google Drive cleanup is not configured");
+  }
+
+  return new GoogleDriveDocumentStorageProvider(config.googleDrive);
+}
+
+function parseDriveFileIdFromReplies(replies: readonly string[]): string | undefined {
+  for (const reply of replies) {
+    const match = reply.match(/https:\/\/drive\.google\.com\/file\/d\/([^/\s]+)/u);
+
+    if (match?.[1]) {
+      return decodeURIComponent(match[1]);
+    }
+  }
+
+  return undefined;
 }
 
 class DevSmokeAttachmentDownloader implements AttachmentDownloadPort {

@@ -164,6 +164,10 @@ class StubDocumentStorage implements DocumentStoragePort {
   async moveDocument(): Promise<{ readonly externalId: string }> {
     throw new Error("should not move document");
   }
+
+  async deleteDocument(): Promise<void> {
+    throw new Error("should not delete document");
+  }
 }
 
 class RecordingDocumentRepository implements DocumentRepositoryPort {
