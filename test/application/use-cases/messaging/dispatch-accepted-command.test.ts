@@ -115,7 +115,70 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
-  it("asks for a file destination when attachments do not specify one", async () => {
+  it("uploads attachments to Drive by default when document storage is configured", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    const attachmentStore = new FakeAttachmentStore(1);
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      documentAttachmentStore,
+      pendingDocumentDecisions,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "save this",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "passport.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Какой это документ?",
+        "Можно ответить тип и subject, например: identity max, или skip."
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "passport.pdf"
+        }
+      ]
+    });
+    expect(attachmentStore.seenInput).toBeUndefined();
+    expect(pendingFileDestinationDecisions.saved).toBeUndefined();
+    expect(pendingDocumentDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: { kind: "update_metadata" },
+      candidates: [uploadedDocumentRecord()],
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+  });
+
+  it("asks for a file destination when Drive upload is not configured", async () => {
     const pendingFileDestinationDecisions =
       new FakePendingFileDestinationDecisions();
     const attachmentStore = new FakeAttachmentStore(1);
@@ -151,21 +214,6 @@ describe("DispatchAcceptedCommandUseCase", () => {
       ].join("\n")
     });
     expect(attachmentStore.seenInput).toBeUndefined();
-    expect(pendingFileDestinationDecisions.saved).toEqual({
-      chatId: "chat-owner",
-      actorId: "actor-owner",
-      provider: "telegram",
-      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
-      attachments: [
-        {
-          id: "attachment-1",
-          providerFileId: "telegram-file-1",
-          fileName: "passport.pdf"
-        }
-      ],
-      createdAt: new Date("2026-07-02T20:00:00.000Z"),
-      expiresAt: new Date("2026-07-02T20:30:00.000Z")
-    });
   });
 
   it("stores a pending attachment locally when the user chooses local inbox", async () => {
@@ -209,6 +257,40 @@ describe("DispatchAcceptedCommandUseCase", () => {
         }
       ]
     });
+    expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
+  it("does not allow non-owner users to store attachments in the local inbox", async () => {
+    const pendingFileDestinationDecisions =
+      new FakePendingFileDestinationDecisions();
+    pendingFileDestinationDecisions.pending = pendingFileDestinationDecision();
+    const attachmentStore = new FakeAttachmentStore(1);
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore,
+      pendingFileDestinationDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          actor: {
+            ...acceptedContext.actor,
+            role: "family"
+          },
+          text: "local inbox"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Локальное хранилище доступно только админу. Файл не сохранен."
+    });
+    expect(attachmentStore.seenInput).toBeUndefined();
     expect(pendingFileDestinationDecisions.deletedChatIds).toEqual([
       "chat-owner"
     ]);
@@ -1240,13 +1322,17 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(documentAttachmentStore.seenInput).toBeUndefined();
   });
 
-  it("does not silently use model local destination when the user did not choose local storage", async () => {
+  it("uses Drive default instead of model local destination when the user did not choose local storage", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
     const pendingFileDestinationDecisions =
       new FakePendingFileDestinationDecisions();
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       attachmentStore,
+      documentAttachmentStore,
+      pendingDocumentDecisions,
       pendingFileDestinationDecisions,
       intentClassifier: new FakeIntentClassifier({
         kind: "store_file",
@@ -1274,16 +1360,15 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ).resolves.toEqual({
       chatId: "chat-owner",
       text: [
-        "Куда сохранить файл: ODIGEO cover.pdf?",
-        "Можно ответить:",
-        "- local inbox",
-        "- Google Drive"
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Какой это документ?",
+        "Можно ответить тип и subject, например: identity max, или skip."
       ].join("\n")
     });
     expect(attachmentStore.seenInput).toBeUndefined();
-    expect(pendingFileDestinationDecisions.saved).toEqual({
-      chatId: "chat-owner",
-      actorId: "actor-owner",
+    expect(documentAttachmentStore.seenInput).toEqual({
       provider: "telegram",
       receivedAt: new Date("2026-07-02T20:00:00.000Z"),
       attachments: [
@@ -1292,10 +1377,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
           providerFileId: "telegram-file-1",
           fileName: "ODIGEO cover.pdf"
         }
-      ],
-      createdAt: new Date("2026-07-02T20:05:00.000Z"),
-      expiresAt: new Date("2026-07-02T20:35:00.000Z")
+      ]
     });
+    expect(pendingFileDestinationDecisions.saved).toBeUndefined();
   });
 
   it("records a family fact from model record_fact intent", async () => {

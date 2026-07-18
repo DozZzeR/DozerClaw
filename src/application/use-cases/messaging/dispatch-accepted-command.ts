@@ -756,7 +756,9 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (!destination) {
-      if (!this.dependencies.pendingFileDestinationDecisions) {
+      if (this.dependencies.documentAttachmentStore) {
+        destination = "google_drive";
+      } else if (!this.dependencies.pendingFileDestinationDecisions) {
         destination = "local_inbox";
       } else {
         const now = this.dependencies.now?.() ?? new Date();
@@ -782,6 +784,13 @@ export class DispatchAcceptedCommandUseCase {
         context,
         parseModelDocumentMetadata(intent)
       );
+    }
+
+    if (!canUseLocalFileStorage(context)) {
+      return {
+        chatId: context.chat.id,
+        text: "Локальное хранилище доступно только админу. Файл не сохранен."
+      };
     }
 
     const results = await this.dependencies.attachmentStore?.execute({
@@ -2010,6 +2019,10 @@ function resolveFileUploadDestinationForModelIntent(
   const modelDestination = parseModelFileUploadDestination(intent);
 
   return modelDestination === "google_drive" ? modelDestination : undefined;
+}
+
+function canUseLocalFileStorage(context: AcceptedMessageContext): boolean {
+  return context.actor.role === "owner";
 }
 
 function parseModelDocumentMetadata(

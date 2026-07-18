@@ -126,7 +126,7 @@ describe("buildApp attachment storage", () => {
         displayName: "Owner"
       });
 
-      const prompt = await app.handleNormalizedInboundMessage({
+      const uploaded = await app.handleNormalizedInboundMessage({
         messageId: "message-1",
         provider: "telegram",
         providerUserId: "tg-owner",
@@ -145,29 +145,6 @@ describe("buildApp attachment storage", () => {
         ],
         receivedAt: new Date("2026-07-04T12:00:00.000Z"),
         now: new Date("2026-07-04T12:00:00.000Z")
-      });
-
-      expect(prompt.text).toBe(
-        [
-          "Куда сохранить файл: passport.pdf?",
-          "Можно ответить:",
-          "- local inbox",
-          "- Google Drive"
-        ].join("\n")
-      );
-      expect(downloader.inputs).toEqual([]);
-
-      const uploaded = await app.handleNormalizedInboundMessage({
-        messageId: "message-2",
-        provider: "telegram",
-        providerUserId: "tg-owner",
-        providerChatId: "tg-owner-chat",
-        chatKind: "owner_private",
-        displayName: "Owner",
-        text: "Google Drive",
-        attachments: [],
-        receivedAt: new Date("2026-07-04T12:01:00.000Z"),
-        now: new Date("2026-07-04T12:01:00.000Z")
       });
 
       expect(uploaded.text).toBe(
