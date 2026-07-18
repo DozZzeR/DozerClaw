@@ -241,23 +241,6 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(documentRegistrar ? { documentRegistrar } : {}),
     documentLookup,
     documentManager,
-    ...(documentStorage
-        ? {
-          documentPlacementMover: {
-            execute: async (input) => {
-              await documentStorage.moveDocument(input);
-            }
-          }
-        }
-      : {}),
-    ...(config.googleDrive?.folderIdByPath
-      ? {
-          documentFolderResolver: {
-            findFolderIdByPath: (path) =>
-              config.googleDrive?.folderIdByPath?.[path]
-          }
-        }
-      : {}),
     subjectAliasManager,
     factDecisionResolver,
     pendingAccessRequests: {
@@ -315,17 +298,6 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       save: (input) => stateRepository.savePendingDocumentDecision(input),
       clearByChatId: (chatId) =>
         stateRepository.clearPendingDocumentDecisionByChatId(chatId)
-    },
-    pendingDocumentPlacementDecisions: {
-      findActiveByChatId: (chatId, now) =>
-        stateRepository.findActivePendingDocumentPlacementDecisionByChatId(
-          chatId,
-          now
-        ),
-      save: (input) =>
-        stateRepository.savePendingDocumentPlacementDecision(input),
-      clearByChatId: (chatId) =>
-        stateRepository.clearPendingDocumentPlacementDecisionByChatId(chatId)
     },
     ...(intentClassifier ? { intentClassifier } : {}),
     ...(pendingChoiceClassifier ? { pendingChoiceClassifier } : {})

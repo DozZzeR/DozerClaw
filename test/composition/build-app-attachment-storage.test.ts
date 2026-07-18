@@ -178,31 +178,7 @@ describe("buildApp attachment storage", () => {
       });
 
       expect(metadataReply.text).toBe(
-        [
-          "Updated document: passport.pdf (identity, subject: max)",
-          "Предлагаю папку: Family Documents/max/identity",
-          "Переместить файл туда? Ответь yes или skip."
-        ].join("\n")
-      );
-
-      const placementReply = await app.handleNormalizedInboundMessage({
-        messageId: "message-4",
-        provider: "telegram",
-        providerUserId: "tg-owner",
-        providerChatId: "tg-owner-chat",
-        chatKind: "owner_private",
-        displayName: "Owner",
-        text: "yes",
-        attachments: [],
-        receivedAt: new Date("2026-07-04T12:03:00.000Z"),
-        now: new Date("2026-07-04T12:03:00.000Z")
-      });
-
-      expect(placementReply.text).toBe(
-        [
-          "Не двигаю passport.pdf: для папки Family Documents/max/identity пока не настроен Drive folder id.",
-          "Файл остался на текущем месте."
-        ].join("\n")
+        "Updated document: passport.pdf (identity, subject: max)"
       );
       expect(documentStorage.moves).toEqual([]);
 
@@ -240,7 +216,7 @@ describe("buildApp attachment storage", () => {
     }
   });
 
-  it("moves uploaded Drive documents after confirmed placement when folder mapping is configured", async () => {
+  it("does not ask for placement confirmation while folder policy is disabled", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");
     const fileStorageRoot = join(directory, "file-inbox");
@@ -312,7 +288,7 @@ describe("buildApp attachment storage", () => {
         now: new Date("2026-07-04T12:02:00.000Z")
       });
 
-      const placementReply = await app.handleNormalizedInboundMessage({
+      const ignoredPlacementReply = await app.handleNormalizedInboundMessage({
         messageId: "message-4",
         provider: "telegram",
         providerUserId: "tg-owner",
@@ -325,15 +301,10 @@ describe("buildApp attachment storage", () => {
         now: new Date("2026-07-04T12:03:00.000Z")
       });
 
-      expect(placementReply.text).toBe(
-        "Готово: переместил passport.pdf в Family Documents/max/identity."
+      expect(ignoredPlacementReply.text).toBe(
+        "Command not implemented yet: family_message."
       );
-      expect(documentStorage.moves).toEqual([
-        {
-          externalId: "drive-passport",
-          targetFolderId: "folder-max-identity"
-        }
-      ]);
+      expect(documentStorage.moves).toEqual([]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
