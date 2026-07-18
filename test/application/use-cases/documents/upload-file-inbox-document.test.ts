@@ -86,13 +86,94 @@ describe("UploadFileInboxDocumentUseCase", () => {
       status: "not_found"
     });
   });
+
+  it("deletes stale local inbox records when the physical file is gone", async () => {
+    const fileRecord: FileInboxRecord = {
+      id: "file-1",
+      originalFileName: "card.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 7,
+      storageId: "storage-1",
+      storagePath: "/tmp/missing/card.pdf",
+      receivedAt: new Date("2026-07-02T19:00:00.000Z"),
+      createdAt: new Date("2026-07-02T19:00:00.000Z")
+    };
+    const repository = new FakeFileInboxRepository(fileRecord);
+    const useCase = new UploadFileInboxDocumentUseCase({
+      fileInboxRepository: repository,
+      fileStorage: new MissingFakeFileStorageReader(),
+      fileStorageSearch: {
+        async findFileByName(input) {
+          expect(input).toEqual({ fileName: "card.pdf" });
+
+          return undefined;
+        }
+      },
+      documentStorage: new FakeDocumentStorage(),
+      documentRepository: new FakeDocumentRepository(),
+      generateId: () => "document-1",
+      now: () => new Date("2026-07-02T20:00:00.000Z")
+    });
+
+    await expect(useCase.execute({ fileInboxRecordId: "file-1" })).resolves.toEqual({
+      status: "not_found"
+    });
+    expect(repository.deletedIds).toEqual(["file-1"]);
+  });
+
+  it("repairs stale local inbox paths when the file moved inside storage", async () => {
+    const fileRecord: FileInboxRecord = {
+      id: "file-1",
+      originalFileName: "card.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 7,
+      storageId: "storage-1",
+      storagePath: "/tmp/old/card.pdf",
+      receivedAt: new Date("2026-07-02T19:00:00.000Z"),
+      createdAt: new Date("2026-07-02T19:00:00.000Z")
+    };
+    const repository = new FakeFileInboxRepository(fileRecord);
+    const fileStorage = new MissingThenFoundFakeFileStorageReader(
+      "/tmp/new/card.pdf",
+      new Uint8Array([1, 2, 3])
+    );
+    const documentStorage = new FakeDocumentStorage();
+    const useCase = new UploadFileInboxDocumentUseCase({
+      fileInboxRepository: repository,
+      fileStorage,
+      fileStorageSearch: {
+        async findFileByName(input) {
+          expect(input).toEqual({ fileName: "card.pdf" });
+
+          return { path: "/tmp/new/card.pdf" };
+        }
+      },
+      documentStorage,
+      documentRepository: new FakeDocumentRepository(),
+      generateId: () => "document-1",
+      now: () => new Date("2026-07-02T20:00:00.000Z")
+    });
+
+    await expect(useCase.execute({ fileInboxRecordId: "file-1" })).resolves.toEqual(
+      expect.objectContaining({ status: "uploaded" })
+    );
+    expect(repository.saved?.storagePath).toBe("/tmp/new/card.pdf");
+    expect(documentStorage.seenInput).toEqual({
+      fileName: "card.pdf",
+      mimeType: "application/pdf",
+      bytes: new Uint8Array([1, 2, 3])
+    });
+  });
 });
 
 class FakeFileInboxRepository {
+  saved: FileInboxRecord | undefined;
+  readonly deletedIds: string[] = [];
+
   constructor(private readonly record: FileInboxRecord | undefined) {}
 
-  async saveFileInboxRecord(): Promise<void> {
-    throw new Error("should not be called");
+  async saveFileInboxRecord(record: FileInboxRecord): Promise<void> {
+    this.saved = record;
   }
 
   async findFileInboxRecordById(): Promise<FileInboxRecord | undefined> {
@@ -103,6 +184,12 @@ class FakeFileInboxRepository {
     FileInboxRecord | undefined
   > {
     throw new Error("should not be called");
+  }
+
+  async deleteFileInboxRecordById(id: string): Promise<boolean> {
+    this.deletedIds.push(id);
+
+    return Boolean(this.record && this.record.id === id);
   }
 }
 
@@ -115,6 +202,27 @@ class FakeFileStorageReader {
     this.seenInput = input;
 
     return this.bytes;
+  }
+}
+
+class MissingFakeFileStorageReader {
+  async readFile(): Promise<Uint8Array> {
+    throw Object.assign(new Error("missing"), { code: "ENOENT" });
+  }
+}
+
+class MissingThenFoundFakeFileStorageReader {
+  constructor(
+    private readonly foundPath: string,
+    private readonly bytes: Uint8Array
+  ) {}
+
+  async readFile(input: { readonly path: string }): Promise<Uint8Array> {
+    if (input.path === this.foundPath) {
+      return this.bytes;
+    }
+
+    throw Object.assign(new Error("missing"), { code: "ENOENT" });
   }
 }
 

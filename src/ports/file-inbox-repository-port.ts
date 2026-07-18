@@ -6,4 +6,5 @@ export interface FileInboxRepositoryPort {
   findLatestFileInboxRecordByOriginalFileName(
     originalFileName: string
   ): Promise<FileInboxRecord | undefined>;
+  deleteFileInboxRecordById(id: string): Promise<boolean>;
 }

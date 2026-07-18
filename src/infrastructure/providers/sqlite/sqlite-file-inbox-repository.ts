@@ -111,6 +111,14 @@ export class SqliteFileInboxRepository implements FileInboxRepositoryPort {
 
     return row ? toFileInboxRecord(row) : undefined;
   }
+
+  async deleteFileInboxRecordById(id: string): Promise<boolean> {
+    const result = this.database
+      .prepare("delete from file_inbox_records where id = ?")
+      .run(id);
+
+    return result.changes > 0;
+  }
 }
 
 function toFileInboxRecord(row: FileInboxRecordRow): FileInboxRecord {

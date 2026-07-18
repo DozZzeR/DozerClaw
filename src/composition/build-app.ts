@@ -176,6 +176,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ? new UploadFileInboxDocumentUseCase({
         fileInboxRepository,
         fileStorage,
+        fileStorageSearch: fileStorage,
         documentStorage,
         documentRepository,
         generateId,

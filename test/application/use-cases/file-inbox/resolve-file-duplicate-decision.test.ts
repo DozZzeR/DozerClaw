@@ -190,6 +190,9 @@ function repository(savedRecords: FileInboxRecord[]): FileInboxRepositoryPort {
     },
     async findLatestFileInboxRecordByOriginalFileName() {
       return undefined;
+    },
+    async deleteFileInboxRecordById() {
+      throw new Error("should not delete");
     }
   };
 }

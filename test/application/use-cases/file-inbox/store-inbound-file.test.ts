@@ -33,6 +33,9 @@ describe("StoreInboundFileUseCase", () => {
         },
         async findLatestFileInboxRecordByOriginalFileName() {
           return undefined;
+        },
+        async deleteFileInboxRecordById() {
+          throw new Error("should not delete");
         }
       } satisfies FileInboxRepositoryPort,
       generateId: () => "file-inbox-1",
@@ -99,6 +102,9 @@ describe("StoreInboundFileUseCase", () => {
         },
         async findLatestFileInboxRecordByOriginalFileName(fileName) {
           return fileName === "report.pdf" ? existingRecord : undefined;
+        },
+        async deleteFileInboxRecordById() {
+          throw new Error("should not delete");
         }
       } satisfies FileInboxRepositoryPort,
       generateId: () => "file-inbox-1",

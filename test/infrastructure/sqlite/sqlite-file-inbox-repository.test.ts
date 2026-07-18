@@ -134,4 +134,29 @@ describe("SqliteFileInboxRepository", () => {
     database.close();
   });
 
+  it("deletes file inbox records by id", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteFileInboxRepository(database);
+
+    await repository.saveFileInboxRecord({
+      id: "file-inbox-1",
+      originalFileName: "report.pdf",
+      sizeBytes: 123,
+      storageId: "stored-file-1",
+      storagePath: "inbox/file-inbox-1/report.pdf",
+      receivedAt: new Date("2026-07-03T10:59:00.000Z"),
+      createdAt: new Date("2026-07-03T11:00:00.000Z")
+    });
+
+    await expect(repository.deleteFileInboxRecordById("file-inbox-1")).resolves.toBe(
+      true
+    );
+    await expect(repository.findFileInboxRecordById("file-inbox-1")).resolves.toBeUndefined();
+    await expect(repository.deleteFileInboxRecordById("file-inbox-1")).resolves.toBe(
+      false
+    );
+
+    database.close();
+  });
+
 });
