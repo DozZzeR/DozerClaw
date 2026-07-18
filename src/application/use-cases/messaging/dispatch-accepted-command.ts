@@ -13,9 +13,11 @@ import type {
   ManageDocumentRecordResult
 } from "../documents/manage-document-record.js";
 import type {
+  PreparedDocumentAttachment,
   StoreMessageDocumentAttachmentResult,
   StoreMessageDocumentAttachmentsInput
 } from "../documents/store-message-document-attachments.js";
+import type { UploadPreparedDocumentInput } from "../documents/store-message-document-attachments.js";
 import type {
   RecordDocumentSearchDescriptionInput,
   RecordDocumentSearchDescriptionResult
@@ -97,6 +99,9 @@ export interface MessageDocumentAttachmentStore {
   execute(
     input: StoreMessageDocumentAttachmentsInput
   ): Promise<readonly StoreMessageDocumentAttachmentResult[]>;
+  uploadPrepared(
+    input: UploadPreparedDocumentInput
+  ): Promise<Extract<StoreMessageDocumentAttachmentResult, { readonly status: "uploaded" }>>;
 }
 
 export interface FileInboxDocumentUploader {
@@ -883,6 +888,45 @@ export class DispatchAcceptedCommandUseCase {
       userText: context.text,
       ...metadata
     });
+    const folderChoices = results.flatMap((result) =>
+      result.status === "needs_folder_choice" ? [result] : []
+    );
+
+    const choice = folderChoices[0];
+
+    if (choice) {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingDocumentDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        action: {
+          kind: "choose_upload_folder",
+          provider: context.provider,
+          receivedAt: context.receivedAt.toISOString(),
+          attachment: {
+            fileName: choice.attachment.fileName,
+            ...(choice.attachment.mimeType
+              ? { mimeType: choice.attachment.mimeType }
+              : {}),
+            bytesBase64: Buffer.from(choice.attachment.bytes).toString("base64")
+          },
+          parentPath: choice.parentPath,
+          parentFolderId: choice.parentFolderId,
+          options: choice.options,
+          ...(choice.documentType ? { documentType: choice.documentType } : {}),
+          ...(choice.subjectId ? { subjectId: choice.subjectId } : {})
+        },
+        candidates: [],
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: formatUploadFolderChoicePrompt(choice)
+      };
+    }
+
     const uploadedDocuments = results.flatMap((result) =>
       result.status === "uploaded" ? [result.document] : []
     );
@@ -1509,6 +1553,10 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
+    if (pending.action.kind === "choose_upload_folder") {
+      return this.dispatchPendingUploadFolderChoice(context, pending);
+    }
+
     if (pending.action.kind === "describe_for_search") {
       return this.dispatchPendingDocumentSearchDescription(context, pending);
     }
@@ -1579,6 +1627,85 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: result.text
+    };
+  }
+
+  private async dispatchPendingUploadFolderChoice(
+    context: AcceptedMessageContext,
+    pending: PendingDocumentDecision
+  ): Promise<OutboundReply> {
+    if (pending.action.kind !== "choose_upload_folder") {
+      return {
+        chatId: context.chat.id,
+        text: "Document folder choice is not pending."
+      };
+    }
+
+    const decision = parseUploadFolderChoice(context.text, pending.action.options);
+
+    if (decision === "cancel") {
+      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+        context.chat.id
+      );
+
+      return {
+        chatId: context.chat.id,
+        text: "Ок, не сохраняю файл."
+      };
+    }
+
+    if (!decision) {
+      return {
+        chatId: context.chat.id,
+        text: formatUploadFolderChoicePrompt({
+          status: "needs_folder_choice",
+          attachment: {
+            fileName: pending.action.attachment.fileName,
+            ...(pending.action.attachment.mimeType
+              ? { mimeType: pending.action.attachment.mimeType }
+              : {}),
+            bytes: new Uint8Array()
+          },
+          parentPath: pending.action.parentPath,
+          parentFolderId: pending.action.parentFolderId,
+          options: pending.action.options,
+          ...(pending.action.documentType
+            ? { documentType: pending.action.documentType }
+            : {}),
+          ...(pending.action.subjectId ? { subjectId: pending.action.subjectId } : {})
+        })
+      };
+    }
+
+    if (!this.dependencies.documentAttachmentStore) {
+      return {
+        chatId: context.chat.id,
+        text: "Google Drive upload is not configured yet. File was not saved."
+      };
+    }
+
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    const uploaded = await this.dependencies.documentAttachmentStore.uploadPrepared({
+      attachment: {
+        fileName: pending.action.attachment.fileName,
+        ...(pending.action.attachment.mimeType
+          ? { mimeType: pending.action.attachment.mimeType }
+          : {}),
+        bytes: Buffer.from(pending.action.attachment.bytesBase64, "base64")
+      },
+      targetFolderId: decision.folderId,
+      ...(pending.action.documentType
+        ? { documentType: pending.action.documentType }
+        : {}),
+      ...(pending.action.subjectId ? { subjectId: pending.action.subjectId } : {})
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: formatUploadedDocumentsReply([uploaded.document])
     };
   }
 
@@ -2300,6 +2427,44 @@ function formatUploadedDocumentLine(
     : document.name;
 
   return `- ${name}\n  ${document.url}`;
+}
+
+function formatUploadFolderChoicePrompt(
+  choice: Extract<
+    StoreMessageDocumentAttachmentResult,
+    { readonly status: "needs_folder_choice" }
+  >
+): string {
+  return [
+    `Куда сохранить ${choice.attachment.fileName}?`,
+    `Выбрана папка ${choice.parentPath}, но в ней есть подпапки:`,
+    ...choice.options.map((option, index) => `${index + 1}. ${option.path}`),
+    "Ответь номером, названием папки или \"отмена\"."
+  ].join("\n");
+}
+
+function parseUploadFolderChoice(
+  text: string,
+  options: readonly { readonly path: string; readonly folderId: string }[]
+): { readonly path: string; readonly folderId: string } | "cancel" | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (/^(cancel|skip|отмена|отмени|не надо)$/u.test(normalized)) {
+    return "cancel";
+  }
+
+  const numeric = Number.parseInt(normalized, 10);
+
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= options.length) {
+    return options[numeric - 1];
+  }
+
+  return options.find((option) => {
+    const path = option.path.toLowerCase();
+    const lastSegment = path.split("/").at(-1)?.toLowerCase();
+
+    return path.includes(normalized) || lastSegment === normalized;
+  });
 }
 
 function formatDocumentSearchDescriptionResult(

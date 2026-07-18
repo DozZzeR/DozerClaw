@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 
 import type {
   DocumentFolderPolicyPort,
+  DocumentUploadFolderResolution,
   ResolveDocumentUploadFolderInput,
-  ResolvedDocumentUploadFolder
 } from "../../../ports/document-folder-policy-port.js";
 
 interface JsonDocumentFolderPolicyFile {
@@ -25,6 +25,10 @@ interface FlatPolicyEntry {
   readonly path: string;
   readonly folderId: string;
   readonly depth: number;
+  readonly childOptions: readonly {
+    readonly path: string;
+    readonly folderId: string;
+  }[];
   readonly searchText: string;
   readonly phrases: readonly string[];
   readonly documentTypes: readonly string[];
@@ -46,7 +50,7 @@ export class JsonDocumentFolderPolicy implements DocumentFolderPolicyPort {
 
   resolveUploadFolder(
     input: ResolveDocumentUploadFolderInput
-  ): ResolvedDocumentUploadFolder | undefined {
+  ): DocumentUploadFolderResolution | undefined {
     const candidates = this.entries
       .map((entry) => ({
         entry,
@@ -65,7 +69,18 @@ export class JsonDocumentFolderPolicy implements DocumentFolderPolicyPort {
       return undefined;
     }
 
+    if (best.entry.childOptions.length > 0) {
+      return {
+        status: "needs_choice",
+        path: best.entry.path,
+        folderId: best.entry.folderId,
+        confidence: Math.min(1, best.score / 10),
+        options: best.entry.childOptions
+      };
+    }
+
     return {
+      status: "resolved",
       path: best.entry.path,
       folderId: best.entry.folderId,
       confidence: Math.min(1, best.score / 10)
@@ -83,6 +98,16 @@ function flattenEntries(
         path: entry.path,
         folderId: entry.driveFolderId,
         depth: entry.path.split("/").length,
+        childOptions: (entry.folders ?? []).flatMap((child) =>
+          child.path && child.driveFolderId
+            ? [
+                {
+                  path: child.path,
+                  folderId: child.driveFolderId
+                }
+              ]
+            : []
+        ),
         documentTypes: normalizeList(entry.documentTypes),
         subjects: normalizeList(entry.subjects),
         phrases: normalizePhrases([

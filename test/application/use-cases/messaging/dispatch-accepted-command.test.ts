@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-cases/messaging/dispatch-accepted-command.js";
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
-import type { StoreMessageDocumentAttachmentsInput } from "../../../../src/application/use-cases/documents/store-message-document-attachments.js";
+import type {
+  StoreMessageDocumentAttachmentResult,
+  StoreMessageDocumentAttachmentsInput
+} from "../../../../src/application/use-cases/documents/store-message-document-attachments.js";
 import type { FileInboxRecord } from "../../../../src/core/domain/file-inbox/file-inbox-record.js";
 import type { DocumentRecord } from "../../../../src/core/domain/documents/document-record.js";
 import type { DocumentType } from "../../../../src/core/domain/documents/document-record.js";
@@ -180,6 +183,103 @@ describe("DispatchAcceptedCommandUseCase", () => {
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
     });
+  });
+
+  it("asks for a child Drive folder before uploading when policy needs a folder choice", async () => {
+    const documentAttachmentStore = new FakeFolderChoiceDocumentAttachmentStore();
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      pendingDocumentDecisions,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "сохрани паспорт",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "passport.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Куда сохранить passport.pdf?",
+        "Выбрана папка 01_Личные_документы, но в ней есть подпапки:",
+        "1. 01_Личные_документы/Alexey",
+        "2. 01_Личные_документы/Victoria",
+        "Ответь номером, названием папки или \"отмена\"."
+      ].join("\n")
+    });
+    expect(pendingDocumentDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: {
+        kind: "choose_upload_folder",
+        provider: "telegram",
+        receivedAt: "2026-07-02T20:00:00.000Z",
+        attachment: {
+          fileName: "passport.pdf",
+          mimeType: "application/pdf",
+          bytesBase64: "AQID"
+        },
+        parentPath: "01_Личные_документы",
+        parentFolderId: "folder-personal",
+        options: [
+          {
+            path: "01_Личные_документы/Alexey",
+            folderId: "folder-alexey"
+          },
+          {
+            path: "01_Личные_документы/Victoria",
+            folderId: "folder-victoria"
+          }
+        ],
+        documentType: "identity"
+      },
+      candidates: [],
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+
+    pendingDocumentDecisions.pending = pendingDocumentDecisions.saved;
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "1",
+          attachments: []
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf (identity)",
+        "  https://drive.google.com/file/d/drive-passport"
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenPreparedInput).toEqual({
+      attachment: {
+        fileName: "passport.pdf",
+        mimeType: "application/pdf",
+        bytes: Buffer.from("AQID", "base64")
+      },
+      targetFolderId: "folder-alexey",
+      documentType: "identity"
+    });
+    expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
   it("asks for a file destination when Drive upload is not configured", async () => {
@@ -3784,8 +3884,22 @@ class FakeAttachmentStore {
 
 class FakeDocumentAttachmentStore {
   seenInput: StoreMessageDocumentAttachmentsInput | undefined;
+  seenPreparedInput:
+    | {
+        readonly attachment?: {
+          readonly fileName: string;
+          readonly mimeType?: string;
+          readonly bytes: Uint8Array;
+        };
+        readonly targetFolderId?: string;
+        readonly documentType?: DocumentType;
+        readonly subjectId?: string;
+      }
+    | undefined;
 
-  async execute(input: StoreMessageDocumentAttachmentsInput) {
+  async execute(
+    input: StoreMessageDocumentAttachmentsInput
+  ): Promise<readonly StoreMessageDocumentAttachmentResult[]> {
     this.seenInput = input;
 
     return [
@@ -3796,6 +3910,62 @@ class FakeDocumentAttachmentStore {
           ...(input.documentType ? { documentType: input.documentType } : {}),
           ...(input.subjectId ? { subjectId: input.subjectId } : {})
         }
+      }
+    ];
+  }
+
+  async uploadPrepared(input: {
+    readonly attachment: {
+      readonly fileName: string;
+      readonly mimeType?: string;
+      readonly bytes: Uint8Array;
+    };
+    readonly targetFolderId?: string;
+    readonly documentType?: DocumentType;
+    readonly subjectId?: string;
+  }): Promise<
+    Extract<StoreMessageDocumentAttachmentResult, { readonly status: "uploaded" }>
+  > {
+    this.seenPreparedInput = input;
+
+    return {
+      status: "uploaded" as const,
+      document: {
+        ...uploadedDocumentRecord(),
+        ...(input.documentType ? { documentType: input.documentType } : {}),
+        ...(input.subjectId ? { subjectId: input.subjectId } : {})
+      }
+    };
+  }
+}
+
+class FakeFolderChoiceDocumentAttachmentStore extends FakeDocumentAttachmentStore {
+  override async execute(
+    input: StoreMessageDocumentAttachmentsInput
+  ): Promise<readonly StoreMessageDocumentAttachmentResult[]> {
+    this.seenInput = input;
+
+    return [
+      {
+        status: "needs_folder_choice" as const,
+        attachment: {
+          fileName: "passport.pdf",
+          mimeType: "application/pdf",
+          bytes: new Uint8Array([1, 2, 3])
+        },
+        parentPath: "01_Личные_документы",
+        parentFolderId: "folder-personal",
+        options: [
+          {
+            path: "01_Личные_документы/Alexey",
+            folderId: "folder-alexey"
+          },
+          {
+            path: "01_Личные_документы/Victoria",
+            folderId: "folder-victoria"
+          }
+        ],
+        documentType: "identity" as const
       }
     ];
   }

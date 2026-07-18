@@ -166,6 +166,7 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
           });
 
           return {
+            status: "resolved",
             path: "01_Личные_документы/Alexey",
             folderId: "folder-personal-alexey",
             confidence: 1
@@ -204,5 +205,109 @@ describe("StoreMessageDocumentAttachmentsUseCase", () => {
         }
       ]
     });
+  });
+
+  it("returns a folder choice instead of uploading when policy asks for a child folder", async () => {
+    const useCase = new StoreMessageDocumentAttachmentsUseCase({
+      attachmentDownloader: {
+        async downloadAttachment() {
+          return {
+            fileName: "passport.pdf",
+            mimeType: "application/pdf",
+            bytes: new Uint8Array([1, 2, 3])
+          };
+        }
+      } satisfies AttachmentDownloadPort,
+      documentStorage: {
+        async resolveDocument() {
+          throw new Error("should not resolve existing document");
+        },
+        async uploadDocument() {
+          throw new Error("should not upload before folder choice");
+        },
+        async moveDocument() {
+          throw new Error("should not move document");
+        },
+        async deleteDocument() {
+          throw new Error("should not delete document");
+        }
+      } satisfies DocumentStoragePort,
+      documentFolderPolicy: {
+        resolveUploadFolder() {
+          return {
+            status: "needs_choice",
+            path: "01_Личные_документы",
+            folderId: "folder-personal",
+            confidence: 0.6,
+            options: [
+              {
+                path: "01_Личные_документы/Alexey",
+                folderId: "folder-personal-alexey"
+              },
+              {
+                path: "01_Личные_документы/Victoria",
+                folderId: "folder-personal-victoria"
+              }
+            ]
+          };
+        }
+      } satisfies DocumentFolderPolicyPort,
+      repository: {
+        async saveDocument() {
+          throw new Error("should not save before folder choice");
+        },
+        async findDocumentByExternalId() {
+          return undefined;
+        },
+        async findDocumentsByIds() {
+          return [];
+        },
+        async searchDocuments() {
+          return [];
+        }
+      } satisfies DocumentRepositoryPort,
+      generateId: () => "document-1",
+      now: () => new Date("2026-07-16T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        provider: "telegram",
+        receivedAt: new Date("2026-07-16T09:59:00.000Z"),
+        userText: "сохрани паспорт",
+        documentType: "identity",
+        attachments: [
+          {
+            id: "attachment-1",
+            providerFileId: "telegram-file-1",
+            fileName: "passport.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 3
+          }
+        ]
+      })
+    ).resolves.toEqual([
+      {
+        status: "needs_folder_choice",
+        attachment: {
+          fileName: "passport.pdf",
+          mimeType: "application/pdf",
+          bytes: new Uint8Array([1, 2, 3])
+        },
+        parentPath: "01_Личные_документы",
+        parentFolderId: "folder-personal",
+        options: [
+          {
+            path: "01_Личные_документы/Alexey",
+            folderId: "folder-personal-alexey"
+          },
+          {
+            path: "01_Личные_документы/Victoria",
+            folderId: "folder-personal-victoria"
+          }
+        ],
+        documentType: "identity"
+      }
+    ]);
   });
 });

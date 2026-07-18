@@ -2,6 +2,7 @@ import type { MessageAttachment } from "../core/domain/messaging/message.js";
 import type { DocumentRecord } from "../core/domain/documents/document-record.js";
 import type { DocumentType } from "../core/domain/documents/document-record.js";
 import type { FamilyFact } from "../core/domain/family-memory/family-fact.js";
+import type { DocumentUploadFolderOption } from "./document-folder-policy-port.js";
 
 export interface StateRepositoryPort {
   healthCheck(): Promise<StateRepositoryHealth>;
@@ -125,6 +126,21 @@ export type PendingDocumentDecisionAction =
     }
   | {
       readonly kind: "describe_for_search";
+    }
+  | {
+      readonly kind: "choose_upload_folder";
+      readonly provider: string;
+      readonly receivedAt: string;
+      readonly attachment: {
+        readonly fileName: string;
+        readonly mimeType?: string;
+        readonly bytesBase64: string;
+      };
+      readonly parentPath: string;
+      readonly parentFolderId: string;
+      readonly options: readonly DocumentUploadFolderOption[];
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
     };
 
 export interface PendingDocumentDecision {
