@@ -594,6 +594,64 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ]);
   });
 
+  it("uses model choice classification for unclear document placement replies", async () => {
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    pendingDocumentPlacementDecisions.pending = {
+      ...pendingDocumentPlacementDecision(),
+      targetFolderId: "folder-max-identity"
+    };
+    const mover = new FakeDocumentPlacementMover();
+    const pendingChoiceClassifier = new FakePendingChoiceClassifier("accept");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentPlacementMover: mover,
+      pendingChoiceClassifier,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:12:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "давай туда, это правильная папка"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Готово: переместил passport.pdf в Family Documents/max/identity."
+    });
+    expect(pendingChoiceClassifier.seenInput).toEqual({
+      prompt: [
+        "Я жду решение по размещению passport.pdf.",
+        "Предлагаемая папка: Family Documents/max/identity",
+        "Можно ответить yes или skip."
+      ].join("\n"),
+      userReply: "давай туда, это правильная папка",
+      options: [
+        {
+          value: "accept",
+          label: "переместить файл",
+          description: "Move the document to the suggested folder."
+        },
+        {
+          value: "skip",
+          label: "оставить как есть",
+          description: "Leave the document in its current folder."
+        }
+      ]
+    });
+    expect(mover.seenInput).toEqual({
+      externalId: "drive-passport",
+      targetFolderId: "folder-max-identity"
+    });
+    expect(pendingDocumentPlacementDecisions.deletedChatIds).toEqual([
+      "chat-owner"
+    ]);
+  });
+
   it("cancels pending document placement", async () => {
     const pendingDocumentPlacementDecisions =
       new FakePendingDocumentPlacementDecisions();
@@ -3091,6 +3149,7 @@ class FakePendingChoiceClassifier {
       | "update"
       | "create"
       | "cancel"
+      | "accept"
       | undefined
   ) {}
 

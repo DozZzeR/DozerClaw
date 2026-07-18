@@ -57,6 +57,7 @@ import type {
   PendingChoiceClassifier,
   PendingChoiceOption
 } from "./classify-pending-choice.js";
+import { resolvePendingDecision } from "./resolve-pending-decision.js";
 import type {
   PendingIdentityDecision,
   ReviewPendingIdentityResult
@@ -989,9 +990,15 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision
   ): Promise<OutboundReply> {
-    const decision =
-      parseDuplicateDecision(context.text) ??
-      (await this.classifyPendingDuplicateDecision(context.text, pending));
+    const decision = await resolvePendingDecision<DuplicateDecision>({
+      prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
+      userReply: context.text,
+      options: duplicateDecisionOptions,
+      parseDeterministicChoice: parseDuplicateDecision,
+      classifier: this.dependencies.pendingChoiceClassifier as
+        | PendingChoiceClassifier<DuplicateDecision>
+        | undefined
+    });
 
     if (decision === undefined) {
       return {
@@ -1068,7 +1075,15 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply> {
-    const decision = parsePlacementDecision(context.text);
+    const decision = await resolvePendingDecision<PlacementDecision>({
+      prompt: placementDecisionPrompt(pending),
+      userReply: context.text,
+      options: placementDecisionOptions,
+      parseDeterministicChoice: parsePlacementDecision,
+      classifier: this.dependencies.pendingChoiceClassifier as
+        | PendingChoiceClassifier<PlacementDecision>
+        | undefined
+    });
 
     if (!decision) {
       return {
@@ -1387,9 +1402,21 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFamilyFactDecision
   ): Promise<OutboundReply> {
+    const deterministicDecision = parseFamilyFactDecision(context.text);
+    const modelDecision = deterministicDecision
+      ? undefined
+      : await resolvePendingDecision<FamilyFactDecision>({
+          prompt: familyFactDecisionPrompt(pending),
+          userReply: context.text,
+          options: familyFactDecisionOptions,
+          parseDeterministicChoice: (text) =>
+            parseFamilyFactDecision(text)?.decision,
+          classifier: this.dependencies.pendingChoiceClassifier as
+            | PendingChoiceClassifier<FamilyFactDecision>
+            | undefined
+        });
     const parsedDecision =
-      parseFamilyFactDecision(context.text) ??
-      (await this.classifyPendingFamilyFactDecision(context.text, pending));
+      deterministicDecision ?? (modelDecision ? { decision: modelDecision } : undefined);
 
     if (!parsedDecision) {
       return {
@@ -1518,48 +1545,6 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async classifyPendingDuplicateDecision(
-    userReply: string,
-    pending: PendingFileDuplicateDecision
-  ): Promise<DuplicateDecision | undefined> {
-    if (!this.dependencies.pendingChoiceClassifier) {
-      return undefined;
-    }
-
-    try {
-      return await this.dependencies.pendingChoiceClassifier.execute({
-        prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
-        userReply,
-        options: duplicateDecisionOptions
-      }) as DuplicateDecision | undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async classifyPendingFamilyFactDecision(
-    userReply: string,
-    pending: PendingFamilyFactDecision
-  ): Promise<
-    | { readonly decision: FamilyFactDecision; readonly candidateIndex?: number }
-    | undefined
-  > {
-    if (!this.dependencies.pendingChoiceClassifier) {
-      return undefined;
-    }
-
-    try {
-      const decision = (await this.dependencies.pendingChoiceClassifier.execute({
-        prompt: familyFactDecisionPrompt(pending),
-        userReply,
-        options: familyFactDecisionOptions
-      })) as FamilyFactDecision | undefined;
-
-      return decision ? { decision } : undefined;
-    } catch {
-      return undefined;
-    }
-  }
 }
 
 function parseActorId(text: string): string | undefined {
@@ -1633,7 +1618,7 @@ function suggestCopyName(fileName: string): string {
 
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
 type FileUploadDestination = "local_inbox" | "google_drive";
-type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision;
+type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision | PlacementDecision;
 
 const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[] = [
   {
@@ -1650,6 +1635,19 @@ const duplicateDecisionOptions: readonly PendingChoiceOption<DuplicateDecision>[
     value: "skip",
     label: "ничего не делать",
     description: "Leave the existing file unchanged."
+  }
+];
+
+const placementDecisionOptions: readonly PendingChoiceOption<PlacementDecision>[] = [
+  {
+    value: "accept",
+    label: "переместить файл",
+    description: "Move the document to the suggested folder."
+  },
+  {
+    value: "skip",
+    label: "оставить как есть",
+    description: "Leave the document in its current folder."
   }
 ];
 
@@ -1925,19 +1923,27 @@ function placementDecisionPrompt(
   ].join("\n");
 }
 
-function parsePlacementDecision(text: string): "accept" | "skip" | undefined {
+type PlacementDecision = "accept" | "skip";
+
+function parsePlacementDecision(text: string): PlacementDecision | undefined {
   const normalized = text.trim().toLowerCase();
+  const tokens = normalized
+    .split(/[^a-zа-яё0-9_-]+/u)
+    .filter((token) => token.length > 0);
 
   if (
     /\b(yes|ok|move|accept|confirm)\b/.test(normalized) ||
-    /да|ок|перемести|подтверж|соглас/.test(normalized)
+    tokens.includes("да") ||
+    tokens.includes("ок") ||
+    /перемести|подтверж|соглас/.test(normalized)
   ) {
     return "accept";
   }
 
   if (
     /\b(no|skip|cancel|nothing|later)\b/.test(normalized) ||
-    /нет|пропусти|отмена|ничего|потом|не надо/.test(normalized)
+    tokens.includes("нет") ||
+    /пропусти|отмена|ничего|потом|не надо/.test(normalized)
   ) {
     return "skip";
   }
