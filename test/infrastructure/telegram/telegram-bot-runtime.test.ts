@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { TelegramBotRuntime } from "../../../src/infrastructure/providers/telegram/telegram-bot-runtime.js";
+import { TelegramApiError } from "../../../src/infrastructure/providers/telegram/telegram-api.js";
 import type { TelegramUpdate } from "../../../src/infrastructure/providers/telegram/telegram-api.js";
 import type { DozerClawApp } from "../../../src/composition/app.js";
 import type { OutboundReply } from "../../../src/core/domain/messaging/reply.js";
@@ -126,6 +127,46 @@ describe("TelegramBotRuntime", () => {
         ]
       })
     );
+  });
+
+  it("backs off longer for Telegram getUpdates conflicts", async () => {
+    const errors: unknown[] = [];
+    const sleeps: number[] = [];
+    const runtime = new TelegramBotRuntime({
+      app: new FakeApp({
+        chatId: "internal-chat",
+        text: "ok"
+      }),
+      telegram: {
+        async getUpdates() {
+          throw new TelegramApiError({
+            method: "getUpdates",
+            statusCode: 409,
+            description: "Conflict"
+          });
+        },
+        async sendMessage() {
+          throw new Error("should not send");
+        }
+      },
+      onError(error) {
+        errors.push(error);
+        runtime.stop();
+      },
+      sleep: async (milliseconds) => {
+        sleeps.push(milliseconds);
+      }
+    });
+
+    await runtime.start();
+
+    expect(errors).toEqual([
+      expect.objectContaining({
+        statusCode: 409,
+        isConflict: true
+      })
+    ]);
+    expect(sleeps).toEqual([30000]);
   });
 });
 

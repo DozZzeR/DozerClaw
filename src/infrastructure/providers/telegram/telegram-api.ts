@@ -65,6 +65,41 @@ export interface TelegramBotApiClientOptions {
   readonly fetch?: typeof fetch;
 }
 
+export interface TelegramApiErrorInput {
+  readonly method: string;
+  readonly statusCode?: number;
+  readonly description?: string;
+  readonly cause?: unknown;
+}
+
+export class TelegramApiError extends Error {
+  readonly method: string;
+  readonly statusCode?: number;
+  readonly description?: string;
+  readonly isConflict: boolean;
+
+  constructor(input: TelegramApiErrorInput) {
+    super(
+      `Telegram API ${input.method} failed${
+        input.statusCode ? `: HTTP ${input.statusCode}` : ""
+      }${input.description ? ` (${input.description})` : ""}`
+    );
+    this.name = "TelegramApiError";
+    this.method = input.method;
+    if (input.statusCode !== undefined) {
+      this.statusCode = input.statusCode;
+    }
+    if (input.description !== undefined) {
+      this.description = input.description;
+    }
+    this.isConflict = input.statusCode === 409;
+
+    if (input.cause) {
+      this.cause = input.cause;
+    }
+  }
+}
+
 export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
   private readonly fetchImpl: typeof fetch;
 
@@ -116,19 +151,34 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
     method: string,
     body: Record<string, unknown>
   ): Promise<TResponse> {
-    const response = await this.fetchImpl(
-      `https://api.telegram.org/bot${this.options.token}/${method}`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(body)
-      }
-    );
+    let response: Response;
+
+    try {
+      response = await this.fetchImpl(
+        `https://api.telegram.org/bot${this.options.token}/${method}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(body)
+        }
+      );
+    } catch (error) {
+      throw new TelegramApiError({
+        method,
+        description: "fetch failed",
+        cause: error
+      });
+    }
 
     if (!response.ok) {
-      throw new Error(`Telegram API ${method} failed: HTTP ${response.status}`);
+      const description = await telegramErrorDescription(response);
+      throw new TelegramApiError({
+        method,
+        statusCode: response.status,
+        ...(description ? { description } : {})
+      });
     }
 
     const payload = (await response.json()) as {
@@ -138,11 +188,22 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
     };
 
     if (!payload.ok) {
-      throw new Error(
-        `Telegram API ${method} failed: ${payload.description ?? "unknown"}`
-      );
+      throw new TelegramApiError({
+        method,
+        description: payload.description ?? "unknown"
+      });
     }
 
     return payload.result as TResponse;
+  }
+}
+
+async function telegramErrorDescription(response: Response): Promise<string | undefined> {
+  try {
+    const payload = (await response.json()) as { readonly description?: string };
+
+    return payload.description;
+  } catch {
+    return undefined;
   }
 }

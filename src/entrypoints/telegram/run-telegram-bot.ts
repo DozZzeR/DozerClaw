@@ -1,6 +1,7 @@
 import { buildApp } from "../../composition/build-app.js";
 import { loadConfig } from "../../composition/config.js";
 import { TelegramAttachmentDownloader } from "../../infrastructure/providers/telegram/telegram-attachment-downloader.js";
+import { TelegramApiError } from "../../infrastructure/providers/telegram/telegram-api.js";
 import { TelegramBotApiClient } from "../../infrastructure/providers/telegram/telegram-api.js";
 import { TelegramBotRuntime } from "../../infrastructure/providers/telegram/telegram-bot-runtime.js";
 
@@ -41,7 +42,7 @@ export async function runTelegramBot(
       : {}),
     pollingTimeoutSeconds: config.telegram.pollingTimeoutSeconds,
     onError(error) {
-      stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+      stderr.write(formatRuntimeError(error));
     }
   });
 
@@ -50,4 +51,19 @@ export async function runTelegramBot(
 
   stdout.write("DozerClaw Telegram bot polling started.\n");
   await runtime.start();
+}
+
+function formatRuntimeError(error: unknown): string {
+  if (error instanceof TelegramApiError) {
+    return [
+      `Telegram ${error.method} failed`,
+      error.statusCode ? `HTTP ${error.statusCode}` : undefined,
+      error.description
+    ]
+      .filter(Boolean)
+      .join(": ")
+      .concat("\n");
+  }
+
+  return `${error instanceof Error ? error.stack : String(error)}\n`;
 }

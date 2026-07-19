@@ -1,6 +1,7 @@
 import type { DozerClawApp } from "../../../composition/app.js";
 import type { ChatContextKind } from "../../../core/domain/identity/chat-context.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import { TelegramApiError } from "./telegram-api.js";
 import type {
   TelegramApi,
   TelegramDocument,
@@ -17,15 +18,18 @@ export interface TelegramBotRuntimeOptions {
   readonly pollingTimeoutSeconds?: number;
   readonly now?: () => Date;
   readonly onError?: (error: unknown) => void;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
 }
 
 export class TelegramBotRuntime {
   private nextOffset: number | undefined;
   private stopped = false;
   private readonly now: () => Date;
+  private readonly sleep: (milliseconds: number) => Promise<void>;
 
   constructor(private readonly options: TelegramBotRuntimeOptions) {
     this.now = options.now ?? (() => new Date());
+    this.sleep = options.sleep ?? sleep;
   }
 
   stop(): void {
@@ -38,7 +42,7 @@ export class TelegramBotRuntime {
         await this.pollOnce();
       } catch (error) {
         this.options.onError?.(error);
-        await sleep(1000);
+        await this.sleep(pollingBackoffMilliseconds(error));
       }
     }
   }
@@ -166,4 +170,8 @@ function displayNameFromUser(user: TelegramUser): string {
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function pollingBackoffMilliseconds(error: unknown): number {
+  return error instanceof TelegramApiError && error.isConflict ? 30000 : 1000;
 }
