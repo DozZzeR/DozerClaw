@@ -424,6 +424,12 @@ export class DispatchAcceptedCommandUseCase {
         context.chat.id,
         now
       );
+    const pendingDeniedReply = pending
+      ? this.pendingActorDeniedReply(context, pending)
+      : undefined;
+    if (pendingDeniedReply) {
+      return pendingDeniedReply;
+    }
     const classifierInput = pending
       ? {
           text: buildClarificationClassifierText(pending, context.text),
@@ -942,6 +948,20 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
+  private pendingActorDeniedReply(
+    context: AcceptedMessageContext,
+    pending: { readonly actorId: string }
+  ): OutboundReply | undefined {
+    if (pending.actorId === context.actor.id) {
+      return undefined;
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: "This pending action belongs to another user."
+    };
+  }
+
   private async storeFamilyMessageDocumentAttachments(
     context: AcceptedMessageContext,
     metadataOverride: {
@@ -1083,6 +1103,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDestinationDecision
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     const destination = parseFileUploadDestination(context.text);
 
     if (!destination) {
@@ -1253,6 +1278,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     const decision = await resolvePendingDecision<DuplicateDecision>({
       policy: "choice_only",
       prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
@@ -1325,6 +1355,11 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingFileDuplicateDecision,
     destination: FileUploadDestination
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     if (
       destination === "google_drive" &&
       this.dependencies.fileInboxDocumentUploader
@@ -1387,6 +1422,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     const decision = await resolvePendingDecision<PlacementDecision>({
       policy: documentPlacementDecisionPolicy,
       prompt: placementDecisionPrompt(pending),
@@ -1639,6 +1679,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     if (pending.action.kind === "choose_upload_folder") {
       return this.dispatchPendingUploadFolderChoice(context, pending);
     }
@@ -1937,6 +1982,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFamilyFactDecision
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     const deterministicDecision = parseFamilyFactDecision(context.text);
     const modelDecision = deterministicDecision
       ? undefined
@@ -2007,6 +2057,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFamilyFactArchiveDecision
   ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
     const decision = parseFamilyFactArchiveDecision(context.text);
 
     if (decision === undefined) {

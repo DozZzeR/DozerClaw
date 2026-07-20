@@ -1702,6 +1702,45 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFamilyFactDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("rejects pending memory decision replies from another actor", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("updated");
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "should not be reached"
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      factDecisionResolver,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          actor: {
+            id: "actor-other",
+            displayName: "Other",
+            role: "family",
+            status: "active"
+          },
+          text: "обнови существующий"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "This pending action belongs to another user."
+    });
+    expect(intentClassifier.seenInput).toBeUndefined();
+    expect(factDecisionResolver.seenInput).toBeUndefined();
+    expect(pendingFamilyFactDecisions.deletedChatIds).toEqual([]);
+  });
+
   it("uses model choice classification when memory decision reply is unclear", async () => {
     const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
     pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
