@@ -8,7 +8,7 @@ describe("loadConfig", () => {
       modelRoutingEnabled: false,
       model: "gpt-5.5",
       timeoutMs: 120000,
-      projectRoot: ".",
+      projectRoot: "data/tmp/codex/workspace",
       tmpDirectory: "data/tmp/codex"
     });
   });

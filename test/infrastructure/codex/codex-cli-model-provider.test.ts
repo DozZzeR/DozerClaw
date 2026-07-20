@@ -115,10 +115,75 @@ describe("CodexCliRunner", () => {
     );
   });
 
+  it("runs codex in an isolated cwd with an allowlisted environment", async () => {
+    const child = new FakeChildProcess();
+    const spawnCalls: SpawnCall[] = [];
+    const madeDirectories: string[] = [];
+    const previousSecret = process.env.DOZERCLAW_TEST_SECRET;
+    process.env.DOZERCLAW_TEST_SECRET = "must-not-leak";
+    const previousPath = process.env.PATH;
+    process.env.PATH = "/usr/bin";
+    const runner = new CodexCliRunner({
+      spawnProcess(command, args, options) {
+        spawnCalls.push({ command, args, options });
+        return child;
+      },
+      readFile: async () => "file text",
+      writeFile: async () => undefined,
+      makeDirectory: async (path) => {
+        madeDirectories.push(path);
+      },
+      outputFileName: () => "codex-output.txt"
+    });
+
+    try {
+      const resultPromise = runner.run({
+        prompt: "hello",
+        model: "gpt-test",
+        timeoutMs: 5000,
+        projectRoot: "/tmp/dozerclaw-codex-workspace",
+        tmpDirectory: "/tmp/codex",
+        apiKey: "codex-key"
+      });
+      await nextTick();
+      child.emit("close", 0);
+
+      await expect(resultPromise).resolves.toMatchObject({ text: "file text" });
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.DOZERCLAW_TEST_SECRET;
+      } else {
+        process.env.DOZERCLAW_TEST_SECRET = previousSecret;
+      }
+      if (previousPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = previousPath;
+      }
+    }
+
+    expect(madeDirectories).toEqual([
+      "/tmp/codex",
+      "/tmp/dozerclaw-codex-workspace"
+    ]);
+    expect(spawnCalls[0]?.options).toMatchObject({
+      cwd: "/tmp/dozerclaw-codex-workspace",
+      env: {
+        CODEX_API_KEY: "codex-key",
+        PATH: "/usr/bin"
+      }
+    });
+    expect(
+      (spawnCalls[0]?.options as { env?: NodeJS.ProcessEnv } | undefined)?.env
+        ?.DOZERCLAW_TEST_SECRET
+    ).toBeUndefined();
+  });
+
   it("passes output schema to codex exec when supplied", async () => {
     const child = new FakeChildProcess();
     const spawnCalls: SpawnCall[] = [];
     const writtenFiles: { path: string; data: string }[] = [];
+    const deletedFiles: string[] = [];
     const runner = new CodexCliRunner({
       spawnProcess(command, args, options) {
         spawnCalls.push({ command, args, options });
@@ -127,6 +192,9 @@ describe("CodexCliRunner", () => {
       readFile: async () => "",
       writeFile: async (path, data) => {
         writtenFiles.push({ path, data });
+      },
+      deleteFile: async (path) => {
+        deletedFiles.push(path);
       },
       makeDirectory: async () => undefined,
       outputFileName: (() => {
@@ -169,6 +237,38 @@ describe("CodexCliRunner", () => {
     ]);
     expect(spawnCalls[0]?.args).toContain("--output-schema");
     expect(spawnCalls[0]?.args).toContain("/tmp/codex/intent.schema.json");
+    expect(deletedFiles).toEqual([
+      "/tmp/codex/codex-output.txt",
+      "/tmp/codex/intent.schema.json"
+    ]);
+  });
+
+  it("caps diagnostic output from stdout and stderr", async () => {
+    const child = new FakeChildProcess();
+    const runner = new CodexCliRunner({
+      spawnProcess: () => child,
+      readFile: async () => "",
+      writeFile: async () => undefined,
+      makeDirectory: async () => undefined,
+      outputFileName: () => "codex-output.txt",
+      maxDiagnosticBytes: 32
+    });
+
+    const resultPromise = runner.run({
+      prompt: "hello",
+      model: "gpt-test",
+      timeoutMs: 5000,
+      projectRoot: "/repo",
+      tmpDirectory: "/tmp/codex"
+    });
+    await nextTick();
+    child.stdout.emit("data", Buffer.from("not-json-line\n".repeat(20)));
+    child.stderr.emit("data", Buffer.from("stderr-line\n".repeat(20)));
+    child.emit("close", 1);
+
+    await expect(resultPromise).rejects.toThrow(
+      "diagnostic output truncated after 32 bytes"
+    );
   });
 
   it("falls back to output file when no final message event is emitted", async () => {

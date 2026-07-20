@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { EventEmitter } from "node:events";
@@ -87,7 +87,9 @@ export interface CodexCliRunnerDependencies {
     path: string,
     options: { readonly recursive: true }
   ) => Promise<unknown>;
+  readonly deleteFile?: (path: string) => Promise<void>;
   readonly outputFileName?: () => string;
+  readonly maxDiagnosticBytes?: number;
 }
 
 export type SpawnProcess = (
@@ -131,7 +133,9 @@ export class CodexCliRunner implements CodexCliRunnerPort {
     options: { readonly recursive: true }
   ) => Promise<unknown>;
   private readonly writeSchemaFile: (path: string, data: string) => Promise<void>;
+  private readonly deleteFile: (path: string) => Promise<void>;
   private readonly outputFileName: () => string;
+  private readonly maxDiagnosticBytes: number;
 
   constructor(dependencies: CodexCliRunnerDependencies = {}) {
     this.spawnProcess =
@@ -140,14 +144,19 @@ export class CodexCliRunner implements CodexCliRunnerPort {
         nodeSpawn(command, [...args], options) as ChildProcessLike);
     this.readOutputFile = dependencies.readFile ?? readFile;
     this.writeSchemaFile = dependencies.writeFile ?? writeFile;
+    this.deleteFile =
+      dependencies.deleteFile ??
+      ((path) => rm(path, { force: true, recursive: false }));
     this.makeDirectory = dependencies.makeDirectory ?? mkdir;
     this.outputFileName =
       dependencies.outputFileName ??
       (() => `codex-output-${Date.now()}-${randomUUID()}.txt`);
+    this.maxDiagnosticBytes = dependencies.maxDiagnosticBytes ?? 8192;
   }
 
   async run(input: CodexCliRunInput): Promise<CodexCliRunResult> {
     await this.makeDirectory(input.tmpDirectory, { recursive: true });
+    await this.makeDirectory(input.projectRoot, { recursive: true });
 
     const outputFile = join(input.tmpDirectory, this.outputFileName());
     const schemaFile = input.outputSchema
@@ -176,16 +185,42 @@ export class CodexCliRunner implements CodexCliRunnerPort {
       let stdoutBuffer = "";
       let stderrBuffer = "";
       let stderr = "";
+      let diagnosticBytes = 0;
+      let diagnosticTruncated = false;
       let threadId: string | undefined;
       let finalText = "";
       let settled = false;
       let timedOut = false;
       let aborted = false;
 
-      const env = { ...process.env };
-      if (input.apiKey) {
-        env.CODEX_API_KEY = input.apiKey;
-      }
+      const appendDiagnostic = (text: string) => {
+        if (!text || diagnosticTruncated) {
+          return;
+        }
+
+        const availableBytes = this.maxDiagnosticBytes - diagnosticBytes;
+        if (availableBytes <= 0) {
+          diagnosticTruncated = true;
+          stderr += `\ndiagnostic output truncated after ${this.maxDiagnosticBytes} bytes`;
+          return;
+        }
+
+        const bytes = Buffer.byteLength(text, "utf8");
+        if (bytes <= availableBytes) {
+          stderr += text;
+          diagnosticBytes += bytes;
+          return;
+        }
+
+        stderr += Buffer.from(text, "utf8")
+          .subarray(0, availableBytes)
+          .toString("utf8");
+        stderr += `\ndiagnostic output truncated after ${this.maxDiagnosticBytes} bytes`;
+        diagnosticBytes = this.maxDiagnosticBytes;
+        diagnosticTruncated = true;
+      };
+
+      const env = codexEnvironment(input.apiKey);
 
       const child = this.spawnProcess("codex", args, {
         cwd: input.projectRoot,
@@ -221,6 +256,8 @@ export class CodexCliRunner implements CodexCliRunnerPort {
               ? "Codex run was stopped."
               : "Codex finished without a final agent message.";
         }
+
+        await this.deleteTemporaryFiles(outputFile, schemaFile);
 
         if (code !== 0 && !timedOut && !aborted) {
           reject(
@@ -266,15 +303,20 @@ export class CodexCliRunner implements CodexCliRunnerPort {
 
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.code === "ENOENT") {
-          reject(new Error("Codex CLI is not installed or not on PATH."));
+          void this.deleteTemporaryFiles(outputFile, schemaFile).finally(() => {
+            reject(new Error("Codex CLI is not installed or not on PATH."));
+          });
           return;
         }
 
-        reject(error);
+        void this.deleteTemporaryFiles(outputFile, schemaFile).finally(() => {
+          reject(error);
+        });
       });
 
       child.stdout.on("data", (chunk: Buffer) => {
         stdoutBuffer += chunk.toString("utf8");
+        stdoutBuffer = capPartialBuffer(stdoutBuffer, this.maxDiagnosticBytes);
         const lines = stdoutBuffer.split("\n");
         stdoutBuffer = lines.pop() ?? "";
 
@@ -297,21 +339,24 @@ export class CodexCliRunner implements CodexCliRunnerPort {
               finalText = event.item.text;
             }
             if (event.type === "error") {
-              stderr += `\n${event.error?.message ?? "Codex error event"}`;
+              appendDiagnostic(
+                `\n${event.error?.message ?? "Codex error event"}`
+              );
             }
             if (event.type === "turn.failed") {
-              stderr += "\nCodex turn failed.";
+              appendDiagnostic("\nCodex turn failed.");
             }
           } catch {
-            stderr += `\nUnparsed stdout line: ${trimmed}`;
+            appendDiagnostic(`\nUnparsed stdout line: ${trimmed}`);
           }
         }
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString("utf8");
-        stderr += text;
+        appendDiagnostic(text);
         stderrBuffer += text;
+        stderrBuffer = capPartialBuffer(stderrBuffer, this.maxDiagnosticBytes);
         const lines = stderrBuffer.split("\n");
         stderrBuffer = lines.pop() ?? "";
       });
@@ -319,10 +364,46 @@ export class CodexCliRunner implements CodexCliRunnerPort {
       child.on("close", (code: number | null) => {
         const trailing = stderrBuffer.trim();
         if (trailing) {
-          stderr += trailing;
+          appendDiagnostic(trailing);
         }
         void finish(code);
       });
     });
   }
+
+  private async deleteTemporaryFiles(
+    outputFile: string,
+    schemaFile: string | undefined
+  ): Promise<void> {
+    await Promise.all([
+      this.deleteFile(outputFile).catch(() => undefined),
+      ...(schemaFile
+        ? [this.deleteFile(schemaFile).catch(() => undefined)]
+        : [])
+    ]);
+  }
+}
+
+function codexEnvironment(apiKey: string | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+
+  if (process.env.PATH) {
+    env.PATH = process.env.PATH;
+  }
+  if (process.env.TMPDIR) {
+    env.TMPDIR = process.env.TMPDIR;
+  }
+  if (apiKey) {
+    env.CODEX_API_KEY = apiKey;
+  }
+
+  return env;
+}
+
+function capPartialBuffer(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) {
+    return value;
+  }
+
+  return Buffer.from(value, "utf8").subarray(-maxBytes).toString("utf8");
 }

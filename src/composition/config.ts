@@ -88,7 +88,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
         env.DOZERCLAW_MODEL_ROUTING_ENABLED === "1",
       model: env.DOZERCLAW_CODEX_MODEL ?? "gpt-5.5",
       timeoutMs: parsePositiveInteger(env.DOZERCLAW_CODEX_TIMEOUT_MS, 120000),
-      projectRoot: env.DOZERCLAW_CODEX_PROJECT_ROOT ?? ".",
+      projectRoot:
+        env.DOZERCLAW_CODEX_PROJECT_ROOT ?? "data/tmp/codex/workspace",
       tmpDirectory: env.DOZERCLAW_CODEX_TMP_DIR ?? "data/tmp/codex",
       ...(env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {})
     },
