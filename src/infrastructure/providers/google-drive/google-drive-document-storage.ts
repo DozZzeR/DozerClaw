@@ -17,6 +17,7 @@ export interface GoogleDriveDocumentStorageProviderOptions {
   readonly uploadFolderId?: string;
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
+  readonly requestTimeoutMs?: number;
 }
 
 export interface GoogleDriveOAuthOptions {
@@ -66,7 +67,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     url.searchParams.set("fields", "id,name,webViewLink");
     url.searchParams.set("supportsAllDrives", "true");
 
-    const response = await this.fetchImpl(url.toString(), {
+    const response = await this.fetchWithTimeout(url.toString(), {
       method: "GET",
       headers: {
         authorization: `Bearer ${await this.accessToken()}`
@@ -99,7 +100,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     url.searchParams.set("fields", "id,name,webViewLink");
     url.searchParams.set("supportsAllDrives", "true");
 
-    const response = await this.fetchImpl(url.toString(), {
+    const response = await this.fetchWithTimeout(url.toString(), {
       method: "POST",
       headers: {
         authorization: `Bearer ${await this.accessToken()}`,
@@ -140,7 +141,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     url.searchParams.set("fields", "id");
     url.searchParams.set("supportsAllDrives", "true");
 
-    const response = await this.fetchImpl(url.toString(), {
+    const response = await this.fetchWithTimeout(url.toString(), {
       method: "PATCH",
       headers: {
         authorization: `Bearer ${await this.accessToken()}`
@@ -171,7 +172,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     );
     url.searchParams.set("supportsAllDrives", "true");
 
-    const response = await this.fetchImpl(url.toString(), {
+    const response = await this.fetchWithTimeout(url.toString(), {
       method: "DELETE",
       headers: {
         authorization: `Bearer ${await this.accessToken()}`
@@ -217,7 +218,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
       refresh_token: oauth.refreshToken
     });
 
-    const response = await this.fetchImpl("https://oauth2.googleapis.com/token", {
+    const response = await this.fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded"
@@ -243,6 +244,34 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
       accessToken: token.access_token,
       expiresAtMs: this.now().getTime() + expiresInMs - 60_000
     };
+  }
+
+  private async fetchWithTimeout(
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1]
+  ): Promise<Response> {
+    const timeoutMs = this.options.requestTimeoutMs;
+    if (!timeoutMs) {
+      return this.fetchImpl(input, init);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await this.fetchImpl(input, {
+        ...init,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`Google Drive request timed out after ${timeoutMs}ms`);
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
 }

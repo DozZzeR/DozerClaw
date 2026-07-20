@@ -8,6 +8,7 @@ import type { TelegramFileApi } from "./telegram-api.js";
 export interface TelegramAttachmentDownloaderOptions {
   readonly telegram: TelegramFileApi;
   readonly token: string;
+  readonly maxBytes?: number;
 }
 
 export class TelegramAttachmentDownloader implements AttachmentDownloadPort {
@@ -20,6 +21,16 @@ export class TelegramAttachmentDownloader implements AttachmentDownloadPort {
       throw new Error(`Unsupported attachment provider: ${input.provider}`);
     }
 
+    if (
+      this.options.maxBytes !== undefined &&
+      input.sizeBytes !== undefined &&
+      input.sizeBytes > this.options.maxBytes
+    ) {
+      throw new Error(
+        `Telegram attachment exceeds max size: ${input.sizeBytes} bytes > ${this.options.maxBytes} bytes`
+      );
+    }
+
     const file = await this.options.telegram.getFile(input.providerFileId);
 
     if (!file.file_path) {
@@ -27,7 +38,12 @@ export class TelegramAttachmentDownloader implements AttachmentDownloadPort {
     }
 
     const bytes = await this.options.telegram.downloadFile(
-      `https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`
+      `https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`,
+      {
+        ...(this.options.maxBytes !== undefined
+          ? { maxBytes: this.options.maxBytes }
+          : {})
+      }
     );
 
     return {

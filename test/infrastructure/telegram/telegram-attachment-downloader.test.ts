@@ -7,7 +7,8 @@ describe("TelegramAttachmentDownloader", () => {
     const telegram = new FakeTelegramFileApi();
     const downloader = new TelegramAttachmentDownloader({
       telegram,
-      token: "bot-token"
+      token: "bot-token",
+      maxBytes: 10
     });
 
     const downloaded = await downloader.downloadAttachment({
@@ -21,6 +22,7 @@ describe("TelegramAttachmentDownloader", () => {
     expect(telegram.downloadUrls).toEqual([
       "https://api.telegram.org/file/botbot-token/documents/report.pdf"
     ]);
+    expect(telegram.downloadOptions).toEqual([{ maxBytes: 10 }]);
     expect(downloaded).toEqual({
       fileName: "report.pdf",
       mimeType: "application/pdf",
@@ -41,11 +43,32 @@ describe("TelegramAttachmentDownloader", () => {
       })
     ).rejects.toThrow("Unsupported attachment provider");
   });
+
+  it("rejects declared oversized Telegram files before lookup/download", async () => {
+    const telegram = new FakeTelegramFileApi();
+    const downloader = new TelegramAttachmentDownloader({
+      telegram,
+      token: "bot-token",
+      maxBytes: 2
+    });
+
+    await expect(
+      downloader.downloadAttachment({
+        provider: "telegram",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf",
+        sizeBytes: 3
+      })
+    ).rejects.toThrow("Telegram attachment exceeds max size");
+    expect(telegram.fileIds).toEqual([]);
+    expect(telegram.downloadUrls).toEqual([]);
+  });
 });
 
 class FakeTelegramFileApi {
   readonly fileIds: string[] = [];
   readonly downloadUrls: string[] = [];
+  readonly downloadOptions: unknown[] = [];
 
   async getFile(fileId: string) {
     this.fileIds.push(fileId);
@@ -55,8 +78,9 @@ class FakeTelegramFileApi {
     };
   }
 
-  async downloadFile(url: string) {
+  async downloadFile(url: string, options?: unknown) {
     this.downloadUrls.push(url);
+    this.downloadOptions.push(options);
 
     return new Uint8Array([1, 2, 3]);
   }

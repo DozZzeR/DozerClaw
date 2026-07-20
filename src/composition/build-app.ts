@@ -215,6 +215,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       ? new CodexCliModelProvider({
           model: config.codex.model,
           timeoutMs: config.codex.timeoutMs,
+          maxConcurrency: config.codex.maxConcurrency,
           projectRoot: config.codex.projectRoot,
           tmpDirectory: config.codex.tmpDirectory,
           ...(config.codex.apiKey ? { apiKey: config.codex.apiKey } : {})

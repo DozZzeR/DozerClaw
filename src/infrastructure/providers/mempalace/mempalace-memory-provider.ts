@@ -13,6 +13,7 @@ export interface MempalaceMemoryProviderOptions {
   readonly hall?: string;
   readonly bearerToken?: string;
   readonly maxDistance?: number;
+  readonly requestTimeoutMs?: number;
   readonly fetch?: typeof fetch;
 }
 
@@ -173,7 +174,7 @@ export class MempalaceMemoryProvider implements MemoryPort {
       | "mempalace_search",
     args: Record<string, unknown>
   ): Promise<unknown> {
-    const response = await this.fetcher(this.options.endpointUrl, {
+    const response = await this.fetchWithTimeout(this.options.endpointUrl, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
@@ -215,6 +216,34 @@ export class MempalaceMemoryProvider implements MemoryPort {
         ? { Authorization: `Bearer ${this.options.bearerToken}` }
         : {})
     };
+  }
+
+  private async fetchWithTimeout(
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1]
+  ): Promise<Response> {
+    const timeoutMs = this.options.requestTimeoutMs;
+    if (!timeoutMs) {
+      return this.fetcher(input, init);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await this.fetcher(input, {
+        ...init,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`MemPalace request timed out after ${timeoutMs}ms`);
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 

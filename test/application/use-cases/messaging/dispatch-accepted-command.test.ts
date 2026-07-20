@@ -118,6 +118,38 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("reports attachment safety limit errors without crashing local storage", async () => {
+    const attachmentStore = new FakeAttachmentStore(
+      0,
+      undefined,
+      new Error("Telegram attachment exceeds max size: 3 bytes > 2 bytes")
+    );
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      attachmentStore
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "receipt local inbox",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "receipt.jpg"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Attachment is too large for current safety limits. File was not saved."
+    });
+  });
+
   it("uploads attachments to Drive by default when document storage is configured", async () => {
     const pendingFileDestinationDecisions =
       new FakePendingFileDestinationDecisions();
@@ -182,6 +214,36 @@ describe("DispatchAcceptedCommandUseCase", () => {
       candidates: [uploadedDocumentRecord()],
       createdAt: new Date("2026-07-02T20:00:00.000Z"),
       expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    });
+  });
+
+  it("reports attachment timeout errors without crashing Drive storage", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore(
+      new Error("Telegram file download timed out after 1000ms")
+    );
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "save this",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "passport.pdf"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Attachment transfer timed out. File was not saved; please try again later."
     });
   });
 
@@ -4022,7 +4084,8 @@ class FakeAttachmentStore {
 
   constructor(
     private readonly storedCount: number,
-    private readonly duplicate?: { readonly fileName: string }
+    private readonly duplicate?: { readonly fileName: string },
+    private readonly error?: Error
   ) {}
 
   async execute(
@@ -4038,6 +4101,10 @@ class FakeAttachmentStore {
     )[]
   > {
     this.seenInput = input;
+
+    if (this.error) {
+      throw this.error;
+    }
 
     if (this.duplicate) {
       return [
@@ -4087,10 +4154,16 @@ class FakeDocumentAttachmentStore {
       }
     | undefined;
 
+  constructor(private readonly error?: Error) {}
+
   async execute(
     input: StoreMessageDocumentAttachmentsInput
   ): Promise<readonly StoreMessageDocumentAttachmentResult[]> {
     this.seenInput = input;
+
+    if (this.error) {
+      throw this.error;
+    }
 
     return [
       {

@@ -45,6 +45,22 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     );
   });
 
+  it("passes AbortSignal to Drive requests when timeout is configured", async () => {
+    const fetch = new RecordingFetch();
+    const provider = new GoogleDriveDocumentStorageProvider({
+      accessToken: "drive-token",
+      fetch: fetch.fetch.bind(fetch),
+      apiBaseUrl: "https://www.googleapis.com",
+      requestTimeoutMs: 1000
+    });
+
+    await provider.resolveDocument({
+      externalIdOrUrl: "drive-raw-id"
+    });
+
+    expect(fetch.requests[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("rejects failed metadata responses", async () => {
     const provider = new GoogleDriveDocumentStorageProvider({
       accessToken: "drive-token",
@@ -222,6 +238,7 @@ class RecordingFetch {
     readonly authorization: string;
     readonly method: string;
     readonly contentType: string;
+    readonly signal?: AbortSignal | null;
     readonly body?: Blob;
   }> = [];
   readonly oauthRefreshRequests: Array<{
@@ -265,6 +282,7 @@ class RecordingFetch {
       authorization: String(headers.get("authorization") ?? ""),
       method: init?.method ?? "GET",
       contentType: String(headers.get("content-type") ?? ""),
+      signal: init?.signal ?? null,
       ...(init?.body instanceof Blob ? { body: init.body } : {})
     });
 

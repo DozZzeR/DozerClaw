@@ -24,11 +24,13 @@ export async function runTelegramBot(
   }
 
   const telegram = new TelegramBotApiClient({
-    token: config.telegram.botToken
+    token: config.telegram.botToken,
+    requestTimeoutMs: config.telegram.requestTimeoutMs
   });
   const attachmentDownloader = new TelegramAttachmentDownloader({
     telegram,
-    token: config.telegram.botToken
+    token: config.telegram.botToken,
+    maxBytes: config.telegram.maxAttachmentBytes
   });
   const app = buildApp({
     env,

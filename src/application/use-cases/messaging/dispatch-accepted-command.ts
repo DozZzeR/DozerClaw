@@ -868,11 +868,29 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    const results = await this.dependencies.attachmentStore?.execute({
-      provider: context.provider,
-      receivedAt: context.receivedAt,
-      attachments: context.attachments
-    });
+    let results:
+      | Awaited<
+          ReturnType<NonNullable<typeof this.dependencies.attachmentStore>["execute"]>
+        >
+      | undefined;
+
+    try {
+      results = await this.dependencies.attachmentStore?.execute({
+        provider: context.provider,
+        receivedAt: context.receivedAt,
+        attachments: context.attachments
+      });
+    } catch (error) {
+      const message = attachmentIoErrorMessage(error);
+      if (message) {
+        return {
+          chatId: context.chat.id,
+          text: message
+        };
+      }
+
+      throw error;
+    }
 
     if (!results || results.length === 0) {
       return {
@@ -980,13 +998,29 @@ export class DispatchAcceptedCommandUseCase {
       parseDocumentMetadata(context.text),
       metadataOverride
     );
-    const results = await this.dependencies.documentAttachmentStore.execute({
-      provider: context.provider,
-      receivedAt: context.receivedAt,
-      attachments: context.attachments,
-      userText: context.text,
-      ...metadata
-    });
+    let results: Awaited<
+      ReturnType<NonNullable<typeof this.dependencies.documentAttachmentStore>["execute"]>
+    >;
+
+    try {
+      results = await this.dependencies.documentAttachmentStore.execute({
+        provider: context.provider,
+        receivedAt: context.receivedAt,
+        attachments: context.attachments,
+        userText: context.text,
+        ...metadata
+      });
+    } catch (error) {
+      const message = attachmentIoErrorMessage(error);
+      if (message) {
+        return {
+          chatId: context.chat.id,
+          text: message
+        };
+      }
+
+      throw error;
+    }
     const folderChoices = results.flatMap((result) =>
       result.status === "needs_folder_choice" ? [result] : []
     );
@@ -2292,6 +2326,20 @@ function duplicateAttachmentReply(
   }
 
   return duplicateDecisionPrompt(first.fileName, suggestCopyName(first.fileName));
+}
+
+function attachmentIoErrorMessage(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/exceeds max size/u.test(message)) {
+    return "Attachment is too large for current safety limits. File was not saved.";
+  }
+
+  if (/timed out after/u.test(message)) {
+    return "Attachment transfer timed out. File was not saved; please try again later.";
+  }
+
+  return undefined;
 }
 
 function sourceAttachmentForDuplicate(

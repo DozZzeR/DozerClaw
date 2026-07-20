@@ -14,6 +14,7 @@ import type {
 export interface CodexCliModelProviderOptions {
   readonly model: string;
   readonly timeoutMs: number;
+  readonly maxConcurrency?: number;
   readonly projectRoot: string;
   readonly tmpDirectory: string;
   readonly apiKey?: string;
@@ -46,36 +47,67 @@ export interface CodexCliRunResult {
 
 export class CodexCliModelProvider implements ModelPort {
   private readonly runner: CodexCliRunnerPort;
+  private readonly maxConcurrency: number;
+  private activeRuns = 0;
+  private readonly waiters: Array<() => void> = [];
 
   constructor(private readonly options: CodexCliModelProviderOptions) {
     this.runner = options.runner ?? new CodexCliRunner();
+    this.maxConcurrency = Math.max(1, options.maxConcurrency ?? 1);
   }
 
   async runTextRequest(
     request: ModelTextRequest
   ): Promise<ModelTextResponse> {
-    const result = await this.runner.run({
-      prompt: [
-        `Purpose: ${request.purpose}`,
-        "",
-        "Input:",
-        request.input,
-        "",
-        "Return only the response for the application."
-      ].join("\n"),
-      model: this.options.model,
-      timeoutMs: this.options.timeoutMs,
-      projectRoot: this.options.projectRoot,
-      tmpDirectory: this.options.tmpDirectory,
-      ...(request.outputSchema
-        ? { outputSchema: request.outputSchema.schema }
-        : {}),
-      ...(this.options.apiKey ? { apiKey: this.options.apiKey } : {})
-    });
+    await this.acquireSlot();
 
-    return {
-      text: result.text
-    };
+    try {
+      const result = await this.runner.run({
+        prompt: [
+          `Purpose: ${request.purpose}`,
+          "",
+          "Input:",
+          request.input,
+          "",
+          "Return only the response for the application."
+        ].join("\n"),
+        model: this.options.model,
+        timeoutMs: this.options.timeoutMs,
+        projectRoot: this.options.projectRoot,
+        tmpDirectory: this.options.tmpDirectory,
+        ...(request.outputSchema
+          ? { outputSchema: request.outputSchema.schema }
+          : {}),
+        ...(this.options.apiKey ? { apiKey: this.options.apiKey } : {})
+      });
+
+      return {
+        text: result.text
+      };
+    } finally {
+      this.releaseSlot();
+    }
+  }
+
+  private async acquireSlot(): Promise<void> {
+    if (this.activeRuns < this.maxConcurrency) {
+      this.activeRuns += 1;
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
+    });
+    this.activeRuns += 1;
+  }
+
+  private releaseSlot(): void {
+    this.activeRuns -= 1;
+    const next = this.waiters.shift();
+
+    if (next) {
+      next();
+    }
   }
 }
 

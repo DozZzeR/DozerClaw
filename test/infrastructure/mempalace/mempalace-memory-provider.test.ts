@@ -314,11 +314,34 @@ describe("MempalaceMemoryProvider", () => {
       })
     ).rejects.toThrow("MemPalace JSON-RPC error: Internal tool error");
   });
+
+  it("passes AbortSignal to MemPalace requests when timeout is configured", async () => {
+    const fetcher = new RecordingFetch([
+      jsonRpcToolResult({
+        results: []
+      })
+    ]);
+    const provider = new MempalaceMemoryProvider({
+      endpointUrl: "http://127.0.0.1:4118/mcp",
+      wing: "family",
+      room: "facts",
+      requestTimeoutMs: 1000,
+      fetch: fetcher.fetch
+    });
+
+    await provider.search({
+      text: "Max",
+      limit: 5
+    });
+
+    expect(fetcher.requests[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 interface RecordedRequest {
   readonly url: string;
   readonly headers: Record<string, string>;
+  readonly signal?: AbortSignal | null;
   readonly body: any;
 }
 
@@ -334,6 +357,7 @@ class RecordingFetch {
     this.requests.push({
       url: String(input),
       headers: (init?.headers ?? {}) as Record<string, string>,
+      signal: init?.signal ?? null,
       body: JSON.parse(String(init?.body))
     });
     const response = this.responses[this.requests.length - 1];

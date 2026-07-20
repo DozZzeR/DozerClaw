@@ -8,8 +8,14 @@ describe("loadConfig", () => {
       modelRoutingEnabled: false,
       model: "gpt-5.5",
       timeoutMs: 120000,
+      maxConcurrency: 1,
       projectRoot: "data/tmp/codex/workspace",
       tmpDirectory: "data/tmp/codex"
+    });
+    expect(loadConfig({}).telegram).toMatchObject({
+      pollingTimeoutSeconds: 30,
+      requestTimeoutMs: 30_000,
+      maxAttachmentBytes: 20 * 1024 * 1024
     });
   });
 
@@ -19,6 +25,7 @@ describe("loadConfig", () => {
         DOZERCLAW_CODEX_MODEL: "gpt-test",
         DOZERCLAW_MODEL_ROUTING_ENABLED: "true",
         DOZERCLAW_CODEX_TIMEOUT_MS: "3000",
+        DOZERCLAW_CODEX_MAX_CONCURRENCY: "2",
         DOZERCLAW_CODEX_PROJECT_ROOT: "/tmp/project",
         DOZERCLAW_CODEX_TMP_DIR: "/tmp/codex",
         CODEX_API_KEY: "codex-key"
@@ -27,6 +34,7 @@ describe("loadConfig", () => {
       modelRoutingEnabled: true,
       model: "gpt-test",
       timeoutMs: 3000,
+      maxConcurrency: 2,
       projectRoot: "/tmp/project",
       tmpDirectory: "/tmp/codex",
       apiKey: "codex-key"
@@ -53,7 +61,8 @@ describe("loadConfig", () => {
         DOZERCLAW_MEMPALACE_ROOM: "facts",
         DOZERCLAW_MEMPALACE_HALL: "facts",
         DOZERCLAW_MEMPALACE_MAX_DISTANCE: "1.2",
-        DOZERCLAW_MEMPALACE_SEARCH_LIMIT: "7"
+        DOZERCLAW_MEMPALACE_SEARCH_LIMIT: "7",
+        DOZERCLAW_MEMPALACE_REQUEST_TIMEOUT_MS: "4000"
       }).memory
     ).toEqual({
       mempalace: {
@@ -63,7 +72,8 @@ describe("loadConfig", () => {
         room: "facts",
         hall: "facts",
         maxDistance: 1.2,
-        searchLimit: 7
+        searchLimit: 7,
+        requestTimeoutMs: 4000
       }
     });
   });
@@ -73,6 +83,7 @@ describe("loadConfig", () => {
       loadConfig({
         DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
         DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "http://127.0.0.1:9999",
+        DOZERCLAW_GOOGLE_DRIVE_REQUEST_TIMEOUT_MS: "5000",
         DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID: "folder-inbox",
         DOZERCLAW_DRIVE_FOLDER_MAP_JSON:
           '{"Family Documents/max/identity":"folder-max-identity"}'
@@ -80,6 +91,7 @@ describe("loadConfig", () => {
     ).toEqual({
       accessToken: "drive-token",
       apiBaseUrl: "http://127.0.0.1:9999",
+      requestTimeoutMs: 5000,
       uploadFolderId: "folder-inbox",
       folderIdByPath: {
         "Family Documents/max/identity": "folder-max-identity"
@@ -100,7 +112,8 @@ describe("loadConfig", () => {
         clientSecret: "oauth-secret",
         refreshToken: "refresh-token"
       },
-      apiBaseUrl: "https://www.googleapis.com"
+      apiBaseUrl: "https://www.googleapis.com",
+      requestTimeoutMs: 30_000
     });
   });
 });

@@ -23,6 +23,8 @@ export interface TelegramConfig {
   readonly botToken?: string;
   readonly ownerUserId?: string;
   readonly pollingTimeoutSeconds: number;
+  readonly requestTimeoutMs: number;
+  readonly maxAttachmentBytes: number;
 }
 
 export interface AdminConfig {
@@ -34,6 +36,7 @@ export interface CodexConfig {
   readonly modelRoutingEnabled: boolean;
   readonly model: string;
   readonly timeoutMs: number;
+  readonly maxConcurrency: number;
   readonly projectRoot: string;
   readonly tmpDirectory: string;
   readonly apiKey?: string;
@@ -47,6 +50,7 @@ export interface GoogleDriveConfig {
   readonly accessToken?: string;
   readonly oauth?: GoogleOAuthConfig;
   readonly apiBaseUrl: string;
+  readonly requestTimeoutMs: number;
   readonly uploadFolderId?: string;
   readonly folderIdByPath?: Readonly<Record<string, string>>;
 }
@@ -65,6 +69,7 @@ export interface MempalaceMemoryConfig {
   readonly bearerToken?: string;
   readonly maxDistance?: number;
   readonly searchLimit: number;
+  readonly requestTimeoutMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -86,6 +91,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       pollingTimeoutSeconds: parsePositiveInteger(
         env.DOZERCLAW_TELEGRAM_POLL_TIMEOUT_SECONDS,
         30
+      ),
+      requestTimeoutMs: parsePositiveInteger(
+        env.DOZERCLAW_TELEGRAM_REQUEST_TIMEOUT_MS,
+        30_000
+      ),
+      maxAttachmentBytes: parsePositiveInteger(
+        env.DOZERCLAW_TELEGRAM_MAX_ATTACHMENT_BYTES,
+        20 * 1024 * 1024
       )
     },
     ...adminConfig(env),
@@ -95,6 +108,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
         env.DOZERCLAW_MODEL_ROUTING_ENABLED === "1",
       model: env.DOZERCLAW_CODEX_MODEL ?? "gpt-5.5",
       timeoutMs: parsePositiveInteger(env.DOZERCLAW_CODEX_TIMEOUT_MS, 120000),
+      maxConcurrency: parsePositiveInteger(
+        env.DOZERCLAW_CODEX_MAX_CONCURRENCY,
+        1
+      ),
       projectRoot:
         env.DOZERCLAW_CODEX_PROJECT_ROOT ?? "data/tmp/codex/workspace",
       tmpDirectory: env.DOZERCLAW_CODEX_TMP_DIR ?? "data/tmp/codex",
@@ -141,6 +158,10 @@ function googleDriveConfig(
       apiBaseUrl:
         env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
         "https://www.googleapis.com",
+      requestTimeoutMs: parsePositiveInteger(
+        env.DOZERCLAW_GOOGLE_DRIVE_REQUEST_TIMEOUT_MS,
+        30_000
+      ),
       ...(uploadFolderId ? { uploadFolderId } : {}),
       ...parseDriveFolderMap(env.DOZERCLAW_DRIVE_FOLDER_MAP_JSON)
     }
@@ -214,6 +235,10 @@ function mempalaceMemoryConfig(
     wing: env.DOZERCLAW_MEMPALACE_WING?.trim() || "family",
     room: env.DOZERCLAW_MEMPALACE_ROOM?.trim() || "facts",
     searchLimit: parsePositiveInteger(env.DOZERCLAW_MEMPALACE_SEARCH_LIMIT, 5),
+    requestTimeoutMs: parsePositiveInteger(
+      env.DOZERCLAW_MEMPALACE_REQUEST_TIMEOUT_MS,
+      10_000
+    ),
     ...(env.DOZERCLAW_MEMPALACE_HALL
       ? { hall: env.DOZERCLAW_MEMPALACE_HALL }
       : {}),

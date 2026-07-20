@@ -39,6 +39,43 @@ describe("CodexCliModelProvider", () => {
       type: "object"
     });
   });
+
+  it("bounds concurrent codex model requests", async () => {
+    const runner = new BlockingRunner();
+    const provider = new CodexCliModelProvider({
+      model: "gpt-test",
+      timeoutMs: 5000,
+      projectRoot: "/repo",
+      tmpDirectory: "/tmp",
+      maxConcurrency: 1,
+      runner
+    });
+
+    const first = provider.runTextRequest({
+      purpose: "first",
+      input: "one"
+    });
+    const second = provider.runTextRequest({
+      purpose: "second",
+      input: "two"
+    });
+    await nextTick();
+
+    expect(runner.activeRuns).toBe(1);
+    expect(runner.startedPurposes).toEqual(["Purpose: first"]);
+
+    runner.resolveNext("first-result");
+    await expect(first).resolves.toEqual({ text: "first-result" });
+    await nextTick();
+
+    expect(runner.startedPurposes).toEqual([
+      "Purpose: first",
+      "Purpose: second"
+    ]);
+    runner.resolveNext("second-result");
+    await expect(second).resolves.toEqual({ text: "second-result" });
+    expect(runner.maxActiveRuns).toBe(1);
+  });
 });
 
 describe("CodexCliRunner", () => {
@@ -344,6 +381,41 @@ class FakeRunner {
       timedOut: false,
       aborted: false
     };
+  }
+}
+
+class BlockingRunner {
+  activeRuns = 0;
+  maxActiveRuns = 0;
+  readonly startedPurposes: string[] = [];
+  private readonly pending: Array<(text: string) => void> = [];
+
+  async run(input: CodexCliRunInput) {
+    this.activeRuns += 1;
+    this.maxActiveRuns = Math.max(this.maxActiveRuns, this.activeRuns);
+    this.startedPurposes.push(input.prompt.split("\n")[0] ?? "");
+
+    const text = await new Promise<string>((resolve) => {
+      this.pending.push(resolve);
+    });
+    this.activeRuns -= 1;
+
+    return {
+      text,
+      outputFile: "/tmp/output.txt",
+      stderr: "",
+      timedOut: false,
+      aborted: false
+    };
+  }
+
+  resolveNext(text: string): void {
+    const resolve = this.pending.shift();
+    if (!resolve) {
+      throw new Error("no pending codex run");
+    }
+
+    resolve(text);
   }
 }
 
