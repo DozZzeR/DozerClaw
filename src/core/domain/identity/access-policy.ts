@@ -3,7 +3,11 @@ import { isAdminSessionActive } from "./admin-session.js";
 import type { Actor } from "./actor.js";
 import type { ChatContext } from "./chat-context.js";
 
-export type AccessAction = "family_read" | "owner_read" | "admin_write";
+export type AccessAction =
+  | "family_read"
+  | "family_write"
+  | "owner_read"
+  | "admin_write";
 
 export type AccessDecision =
   | { readonly allowed: true }
@@ -37,7 +41,7 @@ export function evaluateAccess(input: EvaluateAccessInput): AccessDecision {
     return deny("owner_required");
   }
 
-  if (input.action === "family_read") {
+  if (input.action === "family_read" || input.action === "family_write") {
     return { allowed: true };
   }
 

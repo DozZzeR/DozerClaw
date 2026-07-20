@@ -25,6 +25,12 @@ const ownerPrivateChat: ChatContext = {
   approved: true
 };
 
+const familyPrivateChat: ChatContext = {
+  id: "chat-family",
+  kind: "family_private",
+  approved: true
+};
+
 describe("evaluateAccess", () => {
   it("allows an active owner in owner private chat to use owner read actions", () => {
     expect(
@@ -86,6 +92,17 @@ describe("evaluateAccess", () => {
         now: new Date("2026-07-02T20:00:00.000Z")
       })
     ).toEqual({ allowed: false, reason: "owner_required" });
+  });
+
+  it("allows approved family actors to use family write actions", () => {
+    expect(
+      evaluateAccess({
+        actor: family,
+        chat: familyPrivateChat,
+        action: "family_write",
+        now: new Date("2026-07-02T20:00:00.000Z")
+      })
+    ).toEqual({ allowed: true });
   });
 
   it("denies family actors in owner private chat", () => {

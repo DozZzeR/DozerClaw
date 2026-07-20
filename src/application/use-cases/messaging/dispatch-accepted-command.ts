@@ -1,4 +1,6 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
+import type { AccessAction } from "../../../core/domain/identity/access-policy.js";
+import { evaluateAccess } from "../../../core/domain/identity/access-policy.js";
 import type { DocumentType } from "../../../core/domain/documents/document-record.js";
 import type {
   RegisterDocumentInput,
@@ -863,6 +865,32 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
+  private operationDeniedReply(
+    context: AcceptedMessageContext,
+    action: AccessAction | undefined
+  ): OutboundReply | undefined {
+    if (!action) {
+      return undefined;
+    }
+
+    const decision = evaluateAccess({
+      actor: context.actor,
+      chat: context.chat,
+      action,
+      ...(context.adminSession ? { adminSession: context.adminSession } : {}),
+      now: this.dependencies.now?.() ?? new Date()
+    });
+
+    if (decision.allowed) {
+      return undefined;
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: `Access denied: ${decision.reason}.`
+    };
+  }
+
   private async storeFamilyMessageDocumentAttachments(
     context: AcceptedMessageContext,
     metadataOverride: {
@@ -1071,6 +1099,13 @@ export class DispatchAcceptedCommandUseCase {
     readonly allowFileOrClarification: boolean;
   }): Promise<OutboundReply> {
     const { context, intent } = input;
+    const deniedReply = this.operationDeniedReply(
+      context,
+      requiredAccessActionForIntent(intent)
+    );
+    if (deniedReply) {
+      return deniedReply;
+    }
 
     if (intent.kind === "ask_clarification") {
       if (!input.allowFileOrClarification) {
@@ -2722,6 +2757,25 @@ function toSubjectAliasAction(
   return {
     action: "list"
   };
+}
+
+function requiredAccessActionForIntent(
+  intent: InboundIntent
+): AccessAction | undefined {
+  if (
+    intent.kind === "store_file" ||
+    intent.kind === "record_fact" ||
+    intent.kind === "archive_fact" ||
+    intent.kind === "register_document" ||
+    intent.kind === "update_document" ||
+    intent.kind === "archive_document" ||
+    intent.kind === "save_subject_alias" ||
+    intent.kind === "delete_subject_alias"
+  ) {
+    return "family_write";
+  }
+
+  return undefined;
 }
 
 function formatFamilyFactConfirmation(

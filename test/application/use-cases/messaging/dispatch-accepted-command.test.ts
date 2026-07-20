@@ -1571,6 +1571,39 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("denies model-classified family writes when the final operation is not allowed", async () => {
+    const factRecorder = new FakeFamilyFactRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "record_fact",
+        summary: "Max started swimming lessons."
+      }),
+      familyFactRecorder: factRecorder,
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          actor: {
+            id: "actor-family",
+            displayName: "Family",
+            role: "family",
+            status: "active"
+          },
+          action: "family_read"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Access denied: owner_required."
+    });
+    expect(factRecorder.seenInput).toBeUndefined();
+  });
+
   it("asks for confirmation when recording a related family fact", async () => {
     const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
     const factRecorder = new FakeFamilyFactRecorder({
