@@ -1741,6 +1741,33 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFamilyFactDecisions.deletedChatIds).toEqual([]);
   });
 
+  it("keeps pending memory decision when resolver fails", async () => {
+    const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
+    const factDecisionResolver = new FakeFamilyFactDecisionResolver("throw");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      factDecisionResolver,
+      pendingFamilyFactDecisions,
+      now: () => new Date("2026-07-07T10:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "обнови существующий"
+        }
+      })
+    ).rejects.toThrow("resolver failed");
+    expect(factDecisionResolver.seenInput).toEqual({
+      decision: "update",
+      pending: pendingFamilyFactDecision()
+    });
+    expect(pendingFamilyFactDecisions.deletedChatIds).toEqual([]);
+  });
+
   it("uses model choice classification when memory decision reply is unclear", async () => {
     const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
     pendingFamilyFactDecisions.pending = pendingFamilyFactDecision();
@@ -2497,6 +2524,36 @@ describe("DispatchAcceptedCommandUseCase", () => {
       subjectId: "max"
     });
     expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("keeps pending document decision when document manager fails", async () => {
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    pendingDocumentDecisions.pending = pendingDocumentDecision();
+    const documentManager = new FakeDocumentManager("throw");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentManager,
+      pendingDocumentDecisions,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "2"
+        }
+      })
+    ).rejects.toThrow("document manager failed");
+    expect(documentManager.seenInput).toEqual({
+      action: "update_metadata",
+      query: "Sofia Passport.pdf",
+      document: documentRecord({ id: "document-2", name: "Sofia Passport.pdf" }),
+      documentType: "identity",
+      subjectId: "max"
+    });
+    expect(pendingDocumentDecisions.deletedChatIds).toEqual([]);
   });
 
   it("cancels and keeps pending document decisions", async () => {
@@ -3333,7 +3390,7 @@ class FakeDocumentManager {
     | { action: "archive"; query: string; document?: DocumentRecord }
     | undefined;
 
-  constructor(private readonly status: "ok" | "ambiguous" = "ok") {}
+  constructor(private readonly status: "ok" | "ambiguous" | "throw" = "ok") {}
 
   async execute(
     input:
@@ -3347,6 +3404,10 @@ class FakeDocumentManager {
       | { action: "archive"; query: string; document?: DocumentRecord }
   ) {
     this.seenInput = input;
+
+    if (this.status === "throw") {
+      throw new Error("document manager failed");
+    }
 
     if (this.status === "ambiguous") {
       return {
@@ -3631,10 +3692,16 @@ class FakeFamilyFactDecisionResolver {
       }
     | undefined;
 
-  constructor(private readonly status: "updated" | "created" | "cancelled") {}
+  constructor(
+    private readonly status: "updated" | "created" | "cancelled" | "throw"
+  ) {}
 
   async execute(input: NonNullable<FakeFamilyFactDecisionResolver["seenInput"]>) {
     this.seenInput = input;
+
+    if (this.status === "throw") {
+      throw new Error("resolver failed");
+    }
 
     if (this.status === "cancelled") {
       return {

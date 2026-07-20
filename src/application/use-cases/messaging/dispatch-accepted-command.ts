@@ -1126,6 +1126,17 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    const reply = await this.storeFamilyMessageAttachments(
+      {
+        ...context,
+        provider: pending.provider,
+        receivedAt: pending.receivedAt,
+        attachments: pending.attachments
+      },
+      undefined,
+      destination
+    );
+
     await this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
       context.chat.id
     );
@@ -1136,16 +1147,7 @@ export class DispatchAcceptedCommandUseCase {
       pendingCleared: true
     });
 
-    return this.storeFamilyMessageAttachments(
-      {
-        ...context,
-        provider: pending.provider,
-        receivedAt: pending.receivedAt,
-        attachments: pending.attachments
-      },
-      undefined,
-      destination
-    );
+    return reply;
   }
 
   private async dispatchSafePendingFileDestinationInterruption(
@@ -1311,17 +1313,17 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-      context.chat.id
-    );
-    await this.recordPendingRoutingEvent({
-      pendingKind: "file_duplicate",
-      policy: "choice_only",
-      choiceResult: decision,
-      pendingCleared: true
-    });
-
     if (decision === "skip") {
+      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+        context.chat.id
+      );
+      await this.recordPendingRoutingEvent({
+        pendingKind: "file_duplicate",
+        policy: "choice_only",
+        choiceResult: decision,
+        pendingCleared: true
+      });
+
       return {
         chatId: context.chat.id,
         text: `Ок, ничего не делаю с файлом ${pending.fileName}.`
@@ -1331,6 +1333,16 @@ export class DispatchAcceptedCommandUseCase {
     const result = await this.resolveDuplicateMutation(decision, pending);
 
     if (result.status === "copied") {
+      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+        context.chat.id
+      );
+      await this.recordPendingRoutingEvent({
+        pendingKind: "file_duplicate",
+        policy: "choice_only",
+        choiceResult: decision,
+        pendingCleared: true
+      });
+
       return {
         chatId: context.chat.id,
         text: `Готово: сохранил копию как ${pending.suggestedCopyName}.`
@@ -1338,6 +1350,16 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (result.status === "overwritten") {
+      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+        context.chat.id
+      );
+      await this.recordPendingRoutingEvent({
+        pendingKind: "file_duplicate",
+        policy: "choice_only",
+        choiceResult: decision,
+        pendingCleared: true
+      });
+
       return {
         chatId: context.chat.id,
         text: `Готово: перезаписал ${pending.fileName}.`
@@ -1364,10 +1386,6 @@ export class DispatchAcceptedCommandUseCase {
       destination === "google_drive" &&
       this.dependencies.fileInboxDocumentUploader
     ) {
-      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-        context.chat.id
-      );
-
       const upload = await this.dependencies.fileInboxDocumentUploader.execute({
         fileInboxRecordId: pending.existingRecordId
       });
@@ -1383,6 +1401,10 @@ export class DispatchAcceptedCommandUseCase {
         await this.savePendingDocumentPlacementSuggestion(context, [
           upload.document
         ]);
+
+      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+        context.chat.id
+      );
 
       return {
         chatId: context.chat.id,
@@ -1402,11 +1424,7 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return this.storeFamilyMessageAttachments(
+    const reply = await this.storeFamilyMessageAttachments(
       {
         ...context,
         provider: pending.provider,
@@ -1416,6 +1434,12 @@ export class DispatchAcceptedCommandUseCase {
       undefined,
       destination
     );
+
+    await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    return reply;
   }
 
   private async dispatchPendingDocumentPlacementDecision(
@@ -1454,17 +1478,17 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
-      context.chat.id
-    );
-    await this.recordPendingRoutingEvent({
-      pendingKind: "document_placement",
-      policy: documentPlacementDecisionPolicy,
-      choiceResult: decision,
-      pendingCleared: true
-    });
-
     if (decision === "skip") {
+      await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
+        context.chat.id
+      );
+      await this.recordPendingRoutingEvent({
+        pendingKind: "document_placement",
+        policy: documentPlacementDecisionPolicy,
+        choiceResult: decision,
+        pendingCleared: true
+      });
+
       return {
         chatId: context.chat.id,
         text: `Ок, оставляю ${pending.document.name} на текущем месте.`
@@ -1472,6 +1496,16 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (!pending.targetFolderId || !this.dependencies.documentPlacementMover) {
+      await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
+        context.chat.id
+      );
+      await this.recordPendingRoutingEvent({
+        pendingKind: "document_placement",
+        policy: documentPlacementDecisionPolicy,
+        choiceResult: decision,
+        pendingCleared: true
+      });
+
       return {
         chatId: context.chat.id,
         text: [
@@ -1484,6 +1518,15 @@ export class DispatchAcceptedCommandUseCase {
     await this.dependencies.documentPlacementMover.execute({
       externalId: pending.document.externalId,
       targetFolderId: pending.targetFolderId
+    });
+    await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
+      context.chat.id
+    );
+    await this.recordPendingRoutingEvent({
+      pendingKind: "document_placement",
+      policy: documentPlacementDecisionPolicy,
+      choiceResult: decision,
+      pendingCleared: true
     });
 
     return {
@@ -1708,11 +1751,11 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
     if (decision === "cancel") {
+      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+        context.chat.id
+      );
+
       return {
         chatId: context.chat.id,
         text: "Ок, не меняю документ."
@@ -1753,6 +1796,9 @@ export class DispatchAcceptedCommandUseCase {
               ? { subjectId: pending.action.subjectId }
               : {})
           }
+    );
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
     );
 
     return {
@@ -1815,10 +1861,6 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
     const uploaded = await this.dependencies.documentAttachmentStore.uploadPrepared({
       attachment: {
         fileName: pending.action.attachment.fileName,
@@ -1833,6 +1875,9 @@ export class DispatchAcceptedCommandUseCase {
         : {}),
       ...(pending.action.subjectId ? { subjectId: pending.action.subjectId } : {})
     });
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
 
     return {
       chatId: context.chat.id,
@@ -1844,11 +1889,11 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
     if (parseSkipDocumentMetadata(context.text)) {
+      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+        context.chat.id
+      );
+
       return {
         chatId: context.chat.id,
         text: "Ок, оставляю документ без описания для поиска."
@@ -1873,6 +1918,9 @@ export class DispatchAcceptedCommandUseCase {
 
       updated.push(formatDocumentSearchDescriptionResult(result.document, result));
     }
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
 
     return {
       chatId: context.chat.id,
@@ -1914,10 +1962,6 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
     const updated: string[] = [];
     const updatedDocuments = pending.candidates.map((document) => ({
       ...document,
@@ -1933,6 +1977,9 @@ export class DispatchAcceptedCommandUseCase {
       });
       updated.push(result.text);
     }
+    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
+      context.chat.id
+    );
 
     const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
       context,
@@ -2014,10 +2061,6 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingFamilyFactDecisions?.clearByChatId(
-      context.chat.id
-    );
-
     if (!this.dependencies.factDecisionResolver) {
       return {
         chatId: context.chat.id,
@@ -2032,6 +2075,10 @@ export class DispatchAcceptedCommandUseCase {
         : {}),
       pending
     });
+
+    await this.dependencies.pendingFamilyFactDecisions?.clearByChatId(
+      context.chat.id
+    );
 
     if (result.status === "cancelled") {
       return {
@@ -2074,11 +2121,11 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    await this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
-      context.chat.id
-    );
-
     if (decision === "cancel") {
+      await this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
+        context.chat.id
+      );
+
       return {
         chatId: context.chat.id,
         text: "Ок, не архивирую семейный факт."
@@ -2105,6 +2152,9 @@ export class DispatchAcceptedCommandUseCase {
       query: candidate.body,
       factId: candidate.id
     });
+    await this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
+      context.chat.id
+    );
 
     if (result.status === "archived") {
       return {
