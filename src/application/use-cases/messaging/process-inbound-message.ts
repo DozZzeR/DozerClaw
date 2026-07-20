@@ -64,7 +64,7 @@ export interface ProcessInboundMessageDependencies {
   readonly identityContextResolver: IdentityContextResolver;
   readonly identityRepository: Pick<
     IdentityAccessRepositoryPort,
-    "findAdminSession"
+    "findAdminSession" | "findActiveAdminSessionByActorAndChat"
   >;
 }
 
@@ -99,7 +99,13 @@ export class ProcessInboundMessageUseCase {
       ? await this.dependencies.identityRepository.findAdminSession(
           input.adminSessionId
         )
-      : undefined;
+      : input.action === "admin_write"
+        ? await this.dependencies.identityRepository.findActiveAdminSessionByActorAndChat(
+            identityContext.actor.id,
+            identityContext.chat.id,
+            input.now
+          )
+        : undefined;
 
     const decision = evaluateAccess({
       actor: identityContext.actor,

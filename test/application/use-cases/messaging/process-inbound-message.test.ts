@@ -169,6 +169,41 @@ describe("ProcessInboundMessageUseCase", () => {
       }
     });
   });
+
+  it("loads active actor chat admin session when no session id is supplied", async () => {
+    const repository = new FakeIdentityRepository();
+    repository.session = {
+      id: "admin-session-1",
+      actorId: owner.id,
+      chatId: ownerPrivateChat.id,
+      lastActivityAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:05:00.000Z")
+    };
+    const useCase = new ProcessInboundMessageUseCase({
+      identityContextResolver: new FakeIdentityContextResolver({
+        actor: owner,
+        chat: ownerPrivateChat,
+        createdActor: false,
+        createdChat: false
+      }),
+      identityRepository: repository
+    });
+
+    await expect(
+      useCase.execute(
+        baseRequest({
+          action: "admin_write",
+          now: new Date("2026-07-02T20:01:00.000Z")
+        })
+      )
+    ).resolves.toMatchObject({
+      status: "accepted",
+      context: {
+        action: "admin_write",
+        adminSession: repository.session
+      }
+    });
+  });
 });
 
 const activeFamily: Actor = {
@@ -235,11 +270,31 @@ class FakeIdentityContextResolver {
 }
 
 class FakeIdentityRepository
-  implements Pick<IdentityAccessRepositoryPort, "findAdminSession">
+  implements
+    Pick<
+      IdentityAccessRepositoryPort,
+      "findAdminSession" | "findActiveAdminSessionByActorAndChat"
+    >
 {
   session: AdminSession | undefined;
 
   async findAdminSession(id: string): Promise<AdminSession | undefined> {
     return this.session?.id === id ? this.session : undefined;
+  }
+
+  async findActiveAdminSessionByActorAndChat(
+    actorId: string,
+    chatId: string,
+    now: Date
+  ): Promise<AdminSession | undefined> {
+    if (
+      this.session?.actorId === actorId &&
+      this.session.chatId === chatId &&
+      this.session.expiresAt > now
+    ) {
+      return this.session;
+    }
+
+    return undefined;
   }
 }

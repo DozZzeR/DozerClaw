@@ -28,7 +28,12 @@ export function routeCommand(text: string): CommandRoute {
     };
   }
 
-  if (comparable === "/admin" || comparable === "admin") {
+  if (
+    comparable === "/admin" ||
+    comparable === "admin" ||
+    comparable.startsWith("/admin ") ||
+    comparable.startsWith("admin ")
+  ) {
     return {
       kind: "admin_mode_activate",
       action: "owner_read",
@@ -55,7 +60,7 @@ export function routeCommand(text: string): CommandRoute {
   if (comparable.startsWith("/approve ")) {
     return {
       kind: "approve_access_request",
-      action: "owner_read",
+      action: "admin_write",
       normalizedText
     };
   }
@@ -63,7 +68,7 @@ export function routeCommand(text: string): CommandRoute {
   if (comparable.startsWith("/reject ")) {
     return {
       kind: "reject_access_request",
-      action: "owner_read",
+      action: "admin_write",
       normalizedText
     };
   }

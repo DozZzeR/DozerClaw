@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import type { DozerClawApp } from "./app.js";
@@ -7,6 +7,7 @@ import type { StartupDiagnostic } from "../core/domain/diagnostics/startup-diagn
 import { BootstrapOwnerIdentityUseCase } from "../application/use-cases/identity/bootstrap-owner-identity.js";
 import { ListPendingAccessRequestsUseCase } from "../application/use-cases/identity/list-pending-access-requests.js";
 import { ReviewPendingIdentityUseCase } from "../application/use-cases/identity/review-pending-identity.js";
+import { ActivateAdminSessionUseCase } from "../application/use-cases/identity/activate-admin-session.js";
 import { ModelInboundIntentClassifier } from "../application/use-cases/messaging/classify-inbound-intent.js";
 import { ModelPendingChoiceClassifier } from "../application/use-cases/messaging/classify-pending-choice.js";
 import { StoreInboundFileUseCase } from "../application/use-cases/file-inbox/store-inbound-file.js";
@@ -51,6 +52,7 @@ import type { AttachmentDownloadPort } from "../ports/attachment-download-port.j
 import type { DocumentFolderPolicyPort } from "../ports/document-folder-policy-port.js";
 import type { DocumentStoragePort } from "../ports/document-storage-port.js";
 import type { ModelPort } from "../ports/model-port.js";
+import type { AdminSecretVerifierPort } from "../ports/admin-secret-verifier-port.js";
 
 export interface BuildAppOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -86,6 +88,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const reviewPendingIdentity = new ReviewPendingIdentityUseCase({
     repository: identityAccessRepository
   });
+  const activateAdminSession = config.admin
+    ? new ActivateAdminSessionUseCase({
+        repository: identityAccessRepository,
+        verifier: new StaticAdminSecretVerifier(config.admin.secret),
+        generateId,
+        ttlMs: config.admin.ttlMs
+      })
+    : undefined;
   const processInboundMessage = new ProcessInboundMessageUseCase({
     identityContextResolver: resolveIdentityContext,
     identityRepository: identityAccessRepository
@@ -259,6 +269,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       list: () => listPendingAccessRequests.execute(),
       review: (input) => reviewPendingIdentity.execute(input)
     },
+    ...(activateAdminSession
+      ? { adminSessionActivator: activateAdminSession }
+      : {}),
     pendingClarifications: {
       findActiveByChatId: (chatId, now) =>
         stateRepository.findActivePendingClarificationByChatId(chatId, now),
@@ -352,6 +365,19 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       return handleNormalizedInboundMessage.execute(input);
     }
   };
+}
+
+class StaticAdminSecretVerifier implements AdminSecretVerifierPort {
+  constructor(private readonly expectedSecret: string) {}
+
+  async verifyAdminSecret(secret: string): Promise<boolean> {
+    const expected = Buffer.from(this.expectedSecret);
+    const actual = Buffer.from(secret);
+
+    return (
+      expected.length === actual.length && timingSafeEqual(expected, actual)
+    );
+  }
 }
 
 function loadDocumentFolderPolicy(

@@ -102,6 +102,7 @@ describe("buildApp", () => {
       const app = buildApp({
         env: {
           DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_ADMIN_SECRET: "1234",
           NODE_ENV: "test"
         }
       });
@@ -159,6 +160,7 @@ describe("buildApp", () => {
       const app = buildApp({
         env: {
           DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_ADMIN_SECRET: "1234",
           NODE_ENV: "test"
         }
       });
@@ -1272,6 +1274,7 @@ describe("buildApp", () => {
       const app = buildApp({
         env: {
           DOZERCLAW_DB_PATH: databasePath,
+          DOZERCLAW_ADMIN_SECRET: "1234",
           NODE_ENV: "test"
         }
       });
@@ -1315,6 +1318,22 @@ describe("buildApp", () => {
       const actorId = pendingListReply.text.match(/- ([^:]+):/)?.[1];
       expect(actorId).toBeTruthy();
 
+      const adminReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-owner-admin",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "/admin 1234",
+        attachments: [],
+        receivedAt: new Date("2026-07-05T10:01:30.000Z"),
+        now: new Date("2026-07-05T10:01:30.000Z")
+      });
+      expect(adminReply.text).toBe(
+        "Admin mode activated until 2026-07-05T10:06:30.000Z."
+      );
+
       const approveReply = await app.handleNormalizedInboundMessage({
         messageId: "message-owner-approve",
         provider: "telegram",
@@ -1355,6 +1374,7 @@ describe("buildApp", () => {
     const app = buildApp({
       env: {
         DOZERCLAW_DB_PATH: ":memory:",
+        DOZERCLAW_ADMIN_SECRET: "1234",
         NODE_ENV: "test"
       },
       modelProvider: new FakeModelProvider(
@@ -1398,6 +1418,18 @@ describe("buildApp", () => {
     ).text.match(/- ([^:]+):/)?.[1];
     expect(pendingReply.text).toBe("Access request is pending owner approval.");
     expect(actorId).toBeTruthy();
+    await app.handleNormalizedInboundMessage({
+      messageId: "message-owner-admin",
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      providerChatId: "tg-owner",
+      chatKind: "owner_private",
+      displayName: "Owner",
+      text: "/admin 1234",
+      attachments: [],
+      receivedAt: new Date("2026-07-05T11:01:30.000Z"),
+      now: new Date("2026-07-05T11:01:30.000Z")
+    });
     await app.handleNormalizedInboundMessage({
       messageId: "message-owner-approve",
       provider: "telegram",

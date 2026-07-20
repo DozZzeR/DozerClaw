@@ -33,6 +33,17 @@ describe("loadConfig", () => {
     });
   });
 
+  it("loads admin mode secret from environment", () => {
+    expect(
+      loadConfig({
+        DOZERCLAW_ADMIN_SECRET: "1234"
+      }).admin
+    ).toEqual({
+      secret: "1234",
+      ttlMs: 5 * 60 * 1000
+    });
+  });
+
   it("loads MemPalace memory config from environment", () => {
     expect(
       loadConfig({

@@ -5,6 +5,7 @@ export interface AppConfig {
   readonly sqlite: SqliteConfig;
   readonly fileStorage: FileStorageConfig;
   readonly telegram: TelegramConfig;
+  readonly admin?: AdminConfig;
   readonly codex: CodexConfig;
   readonly memory?: MemoryConfig;
   readonly googleDrive?: GoogleDriveConfig;
@@ -22,6 +23,11 @@ export interface TelegramConfig {
   readonly botToken?: string;
   readonly ownerUserId?: string;
   readonly pollingTimeoutSeconds: number;
+}
+
+export interface AdminConfig {
+  readonly secret: string;
+  readonly ttlMs: number;
 }
 
 export interface CodexConfig {
@@ -82,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
         30
       )
     },
+    ...adminConfig(env),
     codex: {
       modelRoutingEnabled:
         env.DOZERCLAW_MODEL_ROUTING_ENABLED === "true" ||
@@ -95,6 +102,24 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     },
     ...memoryConfig(env),
     ...googleDriveConfig(env)
+  };
+}
+
+function adminConfig(env: NodeJS.ProcessEnv): { readonly admin?: AdminConfig } {
+  const secret = env.DOZERCLAW_ADMIN_SECRET?.trim();
+
+  if (!secret) {
+    return {};
+  }
+
+  return {
+    admin: {
+      secret,
+      ttlMs: parsePositiveInteger(
+        env.DOZERCLAW_ADMIN_SESSION_TTL_MS,
+        5 * 60 * 1000
+      )
+    }
   };
 }
 

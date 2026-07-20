@@ -2940,6 +2940,31 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("activates admin mode from deterministic admin command", async () => {
+    const adminSessionActivator = new FakeAdminSessionActivator();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      adminSessionActivator,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("admin_mode_activate", "/admin 1234"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Admin mode activated until 2026-07-02T20:05:00.000Z."
+    });
+    expect(adminSessionActivator.seenInput).toEqual({
+      actor: acceptedContext.actor,
+      chat: acceptedContext.chat,
+      secret: "1234",
+      now: new Date("2026-07-02T20:00:00.000Z")
+    });
+  });
+
   it("approves and rejects pending access requests", async () => {
     const pendingAccessRequests = new FakePendingAccessRequests();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -3050,6 +3075,32 @@ class FakePendingAccessRequests {
       identityStatus:
         input.decision === "approve" ? ("active" as const) : ("blocked" as const),
       chatApproved: input.decision === "approve"
+    };
+  }
+}
+
+class FakeAdminSessionActivator {
+  seenInput:
+    | {
+        actor: AcceptedMessageContext["actor"];
+        chat: AcceptedMessageContext["chat"];
+        secret: string;
+        now: Date;
+      }
+    | undefined;
+
+  async execute(input: NonNullable<FakeAdminSessionActivator["seenInput"]>) {
+    this.seenInput = input;
+
+    return {
+      activated: true as const,
+      session: {
+        id: "admin-session-1",
+        actorId: input.actor.id,
+        chatId: input.chat.id,
+        lastActivityAt: input.now,
+        expiresAt: new Date(input.now.getTime() + 5 * 60 * 1000)
+      }
     };
   }
 }

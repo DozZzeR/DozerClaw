@@ -301,6 +301,32 @@ export class SqliteIdentityAccessRepository
 
     return row ? adminSessionFromRow(row) : undefined;
   }
+
+  async findActiveAdminSessionByActorAndChat(
+    actorId: string,
+    chatId: string,
+    now: Date
+  ): Promise<AdminSession | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select id, actor_id, chat_id, last_activity_at, expires_at
+          from admin_sessions
+          where actor_id = @actorId
+            and chat_id = @chatId
+            and expires_at > @now
+          order by expires_at desc
+          limit 1
+        `
+      )
+      .get({
+        actorId,
+        chatId,
+        now: now.toISOString()
+      }) as AdminSessionRow | undefined;
+
+    return row ? adminSessionFromRow(row) : undefined;
+  }
 }
 
 interface ActorRow {

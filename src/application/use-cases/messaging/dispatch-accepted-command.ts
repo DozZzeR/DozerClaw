@@ -75,6 +75,10 @@ import {
 } from "./resolve-pending-decision.js";
 import type { PendingDecisionPolicy } from "./resolve-pending-decision.js";
 import type {
+  ActivateAdminSessionInput,
+  ActivateAdminSessionResult
+} from "../identity/activate-admin-session.js";
+import type {
   PendingIdentityDecision,
   ReviewPendingIdentityResult
 } from "../identity/review-pending-identity.js";
@@ -171,6 +175,10 @@ export interface PendingAccessRequestReviewer {
   }): Promise<ReviewPendingIdentityResult>;
 }
 
+export interface AdminSessionActivator {
+  execute(input: ActivateAdminSessionInput): Promise<ActivateAdminSessionResult>;
+}
+
 export interface PendingClarificationStore {
   findActiveByChatId(
     chatId: string,
@@ -263,6 +271,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
+  readonly adminSessionActivator?: AdminSessionActivator;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<PendingDecisionChoice>;
   readonly duplicateDecisionResolver?: FileDuplicateDecisionResolver;
@@ -297,6 +306,10 @@ export class DispatchAcceptedCommandUseCase {
 
     if (input.route.kind === "pending_access_requests") {
       return this.listPendingAccessRequests(input.context.chat.id);
+    }
+
+    if (input.route.kind === "admin_mode_activate") {
+      return this.activateAdminSession(input);
     }
 
     if (
@@ -759,6 +772,44 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
+  private async activateAdminSession(
+    input: DispatchAcceptedCommandInput
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.adminSessionActivator) {
+      return {
+        chatId: input.context.chat.id,
+        text: "Admin mode is not configured."
+      };
+    }
+
+    const secret = parseAdminSecret(input.route.normalizedText);
+    if (!secret) {
+      return {
+        chatId: input.context.chat.id,
+        text: "Usage: /admin <secret>."
+      };
+    }
+
+    const result = await this.dependencies.adminSessionActivator.execute({
+      actor: input.context.actor,
+      chat: input.context.chat,
+      secret,
+      now: this.dependencies.now?.() ?? input.context.receivedAt
+    });
+
+    if (!result.activated) {
+      return {
+        chatId: input.context.chat.id,
+        text: `Admin mode not activated: ${result.reason}.`
+      };
+    }
+
+    return {
+      chatId: input.context.chat.id,
+      text: `Admin mode activated until ${result.session.expiresAt.toISOString()}.`
+    };
+  }
+
   private async storeFamilyMessageAttachments(
     context: AcceptedMessageContext,
     intent?: Extract<InboundIntent, { readonly kind: "store_file" }>,
@@ -878,7 +929,7 @@ export class DispatchAcceptedCommandUseCase {
       chat: context.chat,
       action,
       ...(context.adminSession ? { adminSession: context.adminSession } : {}),
-      now: this.dependencies.now?.() ?? new Date()
+      now: this.dependencies.now?.() ?? context.receivedAt
     });
 
     if (decision.allowed) {
@@ -2776,6 +2827,13 @@ function requiredAccessActionForIntent(
   }
 
   return undefined;
+}
+
+function parseAdminSecret(text: string): string | undefined {
+  const match = /^(?:\/admin|admin)\s+(.+)$/i.exec(text.trim());
+  const secret = match?.[1]?.trim();
+
+  return secret || undefined;
 }
 
 function formatFamilyFactConfirmation(

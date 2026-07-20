@@ -395,6 +395,19 @@ class FakeIdentityAccessRepository implements IdentityAccessRepositoryPort {
     return this.sessions.find((session) => session.id === id);
   }
 
+  async findActiveAdminSessionByActorAndChat(
+    actorId: string,
+    chatId: string,
+    now: Date
+  ): Promise<AdminSession | undefined> {
+    return this.sessions.find(
+      (session) =>
+        session.actorId === actorId &&
+        session.chatId === chatId &&
+        session.expiresAt > now
+    );
+  }
+
   async updateActorStatus(
     actorId: string,
     status: Actor["status"]

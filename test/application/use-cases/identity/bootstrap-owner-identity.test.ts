@@ -213,4 +213,8 @@ class FakeIdentityAccessRepository implements IdentityAccessRepositoryPort {
   async findAdminSession(): Promise<AdminSession | undefined> {
     return undefined;
   }
+
+  async findActiveAdminSessionByActorAndChat(): Promise<AdminSession | undefined> {
+    return undefined;
+  }
 }

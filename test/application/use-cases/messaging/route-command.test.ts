@@ -20,6 +20,11 @@ describe("routeCommand", () => {
       action: "owner_read",
       normalizedText: "/admin"
     });
+    expect(routeCommand("/admin 1234")).toEqual({
+      kind: "admin_mode_activate",
+      action: "owner_read",
+      normalizedText: "/admin 1234"
+    });
   });
 
   it("routes start command to family read", () => {
@@ -38,15 +43,15 @@ describe("routeCommand", () => {
     });
   });
 
-  it("routes access review commands to owner read", () => {
+  it("routes access review commands to admin write", () => {
     expect(routeCommand("/approve actor-1")).toEqual({
       kind: "approve_access_request",
-      action: "owner_read",
+      action: "admin_write",
       normalizedText: "/approve actor-1"
     });
     expect(routeCommand("/reject actor-1")).toEqual({
       kind: "reject_access_request",
-      action: "owner_read",
+      action: "admin_write",
       normalizedText: "/reject actor-1"
     });
   });

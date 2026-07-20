@@ -39,4 +39,9 @@ export interface IdentityAccessRepositoryPort {
     providerChatId: string
   ): Promise<ChatContext | undefined>;
   findAdminSession(id: string): Promise<AdminSession | undefined>;
+  findActiveAdminSessionByActorAndChat(
+    actorId: string,
+    chatId: string,
+    now: Date
+  ): Promise<AdminSession | undefined>;
 }
