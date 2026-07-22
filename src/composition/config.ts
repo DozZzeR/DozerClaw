@@ -73,8 +73,10 @@ export interface MempalaceMemoryConfig {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
+  const environment = parseEnvironment(env.NODE_ENV);
+
   return {
-    environment: parseEnvironment(env.NODE_ENV),
+    environment,
     sqlite: {
       databasePath: env.DOZERCLAW_DB_PATH ?? "data/dozerclaw.sqlite"
     },
@@ -117,8 +119,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       tmpDirectory: env.DOZERCLAW_CODEX_TMP_DIR ?? "data/tmp/codex",
       ...(env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {})
     },
-    ...memoryConfig(env),
-    ...googleDriveConfig(env)
+    ...memoryConfig(env, environment),
+    ...googleDriveConfig(env, environment)
   };
 }
 
@@ -141,23 +143,27 @@ function adminConfig(env: NodeJS.ProcessEnv): { readonly admin?: AdminConfig } {
 }
 
 function googleDriveConfig(
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  environment: RuntimeEnvironment
 ): { readonly googleDrive?: GoogleDriveConfig } {
   const accessToken = env.DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN?.trim();
   const oauth = googleOAuthConfig(env);
   const uploadFolderId = env.DOZERCLAW_GOOGLE_DRIVE_UPLOAD_FOLDER_ID?.trim();
+  const apiBaseUrl =
+    env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
+    "https://www.googleapis.com";
 
   if (!accessToken && !oauth) {
     return {};
   }
 
+  validateGoogleDriveApiBaseUrl(apiBaseUrl, environment);
+
   return {
     googleDrive: {
       ...(accessToken ? { accessToken } : {}),
       ...(oauth ? { oauth } : {}),
-      apiBaseUrl:
-        env.DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL?.trim() ||
-        "https://www.googleapis.com",
+      apiBaseUrl,
       requestTimeoutMs: parsePositiveInteger(
         env.DOZERCLAW_GOOGLE_DRIVE_REQUEST_TIMEOUT_MS,
         30_000
@@ -215,20 +221,30 @@ function parseDriveFolderMap(
   }
 }
 
-function memoryConfig(env: NodeJS.ProcessEnv): { readonly memory?: MemoryConfig } {
-  const mempalace = mempalaceMemoryConfig(env);
+function memoryConfig(
+  env: NodeJS.ProcessEnv,
+  environment: RuntimeEnvironment
+): { readonly memory?: MemoryConfig } {
+  const mempalace = mempalaceMemoryConfig(env, environment);
 
   return mempalace ? { memory: { mempalace } } : {};
 }
 
 function mempalaceMemoryConfig(
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  environment: RuntimeEnvironment
 ): MempalaceMemoryConfig | undefined {
   const endpointUrl = env.DOZERCLAW_MEMPALACE_MCP_URL?.trim();
 
   if (!endpointUrl) {
     return undefined;
   }
+
+  validateMempalaceEndpointUrl(
+    endpointUrl,
+    env.DOZERCLAW_MEMPALACE_BEARER_TOKEN,
+    environment
+  );
 
   return {
     endpointUrl,
@@ -247,6 +263,54 @@ function mempalaceMemoryConfig(
       : {}),
     ...parseOptionalNumber("maxDistance", env.DOZERCLAW_MEMPALACE_MAX_DISTANCE)
   };
+}
+
+function validateGoogleDriveApiBaseUrl(
+  value: string,
+  environment: RuntimeEnvironment
+): void {
+  if (environment !== "production") {
+    return;
+  }
+
+  const url = parseUrl(value);
+
+  if (
+    !url ||
+    url.protocol !== "https:" ||
+    url.hostname !== "www.googleapis.com" ||
+    url.pathname.replace(/\/+$/u, "") !== ""
+  ) {
+    throw new Error(
+      "DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL must be https://www.googleapis.com in production."
+    );
+  }
+}
+
+function validateMempalaceEndpointUrl(
+  value: string,
+  bearerToken: string | undefined,
+  environment: RuntimeEnvironment
+): void {
+  if (environment !== "production" || !bearerToken) {
+    return;
+  }
+
+  const url = parseUrl(value);
+
+  if (!url || url.protocol !== "https:") {
+    throw new Error(
+      "DOZERCLAW_MEMPALACE_MCP_URL must use https when a bearer token is configured in production."
+    );
+  }
+}
+
+function parseUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseEnvironment(value: string | undefined): RuntimeEnvironment {

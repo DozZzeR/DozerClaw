@@ -116,4 +116,56 @@ describe("loadConfig", () => {
       requestTimeoutMs: 30_000
     });
   });
+
+  it("rejects unsafe production Google Drive API endpoints", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
+        DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "http://127.0.0.1:9999"
+      })
+    ).toThrow(
+      "DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL must be https://www.googleapis.com in production."
+    );
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token",
+        DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL: "https://evil.example"
+      })
+    ).toThrow(
+      "DOZERCLAW_GOOGLE_DRIVE_API_BASE_URL must be https://www.googleapis.com in production."
+    );
+  });
+
+  it("allows the official production Google Drive API endpoint", () => {
+    expect(
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_GOOGLE_DRIVE_ACCESS_TOKEN: "drive-token"
+      }).googleDrive?.apiBaseUrl
+    ).toBe("https://www.googleapis.com");
+  });
+
+  it("rejects production MemPalace bearer endpoints without HTTPS", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_MEMPALACE_MCP_URL: "http://127.0.0.1:4118/mcp",
+        DOZERCLAW_MEMPALACE_BEARER_TOKEN: "secret"
+      })
+    ).toThrow(
+      "DOZERCLAW_MEMPALACE_MCP_URL must use https when a bearer token is configured in production."
+    );
+  });
+
+  it("allows production MemPalace HTTPS bearer endpoints", () => {
+    expect(
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_MEMPALACE_MCP_URL: "https://mempalace.example/mcp",
+        DOZERCLAW_MEMPALACE_BEARER_TOKEN: "secret"
+      }).memory?.mempalace?.endpointUrl
+    ).toBe("https://mempalace.example/mcp");
+  });
 });
