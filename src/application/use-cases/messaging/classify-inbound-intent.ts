@@ -163,7 +163,9 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- `query`: the shortest useful search text, or `null` when the type and subject are enough.",
       "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
       "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
-      "- For Russian names, map `алексей`, `алексея`, `алёша`, `алеша` to `alexey`; map `вика`, `вики`, `виктория`, `vika`, `viki` to `victoria`.",
+      "- For Russian names, map `алексей`, `алексея`, `алёша`, `алеша` to `alexey`; map `вика`, `вики`, `виктория`, `vika`, `viki` to `victoria`; map `софия`, `софьи`, `sofia`, `sophia` to `sofia`.",
+      "- Family surname aliases: `Горяйнов`, `Goryainov`, and `Goryaynov` without a feminine ending refer to `alexey`; with initials `A`, `А`, `AV`, `АВ`, `A.V`, or `А.В` also use `alexey`.",
+      "- Feminine surname aliases: `Горяйнова`, `Goryainova`, or `Goryaynova` with initials `VA`, `ВА`, `V`, or `В` refer to `victoria`; with initials `SA`, `СА`, `S`, or `С` refer to `sofia`.",
       "- If the user asks for multiple documents in one message, set `requests` to one object per requested document. Each object may include `query`, `documentType`, and `subjectId`.",
       "- For single-document requests, set `requests` to `null`.",
       "- Do not use `find_document` for family memory facts; use `answer_from_memory` for memory recall."
@@ -221,7 +223,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       '{"kind":"find_document","query":"passport","documentType":"identity","subjectId":"max"}',
       '{"kind":"find_document","query":"train ticket","documentType":"travel","subjectId":"family"}',
-      '{"kind":"find_document","query":"паспорт алексея и личная карта вики","documentType":"identity","subjectId":null,"requests":[{"query":"паспорт","documentType":"identity","subjectId":"alexey"},{"query":"личная карта","documentType":"identity","subjectId":"victoria"}]}'
+      '{"kind":"find_document","query":"паспорт алексея и личная карта вики","documentType":"identity","subjectId":null,"requests":[{"query":"паспорт","documentType":"identity","subjectId":"alexey"},{"query":"личная карта","documentType":"identity","subjectId":"victoria"}]}',
+      '{"kind":"find_document","query":"личная карта Goryainova SA","documentType":"identity","subjectId":"sofia"}'
     ].join("\n"),
     "",
     "# document mutation examples",
@@ -617,7 +620,8 @@ function parseFindDocumentRequests(
 
 function normalizeDocumentSubjectId(value: string): string {
   const trimmed = value.trim();
-  const normalized = normalizeSubjectLookupKey(trimmed);
+  const context = normalizeSubjectLookupContext(trimmed);
+  const normalized = context.text;
 
   if (
     [
@@ -627,7 +631,8 @@ function normalizeDocumentSubjectId(value: string): string {
       "алексея",
       "алеша",
       "алёша"
-    ].includes(normalized)
+    ].includes(normalized) ||
+    looksLikeAlexeyDocumentSubjectAlias(context)
   ) {
     return "alexey";
   }
@@ -641,16 +646,84 @@ function normalizeDocumentSubjectId(value: string): string {
       "виктория",
       "вика",
       "вики"
-    ].includes(normalized)
+    ].includes(normalized) ||
+    looksLikeVictoriaDocumentSubjectAlias(context)
   ) {
     return "victoria";
+  }
+
+  if (
+    ["sofia", "sophia", "софия", "софьи"].includes(normalized) ||
+    looksLikeSofiaDocumentSubjectAlias(context)
+  ) {
+    return "sofia";
   }
 
   return trimmed;
 }
 
-function normalizeSubjectLookupKey(value: string): string {
-  return value.toLowerCase().replace(/ё/gu, "е");
+interface SubjectLookupContext {
+  readonly text: string;
+  readonly compactText: string;
+  readonly tokens: ReadonlySet<string>;
+}
+
+function normalizeSubjectLookupContext(value: string): SubjectLookupContext {
+  const text = value
+    .toLowerCase()
+    .replace(/ё/gu, "е")
+    .replace(/[^a-zа-я0-9]+/giu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+
+  return {
+    text,
+    compactText: text.replace(/\s+/gu, ""),
+    tokens: new Set(text.split(/\s+/u).filter(Boolean))
+  };
+}
+
+function looksLikeAlexeyDocumentSubjectAlias(
+  context: SubjectLookupContext
+): boolean {
+  return hasSubjectToken(context, ["горяйнов", "goryainov", "goryaynov"]);
+}
+
+function looksLikeVictoriaDocumentSubjectAlias(
+  context: SubjectLookupContext
+): boolean {
+  const hasFemaleSurname = hasSubjectToken(context, [
+    "горяйнова",
+    "goryainova",
+    "goryaynova"
+  ]);
+
+  return (
+    (hasFemaleSurname && hasSubjectToken(context, ["va", "v", "ва", "в"])) ||
+    /(goryainovava|goryaynovava|горяйновава)/u.test(context.compactText)
+  );
+}
+
+function looksLikeSofiaDocumentSubjectAlias(
+  context: SubjectLookupContext
+): boolean {
+  const hasFemaleSurname = hasSubjectToken(context, [
+    "горяйнова",
+    "goryainova",
+    "goryaynova"
+  ]);
+
+  return (
+    (hasFemaleSurname && hasSubjectToken(context, ["sa", "s", "са", "с"])) ||
+    /(goryainovasa|goryaynovasa|горяйноваса)/u.test(context.compactText)
+  );
+}
+
+function hasSubjectToken(
+  context: SubjectLookupContext,
+  values: readonly string[]
+): boolean {
+  return values.some((value) => context.tokens.has(value));
 }
 
 function optionalDocumentType(

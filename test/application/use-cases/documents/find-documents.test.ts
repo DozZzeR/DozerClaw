@@ -183,6 +183,76 @@ describe("FindDocumentsUseCase", () => {
     ]);
   });
 
+  it("uses family surname and initials aliases for fallback identity lookup", async () => {
+    const alexeyPassport = documentRecord({
+      id: "document-alexey-passport",
+      name: "паспорт Горяйнов А В.pdf",
+      url: "https://drive.google.com/file/d/alexey-passport",
+      documentType: "identity"
+    });
+    const victoriaId = documentRecord({
+      id: "document-victoria-id",
+      name: "GoryainovaVA-lična karta.pdf",
+      url: "https://drive.google.com/file/d/victoria-id",
+      documentType: "identity"
+    });
+    const sofiaId = documentRecord({
+      id: "document-sofia-id",
+      name: "GoryainovaSA-lična karta.pdf",
+      url: "https://drive.google.com/file/d/sofia-id",
+      documentType: "identity"
+    });
+    const repository = new QueueDocumentRepository([
+      [],
+      [alexeyPassport, victoriaId, sofiaId],
+      [],
+      [alexeyPassport, victoriaId, sofiaId],
+      [],
+      [alexeyPassport, victoriaId, sofiaId]
+    ]);
+    const useCase = new FindDocumentsUseCase({
+      repository,
+      limit: 5
+    });
+
+    await expect(
+      useCase.execute({
+        query: "паспорт Goryaynov A.V",
+        documentType: "identity"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Registered documents:",
+        "- паспорт Горяйнов А В.pdf (identity)",
+        "  https://drive.google.com/file/d/alexey-passport"
+      ].join("\n")
+    });
+    await expect(
+      useCase.execute({
+        query: "личная карта Горяйнова В",
+        documentType: "identity"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Registered documents:",
+        "- GoryainovaVA-lična karta.pdf (identity)",
+        "  https://drive.google.com/file/d/victoria-id"
+      ].join("\n")
+    });
+    await expect(
+      useCase.execute({
+        query: "lična karta Goryainova S",
+        documentType: "identity"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Registered documents:",
+        "- GoryainovaSA-lična karta.pdf (identity)",
+        "  https://drive.google.com/file/d/sofia-id"
+      ].join("\n")
+    });
+  });
+
   it("uses semantic document references and resolves them through SQLite", async () => {
     const semanticDocument = documentRecord({
       id: "document-semantic",

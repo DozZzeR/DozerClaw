@@ -68,6 +68,8 @@ describe("ModelInboundIntentClassifier", () => {
     });
     expect(model.request?.input).toContain("victoria");
     expect(model.request?.input).toContain("вики");
+    expect(model.request?.input).toContain("Goryainov");
+    expect(model.request?.input).toContain("Goryainova");
     expect(model.request?.input).toContain("requests");
     expect(model.request?.input).toContain("scan.jpg");
   });
@@ -243,6 +245,57 @@ describe("parseInboundIntent", () => {
           query: "личная карта",
           documentType: "identity",
           subjectId: "victoria"
+        }
+      ]
+    });
+  });
+
+  it("normalizes document subject ids from family surnames and initials", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "find_document",
+          query: "паспорт",
+          documentType: "identity",
+          subjectId: "Goryaynov A.V"
+        })
+      )
+    ).toEqual({
+      kind: "find_document",
+      query: "паспорт",
+      documentType: "identity",
+      subjectId: "alexey"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "find_document",
+          requests: [
+            {
+              query: "личная карта",
+              documentType: "identity",
+              subjectId: "Горяйнова В"
+            },
+            {
+              query: "личная карта",
+              documentType: "identity",
+              subjectId: "Goryainova SA"
+            }
+          ]
+        })
+      )
+    ).toEqual({
+      kind: "find_document",
+      requests: [
+        {
+          query: "личная карта",
+          documentType: "identity",
+          subjectId: "victoria"
+        },
+        {
+          query: "личная карта",
+          documentType: "identity",
+          subjectId: "sofia"
         }
       ]
     });

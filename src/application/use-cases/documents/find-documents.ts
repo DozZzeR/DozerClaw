@@ -247,6 +247,7 @@ function expandedQueryTokens(
   input: FindDocumentsInput
 ): ReadonlySet<string> {
   const tokens = new Set(normalizedTokens(query));
+  const aliasContext = normalizedAliasContext(query, input);
 
   if (input.documentType) {
     tokens.add(input.documentType);
@@ -255,6 +256,8 @@ function expandedQueryTokens(
   if (input.subjectId) {
     tokens.add(input.subjectId);
   }
+
+  addFamilySubjectAliasTokens(tokens, aliasContext);
 
   if (hasAny(tokens, ["паспорт", "ласпорт", "passport"])) {
     tokens.add("passport");
@@ -272,12 +275,22 @@ function expandedQueryTokens(
   if (hasAny(tokens, ["алексея", "алексей", "alexey"])) {
     tokens.add("alexey");
     tokens.add("горяйнов");
+    tokens.add("goryainov");
+    tokens.add("goryaynov");
   }
 
   if (hasAny(tokens, ["вики", "вика", "виктория", "victoria", "vika", "viki"])) {
     tokens.add("victoria");
     tokens.add("goryainova");
     tokens.add("goryainovava");
+    tokens.add("goryaynovava");
+  }
+
+  if (hasAny(tokens, ["софия", "софьи", "sofia", "sophia"])) {
+    tokens.add("sofia");
+    tokens.add("goryainova");
+    tokens.add("goryainovasa");
+    tokens.add("goryaynovasa");
   }
 
   return tokens;
@@ -289,6 +302,15 @@ function scoreFallbackDocument(
   input: FindDocumentsInput
 ): number {
   if (input.documentType && document.documentType !== input.documentType) {
+    return 0;
+  }
+
+  const requestedSubject = requestedFallbackSubject(queryTokens, input);
+
+  if (
+    requestedSubject &&
+    !fallbackDocumentMatchesSubject(document, requestedSubject)
+  ) {
     return 0;
   }
 
@@ -325,6 +347,128 @@ function scoreFallbackDocument(
   }
 
   return score;
+}
+
+interface NormalizedAliasContext {
+  readonly text: string;
+  readonly compactText: string;
+  readonly tokens: ReadonlySet<string>;
+}
+
+function normalizedAliasContext(
+  query: string,
+  input: FindDocumentsInput
+): NormalizedAliasContext {
+  const text = normalizeText([query, input.subjectId].filter(Boolean).join(" "));
+
+  return {
+    text,
+    compactText: text.replace(/\s+/gu, ""),
+    tokens: new Set(text.split(/\s+/u).filter(Boolean))
+  };
+}
+
+function addFamilySubjectAliasTokens(
+  tokens: Set<string>,
+  context: NormalizedAliasContext
+): void {
+  if (looksLikeAlexeyFamilyAlias(context)) {
+    tokens.add("alexey");
+    tokens.add("горяйнов");
+    tokens.add("goryainov");
+    tokens.add("goryaynov");
+  }
+
+  if (looksLikeVictoriaFamilyAlias(context)) {
+    tokens.add("victoria");
+    tokens.add("goryainovava");
+    tokens.add("goryaynovava");
+    tokens.add("горяйновава");
+  }
+
+  if (looksLikeSofiaFamilyAlias(context)) {
+    tokens.add("sofia");
+    tokens.add("goryainovasa");
+    tokens.add("goryaynovasa");
+    tokens.add("горяйноваса");
+  }
+}
+
+function looksLikeAlexeyFamilyAlias(context: NormalizedAliasContext): boolean {
+  return hasAny(context.tokens, ["горяйнов", "goryainov", "goryaynov"]);
+}
+
+function looksLikeVictoriaFamilyAlias(
+  context: NormalizedAliasContext
+): boolean {
+  const hasFemaleSurname = hasAny(context.tokens, [
+    "горяйнова",
+    "goryainova",
+    "goryaynova"
+  ]);
+
+  return (
+    hasAny(context.tokens, ["victoria", "vika", "viki", "виктория", "вика", "вики"]) ||
+    (hasFemaleSurname && hasAny(context.tokens, ["va", "v", "ва", "в"])) ||
+    /(goryainovava|goryaynovava|горяйновава)/u.test(context.compactText)
+  );
+}
+
+function looksLikeSofiaFamilyAlias(context: NormalizedAliasContext): boolean {
+  const hasFemaleSurname = hasAny(context.tokens, [
+    "горяйнова",
+    "goryainova",
+    "goryaynova"
+  ]);
+
+  return (
+    hasAny(context.tokens, ["sofia", "sophia", "софия", "софьи"]) ||
+    (hasFemaleSurname && hasAny(context.tokens, ["sa", "s", "са", "с"])) ||
+    /(goryainovasa|goryaynovasa|горяйноваса)/u.test(context.compactText)
+  );
+}
+
+function requestedFallbackSubject(
+  queryTokens: ReadonlySet<string>,
+  input: FindDocumentsInput
+): string | undefined {
+  if (input.subjectId) {
+    return input.subjectId;
+  }
+
+  const subjects = ["alexey", "victoria", "sofia"].filter((subject) =>
+    queryTokens.has(subject)
+  );
+
+  return subjects.length === 1 ? subjects[0] : undefined;
+}
+
+function fallbackDocumentMatchesSubject(
+  document: DocumentRecord,
+  subjectId: string
+): boolean {
+  if (document.subjectId) {
+    return document.subjectId === subjectId;
+  }
+
+  const context = normalizedAliasContext(
+    [document.name, document.externalId].join(" "),
+    {}
+  );
+
+  if (subjectId === "alexey") {
+    return looksLikeAlexeyFamilyAlias(context);
+  }
+
+  if (subjectId === "victoria") {
+    return looksLikeVictoriaFamilyAlias(context);
+  }
+
+  if (subjectId === "sofia") {
+    return looksLikeSofiaFamilyAlias(context);
+  }
+
+  return false;
 }
 
 function normalizedTokens(value: string): readonly string[] {
