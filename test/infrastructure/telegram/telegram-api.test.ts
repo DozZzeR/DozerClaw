@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   TelegramApiError,
@@ -6,6 +6,10 @@ import {
 } from "../../../src/infrastructure/providers/telegram/telegram-api.js";
 
 describe("TelegramBotApiClient", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("classifies getUpdates 409 conflicts", async () => {
     const client = new TelegramBotApiClient({
       token: "bot-token",
@@ -44,6 +48,38 @@ describe("TelegramBotApiClient", () => {
     await client.getUpdates();
 
     expect(requests[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("keeps getUpdates request timeout above the long polling timeout", async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    const client = new TelegramBotApiClient({
+      token: "bot-token",
+      requestTimeoutMs: 30_000,
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal as AbortSignal | undefined;
+
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener("abort", () => {
+            reject(new Error("aborted"));
+          });
+        });
+      }
+    });
+
+    const request = client.getUpdates({ timeoutSeconds: 30 });
+    const rejection = expect(request).rejects.toThrow(
+      "Telegram API getUpdates failed (fetch failed)"
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(requestSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(requestSignal?.aborted).toBe(true);
+    await rejection;
   });
 
   it("rejects file downloads when content-length exceeds the byte cap", async () => {

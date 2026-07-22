@@ -109,6 +109,8 @@ export class TelegramApiError extends Error {
 }
 
 export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
+  private static readonly getUpdatesTimeoutSafetyMarginMs = 5000;
+
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: TelegramBotApiClientOptions) {
@@ -126,7 +128,12 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
     };
     const response = await this.callTelegram<readonly TelegramUpdate[]>(
       "getUpdates",
-      body
+      body,
+      getUpdatesRequestTimeoutMs(
+        this.options.requestTimeoutMs,
+        input.timeoutSeconds,
+        TelegramBotApiClient.getUpdatesTimeoutSafetyMarginMs
+      )
     );
 
     return response;
@@ -170,7 +177,8 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
 
   private async callTelegram<TResponse = unknown>(
     method: string,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    requestTimeoutMs = this.options.requestTimeoutMs
   ): Promise<TResponse> {
     let response: Response;
 
@@ -185,7 +193,7 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
           },
           body: JSON.stringify(body)
         },
-        this.options.requestTimeoutMs,
+        requestTimeoutMs,
         `Telegram API ${method}`
       );
     } catch (error) {
@@ -220,6 +228,24 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
 
     return payload.result as TResponse;
   }
+}
+
+function getUpdatesRequestTimeoutMs(
+  configuredTimeoutMs: number | undefined,
+  pollingTimeoutSeconds: number | undefined,
+  safetyMarginMs: number
+): number | undefined {
+  if (pollingTimeoutSeconds === undefined) {
+    return configuredTimeoutMs;
+  }
+
+  const minimumTimeoutMs = pollingTimeoutSeconds * 1000 + safetyMarginMs;
+
+  if (configuredTimeoutMs === undefined) {
+    return minimumTimeoutMs;
+  }
+
+  return Math.max(configuredTimeoutMs, minimumTimeoutMs);
 }
 
 async function fetchWithTimeout(
