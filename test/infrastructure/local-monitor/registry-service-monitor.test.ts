@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RegistryServiceMonitor } from "../../../src/infrastructure/providers/local-monitor/registry-service-monitor.js";
 import type { ServiceRegistryRepositoryPort } from "../../../src/ports/service-registry-repository-port.js";
 
 describe("RegistryServiceMonitor", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("reports enabled manual services as unknown", async () => {
     const monitor = new RegistryServiceMonitor({
       repository: {
@@ -205,5 +209,163 @@ describe("RegistryServiceMonitor", () => {
         checkedAt: new Date("2026-07-03T10:01:00.000Z")
       }
     ]);
+  });
+
+  it("rejects unsafe HTTP health hosts without making a request", async () => {
+    const httpRequest = vi.fn(async () => ({ status: 200 }));
+    const monitor = new RegistryServiceMonitor({
+      repository: {
+        async saveMonitoredService() {},
+        async listEnabledMonitoredServices() {
+          return [
+            {
+              id: "service-metadata",
+              name: "metadata",
+              healthSourceKind: "http_health",
+              healthSourceConfig: {
+                url: "http://169.254.169.254/latest/meta-data"
+              },
+              enabled: true,
+              createdAt: new Date("2026-07-03T10:00:00.000Z"),
+              updatedAt: new Date("2026-07-03T10:00:00.000Z")
+            }
+          ];
+        }
+      } satisfies ServiceRegistryRepositoryPort,
+      httpRequest,
+      now: () => new Date("2026-07-03T10:01:00.000Z")
+    });
+
+    await expect(monitor.listServiceHealth()).resolves.toEqual([
+      {
+        name: "metadata",
+        status: "failed",
+        detail:
+          "unsafe http_health url: only loopback http(s) health URLs are allowed",
+        checkedAt: new Date("2026-07-03T10:01:00.000Z")
+      }
+    ]);
+    expect(httpRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe HTTP health schemes without making a request", async () => {
+    const httpRequest = vi.fn(async () => ({ status: 200 }));
+    const monitor = new RegistryServiceMonitor({
+      repository: {
+        async saveMonitoredService() {},
+        async listEnabledMonitoredServices() {
+          return [
+            {
+              id: "service-file",
+              name: "file",
+              healthSourceKind: "http_health",
+              healthSourceConfig: {
+                url: "file:///etc/passwd"
+              },
+              enabled: true,
+              createdAt: new Date("2026-07-03T10:00:00.000Z"),
+              updatedAt: new Date("2026-07-03T10:00:00.000Z")
+            }
+          ];
+        }
+      } satisfies ServiceRegistryRepositoryPort,
+      httpRequest,
+      now: () => new Date("2026-07-03T10:01:00.000Z")
+    });
+
+    await expect(monitor.listServiceHealth()).resolves.toEqual([
+      {
+        name: "file",
+        status: "failed",
+        detail:
+          "unsafe http_health url: only loopback http(s) health URLs are allowed",
+        checkedAt: new Date("2026-07-03T10:01:00.000Z")
+      }
+    ]);
+    expect(httpRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects local paths outside allowed roots without checking the path", async () => {
+    const pathExists = vi.fn(async () => true);
+    const monitor = new RegistryServiceMonitor({
+      repository: {
+        async saveMonitoredService() {},
+        async listEnabledMonitoredServices() {
+          return [
+            {
+              id: "service-passwd",
+              name: "passwd",
+              healthSourceKind: "local_path",
+              healthSourceConfig: {
+                path: "/etc/passwd"
+              },
+              enabled: true,
+              createdAt: new Date("2026-07-03T10:00:00.000Z"),
+              updatedAt: new Date("2026-07-03T10:00:00.000Z")
+            }
+          ];
+        }
+      } satisfies ServiceRegistryRepositoryPort,
+      pathExists,
+      now: () => new Date("2026-07-03T10:01:00.000Z")
+    });
+
+    await expect(monitor.listServiceHealth()).resolves.toEqual([
+      {
+        name: "passwd",
+        status: "failed",
+        detail: "unsafe local_path path: path is outside allowed roots",
+        checkedAt: new Date("2026-07-03T10:01:00.000Z")
+      }
+    ]);
+    expect(pathExists).not.toHaveBeenCalled();
+  });
+
+  it("does not follow redirects in default HTTP health requests", async () => {
+    const fetch = vi.fn(
+      async () =>
+        ({
+          status: 302
+        }) as Response
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const monitor = new RegistryServiceMonitor({
+      repository: {
+        async saveMonitoredService() {},
+        async listEnabledMonitoredServices() {
+          return [
+            {
+              id: "service-taskframe",
+              name: "taskframe",
+              healthSourceKind: "http_health",
+              healthSourceConfig: {
+                url: "http://127.0.0.1:3100/health"
+              },
+              enabled: true,
+              createdAt: new Date("2026-07-03T10:00:00.000Z"),
+              updatedAt: new Date("2026-07-03T10:00:00.000Z")
+            }
+          ];
+        }
+      } satisfies ServiceRegistryRepositoryPort,
+      now: () => new Date("2026-07-03T10:01:00.000Z")
+    });
+
+    await expect(monitor.listServiceHealth()).resolves.toEqual([
+      {
+        name: "taskframe",
+        status: "failed",
+        detail: "HTTP 302: http://127.0.0.1:3100/health",
+        checkedAt: new Date("2026-07-03T10:01:00.000Z")
+      }
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:3100/health",
+      expect.objectContaining({
+        method: "GET",
+        redirect: "manual"
+      })
+    );
   });
 });

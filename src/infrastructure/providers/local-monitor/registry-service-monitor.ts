@@ -1,4 +1,6 @@
 import { stat } from "node:fs/promises";
+import { isIP } from "node:net";
+import path from "node:path";
 
 import type { MonitoredService } from "../../../core/domain/service-health/monitored-service.js";
 import type {
@@ -9,6 +11,7 @@ import type { ServiceRegistryRepositoryPort } from "../../../ports/service-regis
 
 export interface RegistryServiceMonitorOptions {
   readonly repository: ServiceRegistryRepositoryPort;
+  readonly allowedLocalPathRoots?: readonly string[];
   readonly pathExists?: (path: string) => Promise<boolean>;
   readonly httpRequest?: (
     url: string,
@@ -27,7 +30,9 @@ export interface HttpHealthResponse {
 
 export class RegistryServiceMonitor implements ServiceMonitorPort {
   private static readonly defaultHttpTimeoutMs = 3000;
+  private static readonly defaultAllowedLocalPathRoots = ["/opt/services"];
 
+  private readonly allowedLocalPathRoots: readonly string[];
   private readonly now: () => Date;
   private readonly pathExists: (path: string) => Promise<boolean>;
   private readonly httpRequest: (
@@ -36,6 +41,9 @@ export class RegistryServiceMonitor implements ServiceMonitorPort {
   ) => Promise<HttpHealthResponse>;
 
   constructor(private readonly options: RegistryServiceMonitorOptions) {
+    this.allowedLocalPathRoots =
+      options.allowedLocalPathRoots ??
+      RegistryServiceMonitor.defaultAllowedLocalPathRoots;
     this.now = options.now ?? (() => new Date());
     this.pathExists = options.pathExists ?? defaultPathExists;
     this.httpRequest = options.httpRequest ?? defaultHttpRequest;
@@ -62,6 +70,15 @@ export class RegistryServiceMonitor implements ServiceMonitorPort {
         };
       }
 
+      if (!isAllowedLocalPath(path, this.allowedLocalPathRoots)) {
+        return {
+          name: service.name,
+          status: "failed",
+          detail: "unsafe local_path path: path is outside allowed roots",
+          checkedAt: this.now()
+        };
+      }
+
       const exists = await this.pathExists(path);
 
       return {
@@ -80,6 +97,16 @@ export class RegistryServiceMonitor implements ServiceMonitorPort {
           name: service.name,
           status: "failed",
           detail: "http_health service missing url config",
+          checkedAt: this.now()
+        };
+      }
+
+      if (!isAllowedHttpHealthUrl(url)) {
+        return {
+          name: service.name,
+          status: "failed",
+          detail:
+            "unsafe http_health url: only loopback http(s) health URLs are allowed",
           checkedAt: this.now()
         };
       }
@@ -139,6 +166,7 @@ async function defaultHttpRequest(
   try {
     const response = await fetch(url, {
       method: "GET",
+      redirect: "manual",
       signal: controller.signal
     });
 
@@ -147,5 +175,66 @@ async function defaultHttpRequest(
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+function isAllowedHttpHealthUrl(value: string): boolean {
+  const url = parseUrl(value);
+
+  if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    return false;
+  }
+
+  return isLoopbackHostname(url.hostname);
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[(.*)\]$/u, "$1");
+
+  if (normalized === "localhost" || normalized === "::1") {
+    return true;
+  }
+
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split(".");
+
+    return octets[0] === "127";
+  }
+
+  return false;
+}
+
+function isAllowedLocalPath(
+  value: string,
+  allowedRoots: readonly string[]
+): boolean {
+  if (!path.isAbsolute(value)) {
+    return false;
+  }
+
+  const resolvedPath = path.resolve(value);
+
+  return allowedRoots.some((root) => {
+    if (!path.isAbsolute(root)) {
+      return false;
+    }
+
+    const resolvedRoot = path.resolve(root);
+    const relative = path.relative(resolvedRoot, resolvedPath);
+
+    return (
+      relative === "" ||
+      (relative !== ".." &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative))
+    );
+  });
+}
+
+function parseUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
   }
 }

@@ -186,7 +186,7 @@ describe("buildApp", () => {
 
       expect(reply.chatId).toBe(bootstrap.chat.id);
       expect(reply.text).toContain(
-        `- local-service: failed (path missing: ${servicePath})`
+        "- local-service: failed (unsafe local_path path: path is outside allowed roots)"
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
