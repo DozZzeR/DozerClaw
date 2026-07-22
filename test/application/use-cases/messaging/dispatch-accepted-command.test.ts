@@ -2442,6 +2442,52 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("passes decomposed document requests from a model intent", async () => {
+    const documentLookup = new FakeDocumentLookup();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "find_document",
+        requests: [
+          {
+            query: "паспорт",
+            documentType: "identity",
+            subjectId: "alexey"
+          },
+          {
+            query: "личная карта",
+            documentType: "identity",
+            subjectId: "victoria"
+          }
+        ]
+      }),
+      documentLookup
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "найди паспорт алексея и личную карту вики"
+      }
+    });
+
+    expect(documentLookup.seenInput).toEqual({
+      requests: [
+        {
+          query: "паспорт",
+          documentType: "identity",
+          subjectId: "alexey"
+        },
+        {
+          query: "личная карта",
+          documentType: "identity",
+          subjectId: "victoria"
+        }
+      ]
+    });
+  });
+
   it("updates document metadata from a model intent", async () => {
     const documentManager = new FakeDocumentManager();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -3298,6 +3344,11 @@ class FakeIntentClassifier {
           readonly query?: string;
           readonly documentType?: DocumentType;
           readonly subjectId?: string;
+          readonly requests?: readonly {
+            readonly query?: string;
+            readonly documentType?: DocumentType;
+            readonly subjectId?: string;
+          }[];
         }
       | {
           readonly kind: "update_document";
@@ -3425,13 +3476,27 @@ class FakeDocumentRegistrar {
 
 class FakeDocumentLookup {
   seenInput:
-    | { query?: string; documentType?: DocumentType; subjectId?: string }
+    | {
+        query?: string;
+        documentType?: DocumentType;
+        subjectId?: string;
+        requests?: readonly {
+          readonly query?: string;
+          readonly documentType?: DocumentType;
+          readonly subjectId?: string;
+        }[];
+      }
     | undefined;
 
   async execute(input: {
     query?: string;
     documentType?: DocumentType;
     subjectId?: string;
+    requests?: readonly {
+      readonly query?: string;
+      readonly documentType?: DocumentType;
+      readonly subjectId?: string;
+    }[];
   }) {
     this.seenInput = input;
 

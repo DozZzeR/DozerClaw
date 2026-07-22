@@ -7,6 +7,12 @@ import type { DocumentType } from "../../../core/domain/documents/document-recor
 import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
 import type { ModelPort } from "../../../ports/model-port.js";
 
+export interface FindDocumentIntentRequest {
+  readonly query?: string;
+  readonly documentType?: DocumentType;
+  readonly subjectId?: string;
+}
+
 export type InboundIntent =
   | {
       readonly kind: "ask_clarification";
@@ -48,6 +54,7 @@ export type InboundIntent =
       readonly query?: string;
       readonly documentType?: DocumentType;
       readonly subjectId?: string;
+      readonly requests?: readonly FindDocumentIntentRequest[];
     }
   | {
       readonly kind: "update_document";
@@ -130,7 +137,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use `store_file` for uploaded attachments.",
       "- `destination`: use `google_drive` when the user asks for Google Drive, Drive, cloud document storage, or equivalent; use `local_inbox` when they ask to save locally; use `null` when unclear.",
       "- `documentType`: for document-like uploads choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when unclear.",
-      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
       "- The model only classifies. It must not claim the file was saved."
     ].join("\n"),
     "",
@@ -146,7 +153,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use `register_document` when the user asks to register, save, catalog, or remember an existing Drive document link or file id as a document record.",
       "- `externalIdOrUrl`: the Google Drive URL or external file id from the message.",
       "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
-      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
       "- Do not use `register_document` for generic Telegram attachments without a Drive link; use `store_file` for uploaded files."
     ].join("\n"),
     "",
@@ -155,7 +162,10 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use `find_document` when the user asks to show, find, retrieve, list, or look up registered documents.",
       "- `query`: the shortest useful search text, or `null` when the type and subject are enough.",
       "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
-      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when uncertain.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
+      "- For Russian names, map `алексей`, `алексея`, `алёша`, `алеша` to `alexey`; map `вика`, `вики`, `виктория`, `vika`, `viki` to `victoria`.",
+      "- If the user asks for multiple documents in one message, set `requests` to one object per requested document. Each object may include `query`, `documentType`, and `subjectId`.",
+      "- For single-document requests, set `requests` to `null`.",
       "- Do not use `find_document` for family memory facts; use `answer_from_memory` for memory recall."
     ].join("\n"),
     "",
@@ -210,7 +220,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "# find_document examples",
     [
       '{"kind":"find_document","query":"passport","documentType":"identity","subjectId":"max"}',
-      '{"kind":"find_document","query":"train ticket","documentType":"travel","subjectId":"family"}'
+      '{"kind":"find_document","query":"train ticket","documentType":"travel","subjectId":"family"}',
+      '{"kind":"find_document","query":"паспорт алексея и личная карта вики","documentType":"identity","subjectId":null,"requests":[{"query":"паспорт","documentType":"identity","subjectId":"alexey"},{"query":"личная карта","documentType":"identity","subjectId":"victoria"}]}'
     ].join("\n"),
     "",
     "# document mutation examples",
@@ -331,11 +342,14 @@ export function parseInboundIntent(text: string): InboundIntent {
     }
 
     if (parsed.kind === "find_document") {
+      const requests = parseFindDocumentRequests(parsed.requests);
+
       return {
         kind: "find_document",
         ...optionalTrimmedQuery(parsed.query),
         ...optionalDocumentType(parsed.documentType),
-        ...optionalTrimmedText("subjectId", parsed.subjectId)
+        ...optionalDocumentSubjectId(parsed.subjectId),
+        ...(requests.length > 0 ? { requests } : {})
       };
     }
 
@@ -489,6 +503,37 @@ const inboundIntentSchema = {
     },
     reason: {
       type: ["string", "null"]
+    },
+    requests: {
+      type: ["array", "null"],
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: ["string", "null"]
+          },
+          documentType: {
+            type: ["string", "null"],
+            enum: [
+              "identity",
+              "legal",
+              "health",
+              "finance",
+              "education",
+              "travel",
+              "home",
+              "reference",
+              "other",
+              null
+            ]
+          },
+          subjectId: {
+            type: ["string", "null"]
+          }
+        },
+        required: ["query", "documentType", "subjectId"]
+      }
     }
   },
   required: [
@@ -503,6 +548,7 @@ const inboundIntentSchema = {
     "documentType",
     "destination",
     "query",
+    "requests",
     "reason"
   ]
 };
@@ -533,6 +579,78 @@ function optionalTrimmedText(
   return {
     [key]: value.trim()
   };
+}
+
+function optionalDocumentSubjectId(
+  value: unknown
+): { readonly subjectId?: string } {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+
+  return {
+    subjectId: normalizeDocumentSubjectId(value)
+  };
+}
+
+function parseFindDocumentRequests(
+  value: unknown
+): readonly FindDocumentIntentRequest[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((request) => ({
+      ...optionalTrimmedQuery(request.query),
+      ...optionalDocumentType(request.documentType),
+      ...optionalDocumentSubjectId(request.subjectId)
+    }))
+    .filter(
+      (request) =>
+        Boolean(request.query) ||
+        Boolean(request.documentType) ||
+        Boolean(request.subjectId)
+    );
+}
+
+function normalizeDocumentSubjectId(value: string): string {
+  const trimmed = value.trim();
+  const normalized = normalizeSubjectLookupKey(trimmed);
+
+  if (
+    [
+      "alexey",
+      "alexei",
+      "алексей",
+      "алексея",
+      "алеша",
+      "алёша"
+    ].includes(normalized)
+  ) {
+    return "alexey";
+  }
+
+  if (
+    [
+      "victoria",
+      "viktoria",
+      "vika",
+      "viki",
+      "виктория",
+      "вика",
+      "вики"
+    ].includes(normalized)
+  ) {
+    return "victoria";
+  }
+
+  return trimmed;
+}
+
+function normalizeSubjectLookupKey(value: string): string {
+  return value.toLowerCase().replace(/ё/gu, "е");
 }
 
 function optionalDocumentType(

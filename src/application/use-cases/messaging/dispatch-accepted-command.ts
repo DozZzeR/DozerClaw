@@ -1687,7 +1687,8 @@ export class DispatchAcceptedCommandUseCase {
     const result = await this.dependencies.documentLookup.execute({
       ...(intent.query ? { query: intent.query } : {}),
       ...(intent.documentType ? { documentType: intent.documentType } : {}),
-      ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
+      ...(intent.subjectId ? { subjectId: intent.subjectId } : {}),
+      ...(intent.requests ? { requests: intent.requests } : {})
     });
 
     return {

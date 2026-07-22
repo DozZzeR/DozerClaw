@@ -833,6 +833,102 @@ describe("buildApp", () => {
     }
   });
 
+  it("finds multiple locally registered documents from decomposed model requests", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "find_document",
+        question: null,
+        summary: null,
+        externalIdOrUrl: null,
+        documentType: null,
+        subjectId: null,
+        query: "паспорт алексея и личная карта вики",
+        requests: [
+          {
+            query: "паспорт",
+            documentType: "identity",
+            subjectId: "alexey"
+          },
+          {
+            query: "личная карта",
+            documentType: "identity",
+            subjectId: "victoria"
+          }
+        ],
+        reason: null
+      })
+    ]);
+
+    try {
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteDocumentRepository(database);
+      await repository.saveDocument({
+        id: "document-alexey-passport",
+        provider: "google_drive",
+        externalId: "drive-alexey-passport",
+        name: "паспорт Горяйнов А В.pdf",
+        url: "https://drive.google.com/file/d/alexey-passport",
+        documentType: "identity",
+        status: "registered",
+        createdAt: new Date("2026-07-14T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:00:00.000Z")
+      });
+      await repository.saveDocument({
+        id: "document-victoria-id",
+        provider: "google_drive",
+        externalId: "drive-victoria-id",
+        name: "GoryainovaVA-lična karta.pdf",
+        url: "https://drive.google.com/file/d/victoria-id",
+        documentType: "identity",
+        status: "registered",
+        createdAt: new Date("2026-07-14T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-14T08:00:00.000Z")
+      });
+      database.close();
+
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-decomposed-document-lookup",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "найди паспорт алексея и личную карту вики",
+        attachments: [],
+        receivedAt: new Date("2026-07-14T08:30:00.000Z"),
+        now: new Date("2026-07-14T08:30:00.000Z")
+      });
+
+      expect(reply.text).toBe(
+        [
+          "Registered documents:",
+          "- паспорт Горяйнов А В.pdf (identity)",
+          "  https://drive.google.com/file/d/alexey-passport",
+          "- GoryainovaVA-lična karta.pdf (identity)",
+          "  https://drive.google.com/file/d/victoria-id"
+        ].join("\n")
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("updates and archives a local document through composition", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");

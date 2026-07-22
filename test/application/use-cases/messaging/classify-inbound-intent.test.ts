@@ -61,10 +61,14 @@ describe("ModelInboundIntentClassifier", () => {
           "documentType",
           "destination",
           "query",
+          "requests",
           "reason"
         ]
       }
     });
+    expect(model.request?.input).toContain("victoria");
+    expect(model.request?.input).toContain("вики");
+    expect(model.request?.input).toContain("requests");
     expect(model.request?.input).toContain("scan.jpg");
   });
 });
@@ -200,6 +204,47 @@ describe("parseInboundIntent", () => {
       query: "passport",
       documentType: "identity",
       subjectId: "max"
+    });
+  });
+
+  it("parses decomposed find document requests", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "find_document",
+          query: "паспорт алексея и личная карта вики",
+          documentType: "identity",
+          subjectId: null,
+          requests: [
+            {
+              query: "паспорт",
+              documentType: "identity",
+              subjectId: "alexey"
+            },
+            {
+              query: "личная карта",
+              documentType: "identity",
+              subjectId: "вики"
+            }
+          ]
+        })
+      )
+    ).toEqual({
+      kind: "find_document",
+      query: "паспорт алексея и личная карта вики",
+      documentType: "identity",
+      requests: [
+        {
+          query: "паспорт",
+          documentType: "identity",
+          subjectId: "alexey"
+        },
+        {
+          query: "личная карта",
+          documentType: "identity",
+          subjectId: "victoria"
+        }
+      ]
     });
   });
 

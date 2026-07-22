@@ -111,6 +111,78 @@ describe("FindDocumentsUseCase", () => {
     ]);
   });
 
+  it("merges decomposed document requests into one deduplicated reply", async () => {
+    const alexeyPassport = documentRecord({
+      id: "document-alexey-passport",
+      name: "паспорт Горяйнов А В.pdf",
+      url: "https://drive.google.com/file/d/alexey-passport",
+      documentType: "identity"
+    });
+    const victoriaId = documentRecord({
+      id: "document-victoria-id",
+      name: "GoryainovaVA-lična karta.pdf",
+      url: "https://drive.google.com/file/d/victoria-id",
+      documentType: "identity"
+    });
+    const repository = new QueueDocumentRepository([
+      [],
+      [alexeyPassport, victoriaId],
+      [],
+      [alexeyPassport, victoriaId]
+    ]);
+    const useCase = new FindDocumentsUseCase({
+      repository,
+      limit: 5
+    });
+
+    const result = await useCase.execute({
+      requests: [
+        {
+          query: "паспорт",
+          documentType: "identity",
+          subjectId: "alexey"
+        },
+        {
+          query: "личная карта",
+          documentType: "identity",
+          subjectId: "victoria"
+        }
+      ]
+    });
+
+    expect(result.text).toBe(
+      [
+        "Registered documents:",
+        "- паспорт Горяйнов А В.pdf (identity)",
+        "  https://drive.google.com/file/d/alexey-passport",
+        "- GoryainovaVA-lična karta.pdf (identity)",
+        "  https://drive.google.com/file/d/victoria-id"
+      ].join("\n")
+    );
+    expect(repository.seenInputs).toEqual([
+      {
+        query: "паспорт",
+        documentType: "identity",
+        subjectId: "alexey",
+        limit: 5
+      },
+      {
+        documentType: "identity",
+        limit: 25
+      },
+      {
+        query: "личная карта",
+        documentType: "identity",
+        subjectId: "victoria",
+        limit: 5
+      },
+      {
+        documentType: "identity",
+        limit: 25
+      }
+    ]);
+  });
+
   it("uses semantic document references and resolves them through SQLite", async () => {
     const semanticDocument = documentRecord({
       id: "document-semantic",

@@ -9,10 +9,14 @@ export interface FindDocumentsDependencies {
   readonly limit: number;
 }
 
-export interface FindDocumentsInput {
+export interface FindDocumentRequestInput {
   readonly query?: string;
   readonly documentType?: DocumentType;
   readonly subjectId?: string;
+}
+
+export interface FindDocumentsInput extends FindDocumentRequestInput {
+  readonly requests?: readonly FindDocumentRequestInput[];
 }
 
 export interface FindDocumentsResult {
@@ -23,6 +27,31 @@ export class FindDocumentsUseCase {
   constructor(private readonly dependencies: FindDocumentsDependencies) {}
 
   async execute(input: FindDocumentsInput): Promise<FindDocumentsResult> {
+    const matchedDocuments: DocumentRecord[] = [];
+
+    for (const request of expandFindDocumentRequests(input)) {
+      matchedDocuments.push(...(await this.findDocumentsForRequest(request)));
+    }
+
+    const documents = deduplicateDocuments(matchedDocuments).slice(
+      0,
+      this.dependencies.limit
+    );
+
+    if (documents.length === 0) {
+      return {
+        text: "No registered documents matched that request."
+      };
+    }
+
+    return {
+      text: formatDocumentsReply(documents)
+    };
+  }
+
+  private async findDocumentsForRequest(
+    input: FindDocumentRequestInput
+  ): Promise<readonly DocumentRecord[]> {
     const strictDocuments = await this.dependencies.repository.searchDocuments({
       ...(input.query ? { query: input.query } : {}),
       ...(input.documentType ? { documentType: input.documentType } : {}),
@@ -39,25 +68,11 @@ export class FindDocumentsUseCase {
     const resolvedDocuments =
       documents.length > 0 ? documents : fallbackDocuments;
 
-    if (resolvedDocuments.length === 0) {
-      return {
-        text: "No registered documents matched that request."
-      };
-    }
-
-    return {
-      text: [
-        "Registered documents:",
-        ...resolvedDocuments.flatMap((document) => [
-          `- ${document.name}${formatDocumentMetadata(document)}`,
-          `  ${document.url}`
-        ])
-      ].join("\n")
-    };
+    return resolvedDocuments;
   }
 
   private async searchSemanticDocuments(
-    input: FindDocumentsInput
+    input: FindDocumentRequestInput
   ): Promise<readonly DocumentRecord[]> {
     const query = input.query?.trim();
 
@@ -87,7 +102,7 @@ export class FindDocumentsUseCase {
   }
 
   private async searchFallbackDocuments(
-    input: FindDocumentsInput
+    input: FindDocumentRequestInput
   ): Promise<readonly DocumentRecord[]> {
     const query = input.query?.trim();
 
@@ -147,7 +162,7 @@ function deduplicateDocuments(
 
 function matchesStructuredFilters(
   document: DocumentRecord,
-  input: FindDocumentsInput
+  input: FindDocumentRequestInput
 ): boolean {
   if (input.documentType && document.documentType !== input.documentType) {
     return false;
@@ -158,6 +173,60 @@ function matchesStructuredFilters(
   }
 
   return document.status === "registered";
+}
+
+function expandFindDocumentRequests(
+  input: FindDocumentsInput
+): readonly FindDocumentRequestInput[] {
+  const requests = input.requests
+    ?.map((request) =>
+      buildFindDocumentRequest(
+        request.query,
+        request.documentType ?? input.documentType,
+        request.subjectId ?? input.subjectId
+      )
+    )
+    .filter(hasFindDocumentRequestFields);
+
+  if (requests && requests.length > 0) {
+    return requests;
+  }
+
+  return [
+    {
+      ...(input.query ? { query: input.query } : {}),
+      ...(input.documentType ? { documentType: input.documentType } : {}),
+      ...(input.subjectId ? { subjectId: input.subjectId } : {})
+    }
+  ];
+}
+
+function buildFindDocumentRequest(
+  query: string | undefined,
+  documentType: DocumentType | undefined,
+  subjectId: string | undefined
+): FindDocumentRequestInput {
+  return {
+    ...(query ? { query } : {}),
+    ...(documentType ? { documentType } : {}),
+    ...(subjectId ? { subjectId } : {})
+  };
+}
+
+function hasFindDocumentRequestFields(
+  request: FindDocumentRequestInput
+): boolean {
+  return Boolean(request.query || request.documentType || request.subjectId);
+}
+
+function formatDocumentsReply(documents: readonly DocumentRecord[]): string {
+  return [
+    "Registered documents:",
+    ...documents.flatMap((document) => [
+      `- ${document.name}${formatDocumentMetadata(document)}`,
+      `  ${document.url}`
+    ])
+  ].join("\n");
 }
 
 function formatDocumentMetadata(document: DocumentRecord): string {
@@ -205,7 +274,7 @@ function expandedQueryTokens(
     tokens.add("горяйнов");
   }
 
-  if (hasAny(tokens, ["вики", "вика", "виктория", "victoria"])) {
+  if (hasAny(tokens, ["вики", "вика", "виктория", "victoria", "vika", "viki"])) {
     tokens.add("victoria");
     tokens.add("goryainova");
     tokens.add("goryainovava");
