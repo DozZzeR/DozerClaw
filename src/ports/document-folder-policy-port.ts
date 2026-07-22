@@ -36,4 +36,6 @@ export interface DocumentUploadFolderChoice {
 export interface DocumentUploadFolderOption {
   readonly path: string;
   readonly folderId: string;
+  readonly documentTypes?: readonly string[];
+  readonly subjects?: readonly string[];
 }

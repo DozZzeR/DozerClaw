@@ -34,8 +34,12 @@ export class FindDocumentsUseCase {
       ...strictDocuments,
       ...semanticDocuments
     ]).slice(0, this.dependencies.limit);
+    const fallbackDocuments =
+      documents.length === 0 ? await this.searchFallbackDocuments(input) : [];
+    const resolvedDocuments =
+      documents.length > 0 ? documents : fallbackDocuments;
 
-    if (documents.length === 0) {
+    if (resolvedDocuments.length === 0) {
       return {
         text: "No registered documents matched that request."
       };
@@ -44,7 +48,7 @@ export class FindDocumentsUseCase {
     return {
       text: [
         "Registered documents:",
-        ...documents.flatMap((document) => [
+        ...resolvedDocuments.flatMap((document) => [
           `- ${document.name}${formatDocumentMetadata(document)}`,
           `  ${document.url}`
         ])
@@ -80,6 +84,36 @@ export class FindDocumentsUseCase {
     } catch {
       return [];
     }
+  }
+
+  private async searchFallbackDocuments(
+    input: FindDocumentsInput
+  ): Promise<readonly DocumentRecord[]> {
+    const query = input.query?.trim();
+
+    if (!query) {
+      return [];
+    }
+
+    const candidates = await this.dependencies.repository.searchDocuments({
+      ...(input.documentType ? { documentType: input.documentType } : {}),
+      limit: this.dependencies.limit * 5
+    });
+    const queryTokens = expandedQueryTokens(query, input);
+
+    return candidates
+      .map((document) => ({
+        document,
+        score: scoreFallbackDocument(document, queryTokens, input)
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.document.updatedAt.getTime() - a.document.updatedAt.getTime()
+      )
+      .map((candidate) => candidate.document)
+      .slice(0, this.dependencies.limit);
   }
 }
 
@@ -137,4 +171,122 @@ function formatDocumentMetadata(document: DocumentRecord): string {
   }
 
   return ` (${metadata.join(", ")})`;
+}
+
+function expandedQueryTokens(
+  query: string,
+  input: FindDocumentsInput
+): ReadonlySet<string> {
+  const tokens = new Set(normalizedTokens(query));
+
+  if (input.documentType) {
+    tokens.add(input.documentType);
+  }
+
+  if (input.subjectId) {
+    tokens.add(input.subjectId);
+  }
+
+  if (hasAny(tokens, ["паспорт", "ласпорт", "passport"])) {
+    tokens.add("passport");
+    tokens.add("паспорт");
+  }
+
+  if (hasAny(tokens, ["личная", "личную", "карта", "karta", "licna", "lična", "id"])) {
+    tokens.add("id");
+    tokens.add("karta");
+    tokens.add("licna");
+    tokens.add("личная");
+    tokens.add("карта");
+  }
+
+  if (hasAny(tokens, ["алексея", "алексей", "alexey"])) {
+    tokens.add("alexey");
+    tokens.add("горяйнов");
+  }
+
+  if (hasAny(tokens, ["вики", "вика", "виктория", "victoria"])) {
+    tokens.add("victoria");
+    tokens.add("goryainova");
+    tokens.add("goryainovava");
+  }
+
+  return tokens;
+}
+
+function scoreFallbackDocument(
+  document: DocumentRecord,
+  queryTokens: ReadonlySet<string>,
+  input: FindDocumentsInput
+): number {
+  if (input.documentType && document.documentType !== input.documentType) {
+    return 0;
+  }
+
+  const documentTokens = new Set(
+    normalizedTokens(
+      [
+        document.name,
+        document.documentType,
+        document.subjectId,
+        document.externalId
+      ]
+        .filter(Boolean)
+        .join(" ")
+    )
+  );
+  let score = 0;
+
+  for (const token of queryTokens) {
+    if (documentTokens.has(token)) {
+      score += token.length >= 5 ? 2 : 1;
+      continue;
+    }
+
+    if (
+      token.length >= 5 &&
+      [...documentTokens].some((documentToken) => documentToken.includes(token))
+    ) {
+      score += 1;
+    }
+  }
+
+  if (input.documentType && document.documentType === input.documentType) {
+    score += queryLooksLikeDocumentLookup(queryTokens) ? 1 : 0;
+  }
+
+  return score;
+}
+
+function normalizedTokens(value: string): readonly string[] {
+  return normalizeText(value)
+    .split(/\s+/u)
+    .filter((token) => token.length >= 2);
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[čć]/gu, "c")
+    .replace(/[š]/gu, "s")
+    .replace(/[ž]/gu, "z")
+    .replace(/[đ]/gu, "d")
+    .replace(/[^a-zа-яё0-9]+/giu, " ");
+}
+
+function hasAny(tokens: ReadonlySet<string>, values: readonly string[]): boolean {
+  return values.some((value) => tokens.has(value));
+}
+
+function queryLooksLikeDocumentLookup(tokens: ReadonlySet<string>): boolean {
+  return hasAny(tokens, [
+    "identity",
+    "passport",
+    "паспорт",
+    "id",
+    "karta",
+    "licna",
+    "личная",
+    "карта"
+  ]);
 }

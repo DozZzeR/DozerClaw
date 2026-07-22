@@ -176,11 +176,15 @@ describe("JsonDocumentFolderPolicy", () => {
       options: [
         {
           path: "01_Личные_документы/Alexey",
-          folderId: "folder-personal-alexey"
+          folderId: "folder-personal-alexey",
+          documentTypes: ["passport", "id_card"],
+          subjects: ["alexey"]
         },
         {
           path: "01_Личные_документы/Victoria",
-          folderId: "folder-personal-victoria"
+          folderId: "folder-personal-victoria",
+          documentTypes: ["passport", "id_card"],
+          subjects: ["victoria"]
         }
       ]
     });

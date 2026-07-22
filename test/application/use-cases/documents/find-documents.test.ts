@@ -63,6 +63,54 @@ describe("FindDocumentsUseCase", () => {
     });
   });
 
+  it("falls back to useful token matching for broad Russian identity requests", async () => {
+    const repository = new QueueDocumentRepository([
+      [],
+      [
+        documentRecord({
+          id: "document-alexey-passport",
+          name: "паспорт Горяйнов А В.pdf",
+          url: "https://drive.google.com/file/d/alexey-passport",
+          documentType: "identity"
+        }),
+        documentRecord({
+          id: "document-victoria-id",
+          name: "GoryainovaVA-lična karta.pdf",
+          url: "https://drive.google.com/file/d/victoria-id",
+          documentType: "identity"
+        })
+      ]
+    ]);
+    const useCase = new FindDocumentsUseCase({
+      repository,
+      limit: 5
+    });
+
+    const result = await useCase.execute({
+      query: "паспорт алексея и личная карта вики",
+      documentType: "identity"
+    });
+
+    expect(result.text).toContain("Registered documents:");
+    expect(result.text).toContain("- паспорт Горяйнов А В.pdf (identity)");
+    expect(result.text).toContain(
+      "https://drive.google.com/file/d/alexey-passport"
+    );
+    expect(result.text).toContain("- GoryainovaVA-lična karta.pdf (identity)");
+    expect(result.text).toContain("https://drive.google.com/file/d/victoria-id");
+    expect(repository.seenInputs).toEqual([
+      {
+        query: "паспорт алексея и личная карта вики",
+        documentType: "identity",
+        limit: 5
+      },
+      {
+        documentType: "identity",
+        limit: 25
+      }
+    ]);
+  });
+
   it("uses semantic document references and resolves them through SQLite", async () => {
     const semanticDocument = documentRecord({
       id: "document-semantic",
@@ -139,6 +187,30 @@ describe("FindDocumentsUseCase", () => {
   });
 });
 
+class QueueDocumentRepository implements DocumentRepositoryPort {
+  readonly seenInputs: SearchDocumentsInput[] = [];
+
+  constructor(private readonly results: readonly (readonly DocumentRecord[])[]) {}
+
+  async saveDocument(): Promise<void> {
+    throw new Error("should not save");
+  }
+
+  async findDocumentByExternalId(): Promise<DocumentRecord | undefined> {
+    throw new Error("should not find by external id");
+  }
+
+  async findDocumentsByIds(): Promise<readonly DocumentRecord[]> {
+    throw new Error("should not find by ids");
+  }
+
+  async searchDocuments(input: SearchDocumentsInput): Promise<readonly DocumentRecord[]> {
+    this.seenInputs.push(input);
+
+    return this.results[this.seenInputs.length - 1] ?? [];
+  }
+}
+
 class RecordingDocumentRepository implements DocumentRepositoryPort {
   seenInput: SearchDocumentsInput | undefined;
   seenIds: readonly string[] | undefined;
@@ -201,10 +273,8 @@ class ThrowingSemanticMemory {
 }
 
 function documentRecord(
-  overrides: Pick<
-    DocumentRecord,
-    "id" | "name" | "url" | "documentType" | "subjectId"
-  >
+  overrides: Pick<DocumentRecord, "id" | "name" | "url"> &
+    Partial<Pick<DocumentRecord, "documentType" | "subjectId">>
 ): DocumentRecord {
   return {
     id: overrides.id,

@@ -28,6 +28,8 @@ interface FlatPolicyEntry {
   readonly childOptions: readonly {
     readonly path: string;
     readonly folderId: string;
+    readonly documentTypes: readonly string[];
+    readonly subjects: readonly string[];
   }[];
   readonly searchText: string;
   readonly phrases: readonly string[];
@@ -103,7 +105,9 @@ function flattenEntries(
             ? [
                 {
                   path: child.path,
-                  folderId: child.driveFolderId
+                  folderId: child.driveFolderId,
+                  documentTypes: normalizeList(child.documentTypes),
+                  subjects: normalizeList(child.subjects)
                 }
               ]
             : []

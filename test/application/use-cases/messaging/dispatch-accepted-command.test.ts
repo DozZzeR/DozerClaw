@@ -299,11 +299,15 @@ describe("DispatchAcceptedCommandUseCase", () => {
         options: [
           {
             path: "01_Личные_документы/Alexey",
-            folderId: "folder-alexey"
+            folderId: "folder-alexey",
+            documentTypes: ["passport", "id_card"],
+            subjects: ["alexey"]
           },
           {
             path: "01_Личные_документы/Victoria",
-            folderId: "folder-victoria"
+            folderId: "folder-victoria",
+            documentTypes: ["passport", "id_card"],
+            subjects: ["victoria"]
           }
         ],
         documentType: "identity"
@@ -320,7 +324,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
         route: route("family_message"),
         context: {
           ...acceptedContext,
-          text: "1",
+          text: "2",
           attachments: []
         }
       })
@@ -328,7 +332,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       chatId: "chat-owner",
       text: [
         "Uploaded 1 document(s) to Google Drive:",
-        "- passport.pdf (identity)",
+        "- passport.pdf (identity, subject: victoria)",
         "  https://drive.google.com/file/d/drive-passport"
       ].join("\n")
     });
@@ -338,8 +342,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
         mimeType: "application/pdf",
         bytes: Buffer.from("AQID", "base64")
       },
-      targetFolderId: "folder-alexey",
-      documentType: "identity"
+      targetFolderId: "folder-victoria",
+      documentType: "identity",
+      subjectId: "victoria"
     });
     expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
@@ -4221,11 +4226,15 @@ class FakeFolderChoiceDocumentAttachmentStore extends FakeDocumentAttachmentStor
         options: [
           {
             path: "01_Личные_документы/Alexey",
-            folderId: "folder-alexey"
+            folderId: "folder-alexey",
+            documentTypes: ["passport", "id_card"],
+            subjects: ["alexey"]
           },
           {
             path: "01_Личные_документы/Victoria",
-            folderId: "folder-victoria"
+            folderId: "folder-victoria",
+            documentTypes: ["passport", "id_card"],
+            subjects: ["victoria"]
           }
         ],
         documentType: "identity" as const

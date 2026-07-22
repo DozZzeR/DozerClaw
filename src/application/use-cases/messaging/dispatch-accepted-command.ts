@@ -37,6 +37,7 @@ import type { PendingFamilyFactArchiveDecision } from "../../../ports/state-repo
 import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDestinationDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
+import type { DocumentUploadFolderOption } from "../../../ports/document-folder-policy-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
 import type {
@@ -1904,10 +1905,7 @@ export class DispatchAcceptedCommandUseCase {
         bytes: Buffer.from(pending.action.attachment.bytesBase64, "base64")
       },
       targetFolderId: decision.folderId,
-      ...(pending.action.documentType
-        ? { documentType: pending.action.documentType }
-        : {}),
-      ...(pending.action.subjectId ? { subjectId: pending.action.subjectId } : {})
+      ...selectedUploadFolderMetadata(pending.action, decision)
     });
     await this.dependencies.pendingDocumentDecisions?.clearByChatId(
       context.chat.id
@@ -2632,6 +2630,43 @@ function parseSkipDocumentMetadata(text: string): boolean {
     /\b(skip|cancel|nothing|later)\b/.test(normalized) ||
     /пропусти|отмена|ничего|потом|не надо/.test(normalized)
   );
+}
+
+function selectedUploadFolderMetadata(
+  action: Extract<
+    PendingDocumentDecision["action"],
+    { readonly kind: "choose_upload_folder" }
+  >,
+  decision: DocumentUploadFolderOption
+): {
+  readonly documentType?: DocumentType;
+  readonly subjectId?: string;
+} {
+  const documentType = action.documentType ?? documentTypeFromFolderOption(decision);
+  const subjectId = action.subjectId ?? subjectIdFromFolderOption(decision);
+
+  return {
+    ...(documentType ? { documentType } : {}),
+    ...(subjectId ? { subjectId } : {})
+  };
+}
+
+function documentTypeFromFolderOption(
+  option: DocumentUploadFolderOption
+): DocumentType | undefined {
+  return option.documentTypes?.some((type) =>
+    ["passport", "id_card", "driver_license", "birth_certificate"].includes(type)
+  )
+    ? "identity"
+    : undefined;
+}
+
+function subjectIdFromFolderOption(
+  option: DocumentUploadFolderOption
+): string | undefined {
+  const [subject] = option.subjects ?? [];
+
+  return subject;
 }
 
 function isUploadedDocumentMetadataDecision(
