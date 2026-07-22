@@ -25,7 +25,7 @@ describe("runDevGoogleDriveSmoke", () => {
     const lines: string[] = [];
     const app = new FakeSmokeApp([
       "Куда сохранить файл: dozerclaw-drive-smoke.txt?",
-      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/file/d/drive-smoke-id/view",
+      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/open?id=drive-smoke-id",
       "Updated document: dozerclaw-drive-smoke.txt (identity, subject: max)",
       "Готово: переместил dozerclaw-drive-smoke.txt в Family Documents/max/identity."
     ]);
@@ -58,7 +58,7 @@ describe("runDevGoogleDriveSmoke", () => {
     const lines: string[] = [];
     const app = new FakeSmokeApp([
       "Куда сохранить файл: dozerclaw-drive-smoke.txt?",
-      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/file/d/drive-smoke-id/view",
+      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/open?id=drive-smoke-id",
       "Updated document: dozerclaw-drive-smoke.txt (identity, subject: max)",
       "Готово: переместил dozerclaw-drive-smoke.txt в Family Documents/max/identity."
     ]);
@@ -83,7 +83,7 @@ describe("runDevGoogleDriveSmoke", () => {
     const lines: string[] = [];
     const app = new FakeSmokeApp([
       "Куда сохранить файл: dozerclaw-drive-smoke.txt?",
-      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/file/d/drive-smoke-id/view",
+      "Uploaded 1 document(s) to Google Drive:\n- dozerclaw-drive-smoke.txt\n  https://drive.google.com/open?id=drive-smoke-id",
       "Updated document: dozerclaw-drive-smoke.txt (identity, subject: max)",
       "Готово: переместил dozerclaw-drive-smoke.txt в Family Documents/max/identity."
     ]);

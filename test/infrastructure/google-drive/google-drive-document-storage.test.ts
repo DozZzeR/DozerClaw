@@ -18,7 +18,7 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     ).resolves.toEqual({
       externalId: "drive-abc",
       name: "Passport.pdf",
-      url: "https://drive.google.com/file/d/drive-abc/view"
+      url: "https://drive.google.com/open?id=drive-abc"
     });
     expect(fetch.requests).toEqual([
       expect.objectContaining({
@@ -96,7 +96,7 @@ describe("GoogleDriveDocumentStorageProvider", () => {
     ).resolves.toEqual({
       externalId: "drive-abc",
       name: "Passport.pdf",
-      url: "https://drive.google.com/file/d/drive-abc/view"
+      url: "https://drive.google.com/open?id=drive-abc"
     });
     expect(fetch.requests[0]).toMatchObject({
       url: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2Cname%2CwebViewLink&supportsAllDrives=true",

@@ -37,7 +37,7 @@ describe("FindDocumentsUseCase", () => {
       text: [
         "Registered documents:",
         "- Max Passport.pdf (identity, subject: max)",
-        "  https://drive.google.com/file/d/passport"
+        "  https://drive.google.com/open?id=passport"
       ].join("\n")
     });
     expect(repository.seenInput).toEqual({
@@ -47,6 +47,38 @@ describe("FindDocumentsUseCase", () => {
       limit: 5
     });
   });
+
+  it("formats Google Drive lookup links from external ids instead of stored web preview urls", async () => {
+    const repository = new RecordingDocumentRepository([
+      documentRecord({
+        id: "document-1",
+        externalId: "drive-passport",
+        name: "Passport.pdf",
+        url: "https://drive.google.com/file/d/drive-passport/view?usp=drivesdk",
+        documentType: "identity",
+        subjectId: "max"
+      })
+    ]);
+    const useCase = new FindDocumentsUseCase({
+      repository,
+      limit: 5
+    });
+
+    await expect(
+      useCase.execute({
+        query: "passport",
+        documentType: "identity",
+        subjectId: "max"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Registered documents:",
+        "- Passport.pdf (identity, subject: max)",
+        "  https://drive.google.com/open?id=drive-passport"
+      ].join("\n")
+    });
+  });
+
 
   it("returns a clear empty state", async () => {
     const useCase = new FindDocumentsUseCase({
@@ -94,10 +126,10 @@ describe("FindDocumentsUseCase", () => {
     expect(result.text).toContain("Registered documents:");
     expect(result.text).toContain("- паспорт Горяйнов А В.pdf (identity)");
     expect(result.text).toContain(
-      "https://drive.google.com/file/d/alexey-passport"
+      "https://drive.google.com/open?id=alexey-passport"
     );
     expect(result.text).toContain("- GoryainovaVA-lična karta.pdf (identity)");
-    expect(result.text).toContain("https://drive.google.com/file/d/victoria-id");
+    expect(result.text).toContain("https://drive.google.com/open?id=victoria-id");
     expect(repository.seenInputs).toEqual([
       {
         query: "паспорт алексея и личная карта вики",
@@ -154,9 +186,9 @@ describe("FindDocumentsUseCase", () => {
       [
         "Registered documents:",
         "- паспорт Горяйнов А В.pdf (identity)",
-        "  https://drive.google.com/file/d/alexey-passport",
+        "  https://drive.google.com/open?id=alexey-passport",
         "- GoryainovaVA-lična karta.pdf (identity)",
-        "  https://drive.google.com/file/d/victoria-id"
+        "  https://drive.google.com/open?id=victoria-id"
       ].join("\n")
     );
     expect(repository.seenInputs).toEqual([
@@ -224,7 +256,7 @@ describe("FindDocumentsUseCase", () => {
       text: [
         "Registered documents:",
         "- паспорт Горяйнов А В.pdf (identity)",
-        "  https://drive.google.com/file/d/alexey-passport"
+        "  https://drive.google.com/open?id=alexey-passport"
       ].join("\n")
     });
     await expect(
@@ -236,7 +268,7 @@ describe("FindDocumentsUseCase", () => {
       text: [
         "Registered documents:",
         "- GoryainovaVA-lična karta.pdf (identity)",
-        "  https://drive.google.com/file/d/victoria-id"
+        "  https://drive.google.com/open?id=victoria-id"
       ].join("\n")
     });
     await expect(
@@ -248,7 +280,7 @@ describe("FindDocumentsUseCase", () => {
       text: [
         "Registered documents:",
         "- GoryainovaSA-lična karta.pdf (identity)",
-        "  https://drive.google.com/file/d/sofia-id"
+        "  https://drive.google.com/open?id=sofia-id"
       ].join("\n")
     });
   });
@@ -288,7 +320,7 @@ describe("FindDocumentsUseCase", () => {
       text: [
         "Registered documents:",
         "- Serbian ID card.pdf (identity, subject: alex)",
-        "  https://drive.google.com/file/d/serbian-id"
+        "  https://drive.google.com/open?id=serbian-id"
       ].join("\n")
     });
     expect(repository.seenInput).toEqual({
@@ -322,7 +354,7 @@ describe("FindDocumentsUseCase", () => {
       text: [
         "Registered documents:",
         "- Passport.pdf (identity, subject: max)",
-        "  https://drive.google.com/file/d/passport"
+        "  https://drive.google.com/open?id=passport"
       ].join("\n")
     });
     expect(repository.seenIds).toBeUndefined();
@@ -416,12 +448,12 @@ class ThrowingSemanticMemory {
 
 function documentRecord(
   overrides: Pick<DocumentRecord, "id" | "name" | "url"> &
-    Partial<Pick<DocumentRecord, "documentType" | "subjectId">>
+    Partial<Pick<DocumentRecord, "externalId" | "documentType" | "subjectId">>
 ): DocumentRecord {
   return {
     id: overrides.id,
     provider: "google_drive",
-    externalId: overrides.id,
+    externalId: overrides.externalId ?? parseDriveFileId(overrides.url) ?? overrides.id,
     name: overrides.name,
     url: overrides.url,
     ...(overrides.documentType
@@ -432,4 +464,10 @@ function documentRecord(
     createdAt: new Date("2026-07-14T08:00:00.000Z"),
     updatedAt: new Date("2026-07-14T08:00:00.000Z")
   };
+}
+
+function parseDriveFileId(url: string): string | undefined {
+  const match = url.match(/\/file\/d\/([^/]+)/u);
+
+  return match?.[1];
 }

@@ -825,7 +825,7 @@ describe("buildApp", () => {
         [
           "Registered documents:",
           "- Max Passport.pdf (identity, subject: max)",
-          "  https://drive.google.com/file/d/passport"
+          "  https://drive.google.com/open?id=drive-passport"
         ].join("\n")
       );
     } finally {
@@ -919,9 +919,9 @@ describe("buildApp", () => {
         [
           "Registered documents:",
           "- паспорт Горяйнов А В.pdf (identity)",
-          "  https://drive.google.com/file/d/alexey-passport",
+          "  https://drive.google.com/open?id=drive-alexey-passport",
           "- GoryainovaVA-lična karta.pdf (identity)",
-          "  https://drive.google.com/file/d/victoria-id"
+          "  https://drive.google.com/open?id=drive-victoria-id"
         ].join("\n")
       );
     } finally {

@@ -162,10 +162,20 @@ function buildDefaultCleanup(
 
 function parseDriveFileIdFromReplies(replies: readonly string[]): string | undefined {
   for (const reply of replies) {
-    const match = reply.match(/https:\/\/drive\.google\.com\/file\/d\/([^/\s]+)/u);
+    const filePathMatch = reply.match(
+      /https:\/\/drive\.google\.com\/file\/d\/([^/\s]+)/u
+    );
 
-    if (match?.[1]) {
-      return decodeURIComponent(match[1]);
+    if (filePathMatch?.[1]) {
+      return decodeURIComponent(filePathMatch[1]);
+    }
+
+    const openIdMatch = reply.match(
+      /https:\/\/drive\.google\.com\/open\?id=([^&\s]+)/u
+    );
+
+    if (openIdMatch?.[1]) {
+      return decodeURIComponent(openIdMatch[1]);
     }
   }
 

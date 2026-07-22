@@ -89,7 +89,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     return {
       externalId: metadata.id,
       name: metadata.name,
-      url: metadata.webViewLink
+      url: formatGoogleDriveFileUrl(metadata.id)
     };
   }
 
@@ -128,7 +128,7 @@ export class GoogleDriveDocumentStorageProvider implements DocumentStoragePort {
     return {
       externalId: metadata.id,
       name: metadata.name,
-      url: metadata.webViewLink
+      url: formatGoogleDriveFileUrl(metadata.id)
     };
   }
 
@@ -358,4 +358,8 @@ function parseDriveFileId(input: string): string {
   }
 
   return trimmed;
+}
+
+function formatGoogleDriveFileUrl(fileId: string): string {
+  return `https://drive.google.com/open?id=${encodeURIComponent(fileId)}`;
 }

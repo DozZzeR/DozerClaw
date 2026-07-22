@@ -224,9 +224,17 @@ function formatDocumentsReply(documents: readonly DocumentRecord[]): string {
     "Registered documents:",
     ...documents.flatMap((document) => [
       `- ${document.name}${formatDocumentMetadata(document)}`,
-      `  ${document.url}`
+      `  ${formatDocumentUrl(document)}`
     ])
   ].join("\n");
+}
+
+function formatDocumentUrl(document: DocumentRecord): string {
+  if (document.provider === "google_drive") {
+    return `https://drive.google.com/open?id=${encodeURIComponent(document.externalId)}`;
+  }
+
+  return document.url;
 }
 
 function formatDocumentMetadata(document: DocumentRecord): string {
