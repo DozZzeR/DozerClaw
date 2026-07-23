@@ -87,7 +87,9 @@ export class SingularityPlanningProvider implements PlanningPort {
       );
     }
 
-    const task = toPlanningItem((await response.json()) as unknown);
+    const task = toPlanningItem((await response.json()) as unknown, {
+      includeInactive: true
+    });
 
     if (!task) {
       throw new Error("Singularity task create response was incomplete");
@@ -124,7 +126,9 @@ export class SingularityPlanningProvider implements PlanningPort {
       );
     }
 
-    const task = toPlanningItem((await response.json()) as unknown);
+    const task = toPlanningItem((await response.json()) as unknown, {
+      includeInactive: true
+    });
 
     if (!task) {
       throw new Error("Singularity task complete response was incomplete");
@@ -252,7 +256,10 @@ function toSearchablePlanningItem(
   };
 }
 
-function toPlanningItem(value: unknown): PlanningItem | undefined {
+function toPlanningItem(
+  value: unknown,
+  options: { readonly includeInactive?: boolean } = {}
+): PlanningItem | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -260,7 +267,7 @@ function toPlanningItem(value: unknown): PlanningItem | undefined {
   const id = stringField(value, "id");
   const title = stringField(value, "title");
 
-  if (!id || !title || isInactiveTask(value)) {
+  if (!id || !title || (!options.includeInactive && isInactiveTask(value))) {
     return undefined;
   }
 
@@ -268,12 +275,18 @@ function toPlanningItem(value: unknown): PlanningItem | undefined {
     id,
     title,
     status:
-      stringField(value, "start") || stringField(value, "deadline")
+      isCompletedTask(value)
+        ? "completed"
+        : stringField(value, "start") || stringField(value, "deadline")
         ? "scheduled"
         : "open"
   };
 
   return item;
+}
+
+function isCompletedTask(task: Record<string, unknown>): boolean {
+  return positiveNumberField(task, "complete") || positiveNumberField(task, "checked");
 }
 
 function isInactiveTask(task: Record<string, unknown>): boolean {

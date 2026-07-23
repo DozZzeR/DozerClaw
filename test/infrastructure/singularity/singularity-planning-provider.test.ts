@@ -141,7 +141,9 @@ describe("SingularityPlanningProvider", () => {
   });
 
   it("completes tasks", async () => {
-    const fetcher = new RecordingFetch(task({ id: "T-1", title: "Pack bags" }));
+    const fetcher = new RecordingFetch(
+      task({ id: "T-1", title: "Pack bags", complete: 1, checked: 1 })
+    );
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
@@ -158,7 +160,7 @@ describe("SingularityPlanningProvider", () => {
       item: {
         id: "T-1",
         title: "Pack bags",
-        status: "open"
+        status: "completed"
       }
     });
     expect(fetcher.requests[0]).toEqual(
