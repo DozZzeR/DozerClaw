@@ -40,6 +40,10 @@ export type InboundIntent =
       readonly query: string;
     }
   | {
+      readonly kind: "query_planning";
+      readonly query: string;
+    }
+  | {
       readonly kind: "archive_fact";
       readonly query: string;
     }
@@ -233,6 +237,21 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       '{"kind":"archive_document","query":"old passport"}'
     ].join("\n"),
     "",
+    "# query_planning field rules",
+    [
+      "- Use `query_planning` when the user asks about external tasks, reminders, checklists, plans, or planning state.",
+      "- `query`: the shortest useful planning search text.",
+      "- Use `query_planning` only for read-only lookup. Do not create, update, complete, or delete planning records.",
+      "- Do not use `query_planning` for registered documents; use `find_document` for documents.",
+      "- Do not use `query_planning` for family facts or notes; use `answer_from_memory` for memory recall."
+    ].join("\n"),
+    "",
+    "# query_planning examples",
+    [
+      '{"kind":"query_planning","query":"open family tasks"}',
+      '{"kind":"query_planning","query":"reminders for this week"}'
+    ].join("\n"),
+    "",
     "# Input",
     JSON.stringify({
       text: input.text,
@@ -314,6 +333,22 @@ export function parseInboundIntent(text: string): InboundIntent {
       return {
         kind: "answer_from_memory",
         query: parsed.query.trim()
+      };
+    }
+
+    if (parsed.kind === "query_planning" && typeof parsed.query === "string") {
+      const query = parsed.query.trim();
+
+      if (query) {
+        return {
+          kind: "query_planning",
+          query
+        };
+      }
+
+      return {
+        kind: "unsupported",
+        reason: "Unable to classify message intent."
       };
     }
 
@@ -448,6 +483,7 @@ const inboundIntentSchema = {
         "record_fact",
         "create_reminder",
         "answer_from_memory",
+        "query_planning",
         "archive_fact",
         "register_document",
         "find_document",

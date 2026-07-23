@@ -71,6 +71,7 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("Goryainov");
     expect(model.request?.input).toContain("Goryainova");
     expect(model.request?.input).toContain("requests");
+    expect(model.request?.input).toContain("query_planning");
     expect(model.request?.input).toContain("scan.jpg");
   });
 });
@@ -170,6 +171,34 @@ describe("parseInboundIntent", () => {
     ).toEqual({
       kind: "archive_fact",
       query: "Max tea"
+    });
+  });
+
+  it("parses planning query intent", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "query_planning",
+          query: " open family tasks "
+        })
+      )
+    ).toEqual({
+      kind: "query_planning",
+      query: "open family tasks"
+    });
+  });
+
+  it("rejects planning query intent without a query", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "query_planning",
+          query: " "
+        })
+      )
+    ).toEqual({
+      kind: "unsupported",
+      reason: "Unable to classify message intent."
     });
   });
 

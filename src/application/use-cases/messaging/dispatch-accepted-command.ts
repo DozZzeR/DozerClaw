@@ -131,6 +131,10 @@ export interface FamilyFactRecall {
   execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
 }
 
+export interface PlanningStateQuery {
+  execute(input: { readonly query: string }): Promise<{ readonly text: string }>;
+}
+
 export interface FamilyFactArchiver {
   execute(input: ArchiveFamilyFactInput): Promise<ArchiveFamilyFactResult>;
 }
@@ -263,6 +267,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly documentSearchDescriptionRecorder?: DocumentSearchDescriptionRecorder;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
+  readonly planningQuery?: PlanningStateQuery;
   readonly familyFactArchiver?: FamilyFactArchiver;
   readonly documentRegistrar?: DocumentRegistrar;
   readonly documentLookup?: DocumentLookup;
@@ -620,6 +625,27 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const result = await this.dependencies.familyFactRecall.execute({
+      query: intent.query
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async queryPlanningState(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "query_planning" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.planningQuery) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.planningQuery.execute({
       query: intent.query
     });
 
@@ -1278,6 +1304,10 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "answer_from_memory") {
       return this.recallFamilyFacts(context, intent);
+    }
+
+    if (intent.kind === "query_planning") {
+      return this.queryPlanningState(context, intent);
     }
 
     if (intent.kind === "archive_fact") {

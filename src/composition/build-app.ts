@@ -19,6 +19,7 @@ import { ManageDocumentRecordUseCase } from "../application/use-cases/documents/
 import { RecordDocumentSearchDescriptionUseCase } from "../application/use-cases/documents/record-document-search-description.js";
 import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases/documents/store-message-document-attachments.js";
 import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
+import { QueryPlanningStateUseCase } from "../application/use-cases/planning/query-planning-state.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -52,6 +53,7 @@ import type { AttachmentDownloadPort } from "../ports/attachment-download-port.j
 import type { DocumentFolderPolicyPort } from "../ports/document-folder-policy-port.js";
 import type { DocumentStoragePort } from "../ports/document-storage-port.js";
 import type { ModelPort } from "../ports/model-port.js";
+import type { PlanningPort } from "../ports/planning-port.js";
 import type { AdminSecretVerifierPort } from "../ports/admin-secret-verifier-port.js";
 
 export interface BuildAppOptions {
@@ -60,6 +62,7 @@ export interface BuildAppOptions {
   readonly documentStorage?: DocumentStoragePort;
   readonly documentFolderPolicy?: DocumentFolderPolicyPort;
   readonly modelProvider?: ModelPort;
+  readonly planningProvider?: PlanningPort;
 }
 
 export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
@@ -238,6 +241,11 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const subjectAliasManager = new ManageSubjectAliasesUseCase({
     repository: subjectAliasRepository
   });
+  const planningQuery = options.planningProvider
+    ? new QueryPlanningStateUseCase({
+        planning: options.planningProvider
+      })
+    : undefined;
   const intentClassifier = modelProvider
     ? new ModelInboundIntentClassifier({
         model: modelProvider
@@ -260,6 +268,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,
+    ...(planningQuery ? { planningQuery } : {}),
     familyFactArchiver,
     ...(documentRegistrar ? { documentRegistrar } : {}),
     documentLookup,

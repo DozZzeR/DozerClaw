@@ -19,6 +19,10 @@ import type {
   ModelPort,
   ModelTextRequest
 } from "../../src/ports/model-port.js";
+import type {
+  PlanningPort,
+  PlanningQuery
+} from "../../src/ports/planning-port.js";
 
 describe("buildApp", () => {
   it("composes the application and exposes startup diagnostics", async () => {
@@ -421,6 +425,52 @@ describe("buildApp", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it("queries planning state through an injected provider", async () => {
+    const planningProvider = new RecordingPlanningProvider();
+    const app = buildApp({
+      env: {
+        DOZERCLAW_DB_PATH: ":memory:",
+        NODE_ENV: "test"
+      },
+      modelProvider: new QueueModelProvider([
+        JSON.stringify({
+          kind: "query_planning",
+          question: null,
+          summary: null,
+          query: "open family tasks",
+          reason: null
+        })
+      ]),
+      planningProvider
+    });
+    await app.bootstrapOwnerIdentity({
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      providerChatId: "tg-owner",
+      displayName: "Owner"
+    });
+
+    const reply = await app.handleNormalizedInboundMessage({
+      messageId: "message-planning",
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      providerChatId: "tg-owner",
+      chatKind: "owner_private",
+      displayName: "Owner",
+      text: "what tasks are open?",
+      attachments: [],
+      receivedAt: new Date("2026-07-23T10:00:00.000Z"),
+      now: new Date("2026-07-23T10:00:00.000Z")
+    });
+
+    expect(reply.text).toBe(
+      "Planning items:\n- [open] Renew Max passport (task-1)"
+    );
+    expect(planningProvider.seenQuery).toEqual({
+      text: "open family tasks"
+    });
   });
 
   it("archives a stored family fact through composition", async () => {
@@ -1617,6 +1667,24 @@ class FakeDocumentStorage implements DocumentStoragePort {
 
   async deleteDocument(): Promise<void> {
     throw new Error("should not delete document");
+  }
+}
+
+class RecordingPlanningProvider implements PlanningPort {
+  seenQuery: PlanningQuery | undefined;
+
+  async queryPlanningState(query: PlanningQuery) {
+    this.seenQuery = query;
+
+    return {
+      items: [
+        {
+          id: "task-1",
+          title: "Renew Max passport",
+          status: "open"
+        }
+      ]
+    };
   }
 }
 

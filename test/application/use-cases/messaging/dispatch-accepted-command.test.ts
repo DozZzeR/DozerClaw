@@ -2488,6 +2488,54 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("queries planning state from a model intent", async () => {
+    const planningQuery = new FakePlanningQuery();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "query_planning",
+        query: "family tasks"
+      }),
+      planningQuery
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "what tasks are open?"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Planning items:\n- [open] Renew Max passport (task-1)"
+    });
+    expect(planningQuery.seenInput).toEqual({
+      query: "family tasks"
+    });
+  });
+
+  it("reports planning query intent as not connected without a planning dependency", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "query_planning",
+        query: "family tasks"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "I understood this as query_planning, but that action is not connected yet."
+    });
+  });
+
   it("updates document metadata from a model intent", async () => {
     const documentManager = new FakeDocumentManager();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -3332,6 +3380,7 @@ class FakeIntentClassifier {
           readonly subjectId?: string;
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
+      | { readonly kind: "query_planning"; readonly query: string }
       | { readonly kind: "archive_fact"; readonly query: string }
       | {
           readonly kind: "register_document";
@@ -3506,6 +3555,18 @@ class FakeDocumentLookup {
         "- Max Passport.pdf (identity, subject: max)",
         "  https://drive.google.com/file/d/passport"
       ].join("\n")
+    };
+  }
+}
+
+class FakePlanningQuery {
+  seenInput: { query: string } | undefined;
+
+  async execute(input: { query: string }) {
+    this.seenInput = input;
+
+    return {
+      text: "Planning items:\n- [open] Renew Max passport (task-1)"
     };
   }
 }
