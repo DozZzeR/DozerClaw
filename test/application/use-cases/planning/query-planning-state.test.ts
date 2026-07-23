@@ -31,7 +31,25 @@ describe("QueryPlanningStateUseCase", () => {
         "- [blocked] Book dentist (task-2)"
       ].join("\n")
     });
-    expect(planning.seenQuery).toEqual({ text: "family tasks" });
+    expect(planning.seenQuery).toEqual({
+      text: "family tasks",
+      scope: "family"
+    });
+  });
+
+  it("forwards an explicit personal planning scope", async () => {
+    const planning = new RecordingPlanningProvider([]);
+    const useCase = new QueryPlanningStateUseCase({ planning });
+
+    await useCase.execute({
+      query: "my tasks",
+      scope: "personal"
+    });
+
+    expect(planning.seenQuery).toEqual({
+      text: "my tasks",
+      scope: "personal"
+    });
   });
 
   it("returns a clear empty state", async () => {

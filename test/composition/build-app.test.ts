@@ -469,7 +469,8 @@ describe("buildApp", () => {
       "Planning items:\n- [open] Renew Max passport (task-1)"
     );
     expect(planningProvider.seenQuery).toEqual({
-      text: "open family tasks"
+      text: "open family tasks",
+      scope: "family"
     });
   });
 

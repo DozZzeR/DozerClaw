@@ -1,7 +1,11 @@
-import type { PlanningPort } from "../../../ports/planning-port.js";
+import type {
+  PlanningPort,
+  PlanningScope
+} from "../../../ports/planning-port.js";
 
 export interface QueryPlanningStateInput {
   readonly query: string;
+  readonly scope?: PlanningScope;
 }
 
 export interface QueryPlanningStateResult {
@@ -17,7 +21,8 @@ export class QueryPlanningStateUseCase {
     input: QueryPlanningStateInput
   ): Promise<QueryPlanningStateResult> {
     const result = await this.dependencies.planning.queryPlanningState({
-      text: input.query
+      text: input.query,
+      scope: input.scope ?? "family"
     });
 
     if (result.items.length === 0) {

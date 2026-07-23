@@ -18,7 +18,7 @@ describe("SingularityPlanningProvider", () => {
     });
 
     await expect(
-      provider.queryPlanningState({ text: "" })
+      provider.queryPlanningState({ text: "", scope: "family" })
     ).resolves.toEqual({
       items: [
         {
@@ -63,7 +63,7 @@ describe("SingularityPlanningProvider", () => {
     });
 
     await expect(
-      provider.queryPlanningState({ text: "max family" })
+      provider.queryPlanningState({ text: "max family", scope: "family" })
     ).resolves.toEqual({
       items: [
         {
@@ -86,7 +86,7 @@ describe("SingularityPlanningProvider", () => {
     });
 
     await expect(
-      provider.queryPlanningState({ text: "tasks" })
+      provider.queryPlanningState({ text: "tasks", scope: "family" })
     ).rejects.toThrow("Singularity task list request failed: HTTP 401");
   });
 
@@ -98,7 +98,7 @@ describe("SingularityPlanningProvider", () => {
     });
 
     await expect(
-      provider.queryPlanningState({ text: "tasks" })
+      provider.queryPlanningState({ text: "tasks", scope: "family" })
     ).rejects.toThrow("Singularity task list response was incomplete");
   });
 
@@ -112,7 +112,7 @@ describe("SingularityPlanningProvider", () => {
     });
 
     await expect(
-      provider.queryPlanningState({ text: "tasks" })
+      provider.queryPlanningState({ text: "tasks", scope: "family" })
     ).rejects.toThrow("Singularity request timed out after 1ms");
     expect(fetcher.requests[0]?.signal).toBeInstanceOf(AbortSignal);
   });
