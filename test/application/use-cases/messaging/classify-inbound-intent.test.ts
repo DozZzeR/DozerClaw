@@ -61,6 +61,10 @@ describe("ModelInboundIntentClassifier", () => {
           "documentType",
           "destination",
           "query",
+          "action",
+          "title",
+          "date",
+          "checklistItems",
           "requests",
           "reason"
         ]
@@ -72,6 +76,7 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("Goryainova");
     expect(model.request?.input).toContain("requests");
     expect(model.request?.input).toContain("query_planning");
+    expect(model.request?.input).toContain("manage_planning");
     expect(model.request?.input).toContain("scan.jpg");
   });
 });
@@ -157,6 +162,40 @@ describe("parseInboundIntent", () => {
       )
     ).toEqual({
       kind: "diagnose_subject_aliases"
+    });
+  });
+
+  it("parses planning mutation intents", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "manage_planning",
+          action: "create",
+          title: " Pack bags ",
+          date: "2026-07-24",
+          checklistItems: [" passports ", "", "tickets"]
+        })
+      )
+    ).toEqual({
+      kind: "manage_planning",
+      action: "create",
+      title: "Pack bags",
+      date: "2026-07-24",
+      checklistItems: ["passports", "tickets"]
+    });
+
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "manage_planning",
+          action: "complete",
+          query: " pack bags "
+        })
+      )
+    ).toEqual({
+      kind: "manage_planning",
+      action: "complete",
+      query: "pack bags"
     });
   });
 

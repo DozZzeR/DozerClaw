@@ -44,6 +44,14 @@ export type InboundIntent =
       readonly query: string;
     }
   | {
+      readonly kind: "manage_planning";
+      readonly action: "create" | "complete";
+      readonly title?: string;
+      readonly query?: string;
+      readonly date?: string;
+      readonly checklistItems?: readonly string[];
+    }
+  | {
       readonly kind: "archive_fact";
       readonly query: string;
     }
@@ -241,7 +249,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `query_planning` when the user asks about external tasks, reminders, checklists, plans, or planning state.",
       "- `query`: the shortest useful planning search text.",
-      "- Use `query_planning` only for read-only lookup. Do not create, update, complete, or delete planning records.",
+      "- Use `query_planning` only for read-only lookup.",
       "- Do not use `query_planning` for registered documents; use `find_document` for documents.",
       "- Do not use `query_planning` for family facts or notes; use `answer_from_memory` for memory recall."
     ].join("\n"),
@@ -250,6 +258,24 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       '{"kind":"query_planning","query":"open family tasks"}',
       '{"kind":"query_planning","query":"reminders for this week"}'
+    ].join("\n"),
+    "",
+    "# manage_planning field rules",
+    [
+      "- Use `manage_planning` when the user asks to create, add, complete, close, or mark done a task or planning item.",
+      "- `action`: `create` for new tasks; `complete` for closing or marking a task done.",
+      "- `title`: required for create; the task title without scheduling/checklist words.",
+      "- `query`: required for complete; the shortest useful text to find the target task.",
+      "- `date`: optional YYYY-MM-DD date when the user gives a concrete task day. Use null if no exact date is given.",
+      "- `checklistItems`: optional list of checklist rows to add under a newly created task.",
+      "- Do not use `manage_planning` for family facts, documents, or memory notes."
+    ].join("\n"),
+    "",
+    "# manage_planning examples",
+    [
+      '{"kind":"manage_planning","action":"create","title":"Buy groceries","date":null,"checklistItems":["milk","bread"],"query":null}',
+      '{"kind":"manage_planning","action":"create","title":"Book dentist","date":"2026-07-24","checklistItems":[],"query":null}',
+      '{"kind":"manage_planning","action":"complete","title":null,"date":null,"checklistItems":[],"query":"Buy groceries"}'
     ].join("\n"),
     "",
     "# Input",
@@ -350,6 +376,38 @@ export function parseInboundIntent(text: string): InboundIntent {
         kind: "unsupported",
         reason: "Unable to classify message intent."
       };
+    }
+
+    if (
+      parsed.kind === "manage_planning" &&
+      (parsed.action === "create" || parsed.action === "complete")
+    ) {
+      const title =
+        typeof parsed.title === "string" && parsed.title.trim()
+          ? parsed.title.trim()
+          : undefined;
+      const query =
+        typeof parsed.query === "string" && parsed.query.trim()
+          ? parsed.query.trim()
+          : undefined;
+
+      if (parsed.action === "create" && title) {
+        return {
+          kind: "manage_planning",
+          action: "create",
+          title,
+          ...optionalIsoDate(parsed.date),
+          ...optionalStringArray("checklistItems", parsed.checklistItems)
+        };
+      }
+
+      if (parsed.action === "complete" && query) {
+        return {
+          kind: "manage_planning",
+          action: "complete",
+          query
+        };
+      }
     }
 
     if (parsed.kind === "archive_fact" && typeof parsed.query === "string") {
@@ -484,6 +542,7 @@ const inboundIntentSchema = {
         "create_reminder",
         "answer_from_memory",
         "query_planning",
+        "manage_planning",
         "archive_fact",
         "register_document",
         "find_document",
@@ -540,6 +599,22 @@ const inboundIntentSchema = {
     query: {
       type: ["string", "null"]
     },
+    action: {
+      type: ["string", "null"],
+      enum: ["create", "complete", null]
+    },
+    title: {
+      type: ["string", "null"]
+    },
+    date: {
+      type: ["string", "null"]
+    },
+    checklistItems: {
+      type: ["array", "null"],
+      items: {
+        type: "string"
+      }
+    },
     reason: {
       type: ["string", "null"]
     },
@@ -587,6 +662,10 @@ const inboundIntentSchema = {
     "documentType",
     "destination",
     "query",
+    "action",
+    "title",
+    "date",
+    "checklistItems",
     "requests",
     "reason"
   ]
@@ -618,6 +697,32 @@ function optionalTrimmedText(
   return {
     [key]: value.trim()
   };
+}
+
+function optionalIsoDate(value: unknown): { readonly date?: string } {
+  if (typeof value !== "string") {
+    return {};
+  }
+
+  const date = value.trim();
+
+  return /^\d{4}-\d{2}-\d{2}$/u.test(date) ? { date } : {};
+}
+
+function optionalStringArray(
+  key: "checklistItems",
+  value: unknown
+): { readonly checklistItems?: readonly string[] } {
+  if (!Array.isArray(value)) {
+    return {};
+  }
+
+  const items = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return items.length > 0 ? { [key]: items } : {};
 }
 
 function optionalDocumentSubjectId(

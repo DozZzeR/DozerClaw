@@ -59,6 +59,121 @@ describe("SingularityPlanningProvider", () => {
     );
   });
 
+  it("passes today date range query parameters", async () => {
+    const fetcher = new RecordingFetch({ tasks: [] });
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
+      fetch: fetcher.fetch
+    });
+
+    await provider.queryPlanningState({
+      text: "today",
+      scope: "family",
+      startDateFrom: "2026-07-23",
+      startDateTo: "2026-07-23"
+    });
+
+    expect(fetcher.requests[0]?.url).toBe(
+      "https://api.singularity-app.com/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false&startDateFrom=2026-07-23&startDateTo=2026-07-23&projectId=P-family"
+    );
+  });
+
+  it("creates family tasks and checklist items", async () => {
+    const fetcher = new RecordingFetchSequence([
+      task({ id: "T-created", title: "Pack bags" }),
+      { id: "C-1", parent: "T-created", title: "passports", done: false },
+      { id: "C-2", parent: "T-created", title: "tickets", done: false }
+    ]);
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.createPlanningTask({
+        title: "Pack bags",
+        scope: "family",
+        date: "2026-07-24",
+        checklistItems: ["passports", "tickets"]
+      })
+    ).resolves.toEqual({
+      item: {
+        id: "T-created",
+        title: "Pack bags",
+        status: "open"
+      }
+    });
+    expect(fetcher.requests).toEqual([
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/task",
+        method: "POST",
+        body: {
+          title: "Pack bags",
+          projectId: "P-family",
+          start: "2026-07-24"
+        }
+      }),
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/checklist-item",
+        method: "POST",
+        body: {
+          parent: "T-created",
+          title: "passports",
+          done: false,
+          parentOrder: 1
+        }
+      }),
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/checklist-item",
+        method: "POST",
+        body: {
+          parent: "T-created",
+          title: "tickets",
+          done: false,
+          parentOrder: 2
+        }
+      })
+    ]);
+  });
+
+  it("completes tasks", async () => {
+    const fetcher = new RecordingFetch(task({ id: "T-1", title: "Pack bags" }));
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.completePlanningTask({
+        taskId: "T-1",
+        scope: "family",
+        completedAt: new Date("2026-07-23T10:00:00.000Z")
+      })
+    ).resolves.toEqual({
+      item: {
+        id: "T-1",
+        title: "Pack bags",
+        status: "open"
+      }
+    });
+    expect(fetcher.requests[0]).toEqual(
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/task/T-1",
+        method: "PATCH",
+        body: {
+          complete: 1,
+          checked: 1,
+          completeLast: "2026-07-23T10:00:00.000Z"
+        }
+      })
+    );
+  });
+
   it("filters inactive, note-only, and locally non-matching tasks", async () => {
     const fetcher = new RecordingFetch({
       tasks: [
@@ -157,6 +272,7 @@ class RecordingFetch {
     readonly method: string;
     readonly authorization: string;
     readonly signal: AbortSignal | undefined;
+    readonly body: unknown;
   }> = [];
 
   constructor(
@@ -172,7 +288,8 @@ class RecordingFetch {
       url: input.toString(),
       method: init?.method ?? "GET",
       authorization: String(new Headers(init?.headers).get("authorization")),
-      signal: init?.signal ?? undefined
+      signal: init?.signal ?? undefined,
+      body: parseBody(init?.body)
     });
 
     if (this.hangUntilAbort) {
@@ -185,4 +302,32 @@ class RecordingFetch {
 
     return new Response(JSON.stringify(this.responseBody));
   };
+}
+
+class RecordingFetchSequence {
+  readonly requests: RecordingFetch["requests"] = [];
+  private readonly responseQueue: unknown[];
+
+  constructor(responseBodies: readonly unknown[]) {
+    this.responseQueue = [...responseBodies];
+  }
+
+  fetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1]
+  ) => {
+    this.requests.push({
+      url: input.toString(),
+      method: init?.method ?? "GET",
+      authorization: String(new Headers(init?.headers).get("authorization")),
+      signal: init?.signal ?? undefined,
+      body: parseBody(init?.body)
+    });
+
+    return new Response(JSON.stringify(this.responseQueue.shift()));
+  };
+}
+
+function parseBody(body: unknown): unknown {
+  return typeof body === "string" ? JSON.parse(body) : undefined;
 }

@@ -20,6 +20,7 @@ import { RecordDocumentSearchDescriptionUseCase } from "../application/use-cases
 import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases/documents/store-message-document-attachments.js";
 import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
 import { QueryPlanningStateUseCase } from "../application/use-cases/planning/query-planning-state.js";
+import { ManagePlanningTaskUseCase } from "../application/use-cases/planning/manage-planning-task.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -252,6 +253,11 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         planning: planningProvider
       })
     : undefined;
+  const planningTaskManager = planningProvider
+    ? new ManagePlanningTaskUseCase({
+        planning: planningProvider
+      })
+    : undefined;
   const intentClassifier = modelProvider
     ? new ModelInboundIntentClassifier({
         model: modelProvider
@@ -275,6 +281,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     familyFactRecorder,
     familyFactRecall,
     ...(planningQuery ? { planningQuery } : {}),
+    ...(planningTaskManager ? { planningTaskManager } : {}),
     familyFactArchiver,
     ...(documentRegistrar ? { documentRegistrar } : {}),
     documentLookup,

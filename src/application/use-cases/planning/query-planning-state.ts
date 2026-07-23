@@ -6,6 +6,7 @@ import type {
 export interface QueryPlanningStateInput {
   readonly query: string;
   readonly scope?: PlanningScope;
+  readonly now?: Date;
 }
 
 export interface QueryPlanningStateResult {
@@ -22,7 +23,8 @@ export class QueryPlanningStateUseCase {
   ): Promise<QueryPlanningStateResult> {
     const result = await this.dependencies.planning.queryPlanningState({
       text: input.query,
-      scope: input.scope ?? "family"
+      scope: input.scope ?? "family",
+      ...dateRangeForQuery(input.query, input.now ?? new Date())
     });
 
     if (result.items.length === 0) {
@@ -40,4 +42,20 @@ export class QueryPlanningStateUseCase {
       ].join("\n")
     };
   }
+}
+
+function dateRangeForQuery(
+  query: string,
+  now: Date
+): { readonly startDateFrom?: string; readonly startDateTo?: string } {
+  if (!/\b(today|today's)\b|сегодня/iu.test(query)) {
+    return {};
+  }
+
+  const day = now.toISOString().slice(0, 10);
+
+  return {
+    startDateFrom: day,
+    startDateTo: day
+  };
 }

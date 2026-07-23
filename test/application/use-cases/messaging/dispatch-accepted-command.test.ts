@@ -2512,7 +2512,67 @@ describe("DispatchAcceptedCommandUseCase", () => {
       text: "Planning items:\n- [open] Renew Max passport (task-1)"
     });
     expect(planningQuery.seenInput).toEqual({
-      query: "family tasks"
+      query: "family tasks",
+      now: new Date("2026-07-02T20:00:00.000Z")
+    });
+  });
+
+  it("creates planning tasks from a model intent", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "manage_planning",
+        action: "create",
+        title: "Pack bags",
+        date: "2026-07-24",
+        checklistItems: ["passports", "tickets"]
+      }),
+      planningTaskManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Added to family tasks: Pack bags (T-created)"
+    });
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "create",
+      title: "Pack bags",
+      date: "2026-07-24",
+      checklistItems: ["passports", "tickets"]
+    });
+  });
+
+  it("completes planning tasks from a model intent", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "manage_planning",
+        action: "complete",
+        query: "pack bags"
+      }),
+      planningTaskManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Completed family task: Pack bags (T-created)"
+    });
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "complete",
+      query: "pack bags",
+      now: new Date("2026-07-02T20:00:00.000Z")
     });
   });
 
@@ -3381,6 +3441,14 @@ class FakeIntentClassifier {
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
       | { readonly kind: "query_planning"; readonly query: string }
+      | {
+          readonly kind: "manage_planning";
+          readonly action: "create" | "complete";
+          readonly title?: string;
+          readonly query?: string;
+          readonly date?: string;
+          readonly checklistItems?: readonly string[];
+        }
       | { readonly kind: "archive_fact"; readonly query: string }
       | {
           readonly kind: "register_document";
@@ -3560,13 +3628,31 @@ class FakeDocumentLookup {
 }
 
 class FakePlanningQuery {
-  seenInput: { query: string } | undefined;
+  seenInput: { query: string; now?: Date } | undefined;
 
-  async execute(input: { query: string }) {
+  async execute(input: { query: string; now?: Date }) {
     this.seenInput = input;
 
     return {
       text: "Planning items:\n- [open] Renew Max passport (task-1)"
+    };
+  }
+}
+
+class FakePlanningTaskManager {
+  seenInput: unknown;
+
+  async execute(input: unknown) {
+    this.seenInput = input;
+
+    if (isRecord(input) && input.action === "complete") {
+      return {
+        text: "Completed family task: Pack bags (T-created)"
+      };
+    }
+
+    return {
+      text: "Added to family tasks: Pack bags (T-created)"
     };
   }
 }

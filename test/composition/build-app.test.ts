@@ -536,8 +536,101 @@ describe("buildApp", () => {
       );
       expect(singularity.requests).toEqual([
         {
+          method: "GET",
           path: "/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false&projectId=P-family",
-          authorization: "Bearer singularity-token"
+          authorization: "Bearer singularity-token",
+          body: undefined
+        }
+      ]);
+    } finally {
+      await singularity.close();
+    }
+  });
+
+  it("creates Singularity planning tasks through runtime config", async () => {
+    const singularity = await startSingularityStub([
+      {
+        id: "T-created",
+        title: "Pack bags",
+        note: "",
+        complete: 0,
+        checked: 0,
+        removed: false,
+        journalDate: "",
+        deleteDate: "",
+        isNote: false,
+        tags: []
+      },
+      {
+        id: "C-1",
+        parent: "T-created",
+        title: "passports",
+        done: false
+      }
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: ":memory:",
+          DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+          DOZERCLAW_SINGULARITY_API_BASE_URL: singularity.url,
+          DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID: "P-family",
+          NODE_ENV: "test"
+        },
+        modelProvider: new QueueModelProvider([
+          JSON.stringify({
+            kind: "manage_planning",
+            action: "create",
+            title: "Pack bags",
+            date: "2026-07-24",
+            checklistItems: ["passports"],
+            query: null
+          })
+        ])
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-planning-create-runtime",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "create task pack bags for tomorrow with passports checklist",
+        attachments: [],
+        receivedAt: new Date("2026-07-23T10:00:00.000Z"),
+        now: new Date("2026-07-23T10:00:00.000Z")
+      });
+
+      expect(reply.text).toBe("Added to family tasks: Pack bags (T-created)");
+      expect(singularity.requests).toEqual([
+        {
+          method: "POST",
+          path: "/v2/task",
+          authorization: "Bearer singularity-token",
+          body: {
+            title: "Pack bags",
+            projectId: "P-family",
+            start: "2026-07-24"
+          }
+        },
+        {
+          method: "POST",
+          path: "/v2/checklist-item",
+          authorization: "Bearer singularity-token",
+          body: {
+            parent: "T-created",
+            title: "passports",
+            done: false,
+            parentOrder: 1
+          }
         }
       ]);
     } finally {
@@ -1875,17 +1968,31 @@ async function startGoogleDriveStub() {
 }
 
 async function startSingularityStub(responseBody: unknown) {
-  const requests: Array<{ readonly path: string; readonly authorization: string }> =
-    [];
+  const responseQueue = Array.isArray(responseBody)
+    ? [...responseBody]
+    : [responseBody];
+  const requests: Array<{
+    readonly method: string;
+    readonly path: string;
+    readonly authorization: string;
+    readonly body: unknown;
+  }> = [];
   const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const bodyText = Buffer.concat(chunks).toString("utf8");
     requests.push({
+      method: request.method ?? "GET",
       path: request.url ?? "",
-      authorization: String(request.headers.authorization ?? "")
+        authorization: String(request.headers.authorization ?? ""),
+        body: bodyText ? JSON.parse(bodyText) : undefined
     });
     response.writeHead(200, {
       "Content-Type": "application/json"
     });
-    response.end(JSON.stringify(responseBody));
+      response.end(JSON.stringify(responseQueue.shift() ?? {}));
+    });
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

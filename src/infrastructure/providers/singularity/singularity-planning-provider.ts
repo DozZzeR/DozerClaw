@@ -2,7 +2,10 @@ import type {
   PlanningItem,
   PlanningPort,
   PlanningQuery,
-  PlanningQueryResult
+  PlanningQueryResult,
+  PlanningTaskComplete,
+  PlanningTaskCreate,
+  PlanningTaskMutationResult
 } from "../../../ports/planning-port.js";
 
 export interface SingularityPlanningProviderOptions {
@@ -63,6 +66,75 @@ export class SingularityPlanningProvider implements PlanningPort {
     };
   }
 
+  async createPlanningTask(
+    input: PlanningTaskCreate
+  ): Promise<PlanningTaskMutationResult> {
+    const response = await this.fetchWithTimeout(this.url("/v2/task"), {
+      method: "POST",
+      headers: this.jsonHeaders(),
+      body: JSON.stringify({
+        title: input.title,
+        ...(input.scope === "family" && this.options.familyProjectId
+          ? { projectId: this.options.familyProjectId }
+          : {}),
+        ...(input.date ? { start: input.date } : {})
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Singularity task create request failed: HTTP ${response.status}`
+      );
+    }
+
+    const task = toPlanningItem((await response.json()) as unknown);
+
+    if (!task) {
+      throw new Error("Singularity task create response was incomplete");
+    }
+
+    for (const [index, title] of (input.checklistItems ?? []).entries()) {
+      await this.createChecklistItem(task.id, title, index + 1);
+    }
+
+    return {
+      item: task
+    };
+  }
+
+  async completePlanningTask(
+    input: PlanningTaskComplete
+  ): Promise<PlanningTaskMutationResult> {
+    const response = await this.fetchWithTimeout(
+      this.url(`/v2/task/${encodeURIComponent(input.taskId)}`),
+      {
+        method: "PATCH",
+        headers: this.jsonHeaders(),
+        body: JSON.stringify({
+          complete: 1,
+          checked: 1,
+          completeLast: input.completedAt.toISOString()
+        })
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Singularity task complete request failed: HTTP ${response.status}`
+      );
+    }
+
+    const task = toPlanningItem((await response.json()) as unknown);
+
+    if (!task) {
+      throw new Error("Singularity task complete response was incomplete");
+    }
+
+    return {
+      item: task
+    };
+  }
+
   private taskListUrl(query: PlanningQuery): string {
     const url = new URL("/v2/task", this.apiBaseUrl);
     url.searchParams.set(
@@ -72,11 +144,51 @@ export class SingularityPlanningProvider implements PlanningPort {
     url.searchParams.set("includeRemoved", "false");
     url.searchParams.set("includeArchived", "false");
     url.searchParams.set("includeAllRecurrenceInstances", "false");
+    if (query.startDateFrom) {
+      url.searchParams.set("startDateFrom", query.startDateFrom);
+    }
+    if (query.startDateTo) {
+      url.searchParams.set("startDateTo", query.startDateTo);
+    }
     if (query.scope === "family" && this.options.familyProjectId) {
       url.searchParams.set("projectId", this.options.familyProjectId);
     }
 
     return url.toString();
+  }
+
+  private async createChecklistItem(
+    parent: string,
+    title: string,
+    parentOrder: number
+  ): Promise<void> {
+    const response = await this.fetchWithTimeout(this.url("/v2/checklist-item"), {
+      method: "POST",
+      headers: this.jsonHeaders(),
+      body: JSON.stringify({
+        parent,
+        title,
+        done: false,
+        parentOrder
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Singularity checklist item create request failed: HTTP ${response.status}`
+      );
+    }
+  }
+
+  private jsonHeaders(): Readonly<Record<string, string>> {
+    return {
+      authorization: `Bearer ${this.options.token}`,
+      "content-type": "application/json"
+    };
+  }
+
+  private url(path: string): string {
+    return new URL(path, this.apiBaseUrl).toString();
   }
 
   private async fetchWithTimeout(
@@ -116,6 +228,31 @@ interface SearchablePlanningItem {
 function toSearchablePlanningItem(
   value: unknown
 ): SearchablePlanningItem | undefined {
+  const item = toPlanningItem(value);
+
+  if (!item) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    item,
+    searchText: [
+      item.id,
+      item.title,
+      item.status,
+      stringField(record, "note"),
+      stringField(record, "projectId"),
+      ...stringArrayField(record, "tags")
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+  };
+}
+
+function toPlanningItem(value: unknown): PlanningItem | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -136,20 +273,7 @@ function toSearchablePlanningItem(
         : "open"
   };
 
-  return {
-    item,
-    searchText: [
-      item.id,
-      item.title,
-      item.status,
-      stringField(value, "note"),
-      stringField(value, "projectId"),
-      ...stringArrayField(value, "tags")
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-  };
+  return item;
 }
 
 function isInactiveTask(task: Record<string, unknown>): boolean {

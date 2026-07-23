@@ -52,6 +52,23 @@ describe("QueryPlanningStateUseCase", () => {
     });
   });
 
+  it("adds a today date range for today queries", async () => {
+    const planning = new RecordingPlanningProvider([]);
+    const useCase = new QueryPlanningStateUseCase({ planning });
+
+    await useCase.execute({
+      query: "что на сегодня",
+      now: new Date("2026-07-23T10:15:00.000Z")
+    });
+
+    expect(planning.seenQuery).toEqual({
+      text: "что на сегодня",
+      scope: "family",
+      startDateFrom: "2026-07-23",
+      startDateTo: "2026-07-23"
+    });
+  });
+
   it("returns a clear empty state", async () => {
     const useCase = new QueryPlanningStateUseCase({
       planning: new RecordingPlanningProvider([])

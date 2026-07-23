@@ -91,6 +91,10 @@ import type {
   EventLogPort,
   OperationalEvent
 } from "../../../ports/event-log-port.js";
+import type {
+  ManagePlanningTaskInput,
+  ManagePlanningTaskResult
+} from "../planning/manage-planning-task.js";
 
 export interface SystemHealthCommandHandler {
   execute(input: HandleSystemHealthCommandInput): Promise<OutboundReply>;
@@ -132,7 +136,14 @@ export interface FamilyFactRecall {
 }
 
 export interface PlanningStateQuery {
-  execute(input: { readonly query: string }): Promise<{ readonly text: string }>;
+  execute(input: {
+    readonly query: string;
+    readonly now?: Date;
+  }): Promise<{ readonly text: string }>;
+}
+
+export interface PlanningTaskManager {
+  execute(input: ManagePlanningTaskInput): Promise<ManagePlanningTaskResult>;
 }
 
 export interface FamilyFactArchiver {
@@ -268,6 +279,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
   readonly planningQuery?: PlanningStateQuery;
+  readonly planningTaskManager?: PlanningTaskManager;
   readonly familyFactArchiver?: FamilyFactArchiver;
   readonly documentRegistrar?: DocumentRegistrar;
   readonly documentLookup?: DocumentLookup;
@@ -646,8 +658,42 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const result = await this.dependencies.planningQuery.execute({
-      query: intent.query
+      query: intent.query,
+      now: context.receivedAt
     });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async managePlanningTask(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "manage_planning" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.planningTaskManager) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result =
+      intent.action === "create"
+        ? await this.dependencies.planningTaskManager.execute({
+            action: "create",
+            title: intent.title ?? "",
+            ...(intent.date ? { date: intent.date } : {}),
+            ...(intent.checklistItems
+              ? { checklistItems: intent.checklistItems }
+              : {})
+          })
+        : await this.dependencies.planningTaskManager.execute({
+            action: "complete",
+            query: intent.query ?? "",
+            now: context.receivedAt
+          });
 
     return {
       chatId: context.chat.id,
@@ -1308,6 +1354,10 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "query_planning") {
       return this.queryPlanningState(context, intent);
+    }
+
+    if (intent.kind === "manage_planning") {
+      return this.managePlanningTask(context, intent);
     }
 
     if (intent.kind === "archive_fact") {
@@ -3039,6 +3089,7 @@ function requiredAccessActionForIntent(
     intent.kind === "register_document" ||
     intent.kind === "update_document" ||
     intent.kind === "archive_document" ||
+    intent.kind === "manage_planning" ||
     intent.kind === "save_subject_alias" ||
     intent.kind === "delete_subject_alias"
   ) {
