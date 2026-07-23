@@ -10,6 +10,7 @@ export interface SingularityPlanningProviderOptions {
   readonly apiBaseUrl?: string;
   readonly requestTimeoutMs?: number;
   readonly maxResults?: number;
+  readonly familyProjectId?: string;
   readonly fetch?: typeof fetch;
 }
 
@@ -29,7 +30,7 @@ export class SingularityPlanningProvider implements PlanningPort {
   async queryPlanningState(
     query: PlanningQuery
   ): Promise<PlanningQueryResult> {
-    const response = await this.fetchWithTimeout(this.taskListUrl(), {
+    const response = await this.fetchWithTimeout(this.taskListUrl(query), {
       method: "GET",
       headers: {
         authorization: `Bearer ${this.options.token}`
@@ -62,7 +63,7 @@ export class SingularityPlanningProvider implements PlanningPort {
     };
   }
 
-  private taskListUrl(): string {
+  private taskListUrl(query: PlanningQuery): string {
     const url = new URL("/v2/task", this.apiBaseUrl);
     url.searchParams.set(
       "maxCount",
@@ -71,6 +72,9 @@ export class SingularityPlanningProvider implements PlanningPort {
     url.searchParams.set("includeRemoved", "false");
     url.searchParams.set("includeArchived", "false");
     url.searchParams.set("includeAllRecurrenceInstances", "false");
+    if (query.scope === "family" && this.options.familyProjectId) {
+      url.searchParams.set("projectId", this.options.familyProjectId);
+    }
 
     return url.toString();
   }

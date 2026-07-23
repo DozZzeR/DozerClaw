@@ -498,6 +498,7 @@ describe("buildApp", () => {
           DOZERCLAW_DB_PATH: ":memory:",
           DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
           DOZERCLAW_SINGULARITY_API_BASE_URL: singularity.url,
+          DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID: "P-family",
           NODE_ENV: "test"
         },
         modelProvider: new QueueModelProvider([
@@ -535,7 +536,7 @@ describe("buildApp", () => {
       );
       expect(singularity.requests).toEqual([
         {
-          path: "/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false",
+          path: "/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false&projectId=P-family",
           authorization: "Bearer singularity-token"
         }
       ]);

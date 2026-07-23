@@ -14,6 +14,7 @@ describe("SingularityPlanningProvider", () => {
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
       maxResults: 25,
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 
@@ -35,11 +36,27 @@ describe("SingularityPlanningProvider", () => {
     });
     expect(fetcher.requests).toEqual([
       expect.objectContaining({
-        url: "https://api.singularity-app.com/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false",
+        url: "https://api.singularity-app.com/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false&projectId=P-family",
         authorization: "Bearer singularity-token",
         method: "GET"
       })
     ]);
+  });
+
+  it("does not apply the family project filter to personal queries", async () => {
+    const fetcher = new RecordingFetch({ tasks: [] });
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
+      fetch: fetcher.fetch
+    });
+
+    await provider.queryPlanningState({ text: "", scope: "personal" });
+
+    expect(fetcher.requests[0]?.url).toBe(
+      "https://api.singularity-app.com/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false"
+    );
   });
 
   it("filters inactive, note-only, and locally non-matching tasks", async () => {
