@@ -473,6 +473,76 @@ describe("buildApp", () => {
     });
   });
 
+  it("queries Singularity planning state through runtime config", async () => {
+    const singularity = await startSingularityStub({
+      tasks: [
+        {
+          id: "T-1",
+          title: "Renew Max passport",
+          note: "",
+          complete: 0,
+          checked: 0,
+          removed: false,
+          journalDate: "",
+          deleteDate: "",
+          isNote: false,
+          tags: ["family"]
+        }
+      ]
+    });
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: ":memory:",
+          DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+          DOZERCLAW_SINGULARITY_API_BASE_URL: singularity.url,
+          NODE_ENV: "test"
+        },
+        modelProvider: new QueueModelProvider([
+          JSON.stringify({
+            kind: "query_planning",
+            question: null,
+            summary: null,
+            query: "passport family",
+            reason: null
+          })
+        ])
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const reply = await app.handleNormalizedInboundMessage({
+        messageId: "message-planning-runtime",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "what planning tasks mention passport?",
+        attachments: [],
+        receivedAt: new Date("2026-07-23T10:00:00.000Z"),
+        now: new Date("2026-07-23T10:00:00.000Z")
+      });
+
+      expect(reply.text).toBe(
+        "Planning items:\n- [open] Renew Max passport (T-1)"
+      );
+      expect(singularity.requests).toEqual([
+        {
+          path: "/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false",
+          authorization: "Bearer singularity-token"
+        }
+      ]);
+    } finally {
+      await singularity.close();
+    }
+  });
+
   it("archives a stored family fact through composition", async () => {
     const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
     const databasePath = join(directory, "dozerclaw.sqlite");
@@ -1790,6 +1860,30 @@ async function startGoogleDriveStub() {
         webViewLink: "https://drive.google.com/file/d/drive-abc/view"
       })
     );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve()))
+  };
+}
+
+async function startSingularityStub(responseBody: unknown) {
+  const requests: Array<{ readonly path: string; readonly authorization: string }> =
+    [];
+  const server = createServer((request, response) => {
+    requests.push({
+      path: request.url ?? "",
+      authorization: String(request.headers.authorization ?? "")
+    });
+    response.writeHead(200, {
+      "Content-Type": "application/json"
+    });
+    response.end(JSON.stringify(responseBody));
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

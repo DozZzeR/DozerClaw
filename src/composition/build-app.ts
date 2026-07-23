@@ -40,6 +40,7 @@ import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-c
 import { MempalaceMemoryProvider } from "../infrastructure/providers/mempalace/mempalace-memory-provider.js";
 import { JsonDocumentFolderPolicy } from "../infrastructure/providers/document-folder-policy/json-document-folder-policy.js";
 import { GoogleDriveDocumentStorageProvider } from "../infrastructure/providers/google-drive/google-drive-document-storage.js";
+import { SingularityPlanningProvider } from "../infrastructure/providers/singularity/singularity-planning-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sqlite-document-repository.js";
@@ -241,9 +242,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const subjectAliasManager = new ManageSubjectAliasesUseCase({
     repository: subjectAliasRepository
   });
-  const planningQuery = options.planningProvider
+  const planningProvider =
+    options.planningProvider ??
+    (config.planning?.singularity
+      ? new SingularityPlanningProvider(config.planning.singularity)
+      : undefined);
+  const planningQuery = planningProvider
     ? new QueryPlanningStateUseCase({
-        planning: options.planningProvider
+        planning: planningProvider
       })
     : undefined;
   const intentClassifier = modelProvider

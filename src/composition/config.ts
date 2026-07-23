@@ -9,6 +9,7 @@ export interface AppConfig {
   readonly codex: CodexConfig;
   readonly memory?: MemoryConfig;
   readonly googleDrive?: GoogleDriveConfig;
+  readonly planning?: PlanningConfig;
 }
 
 export interface SqliteConfig {
@@ -44,6 +45,17 @@ export interface CodexConfig {
 
 export interface MemoryConfig {
   readonly mempalace?: MempalaceMemoryConfig;
+}
+
+export interface PlanningConfig {
+  readonly singularity?: SingularityPlanningConfig;
+}
+
+export interface SingularityPlanningConfig {
+  readonly token: string;
+  readonly apiBaseUrl: string;
+  readonly requestTimeoutMs: number;
+  readonly maxResults: number;
 }
 
 export interface GoogleDriveConfig {
@@ -120,7 +132,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       ...(env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {})
     },
     ...memoryConfig(env, environment),
-    ...googleDriveConfig(env, environment)
+    ...googleDriveConfig(env, environment),
+    ...planningConfig(env, environment)
   };
 }
 
@@ -230,6 +243,44 @@ function memoryConfig(
   return mempalace ? { memory: { mempalace } } : {};
 }
 
+function planningConfig(
+  env: NodeJS.ProcessEnv,
+  environment: RuntimeEnvironment
+): { readonly planning?: PlanningConfig } {
+  const singularity = singularityPlanningConfig(env, environment);
+
+  return singularity ? { planning: { singularity } } : {};
+}
+
+function singularityPlanningConfig(
+  env: NodeJS.ProcessEnv,
+  environment: RuntimeEnvironment
+): SingularityPlanningConfig | undefined {
+  const token = env.DOZERCLAW_SINGULARITY_API_TOKEN?.trim();
+
+  if (!token) {
+    return undefined;
+  }
+
+  const apiBaseUrl =
+    env.DOZERCLAW_SINGULARITY_API_BASE_URL?.trim() ||
+    "https://api.singularity-app.com";
+  validateSingularityApiBaseUrl(apiBaseUrl, environment);
+
+  return {
+    token,
+    apiBaseUrl,
+    requestTimeoutMs: parsePositiveInteger(
+      env.DOZERCLAW_SINGULARITY_REQUEST_TIMEOUT_MS,
+      10_000
+    ),
+    maxResults: parsePositiveInteger(
+      env.DOZERCLAW_SINGULARITY_MAX_RESULTS,
+      25
+    )
+  };
+}
+
 function mempalaceMemoryConfig(
   env: NodeJS.ProcessEnv,
   environment: RuntimeEnvironment
@@ -301,6 +352,28 @@ function validateMempalaceEndpointUrl(
   if (!url || url.protocol !== "https:") {
     throw new Error(
       "DOZERCLAW_MEMPALACE_MCP_URL must use https when a bearer token is configured in production."
+    );
+  }
+}
+
+function validateSingularityApiBaseUrl(
+  value: string,
+  environment: RuntimeEnvironment
+): void {
+  if (environment !== "production") {
+    return;
+  }
+
+  const url = parseUrl(value);
+
+  if (
+    !url ||
+    url.protocol !== "https:" ||
+    url.hostname !== "api.singularity-app.com" ||
+    url.pathname.replace(/\/+$/u, "") !== ""
+  ) {
+    throw new Error(
+      "DOZERCLAW_SINGULARITY_API_BASE_URL must be https://api.singularity-app.com in production."
     );
   }
 }

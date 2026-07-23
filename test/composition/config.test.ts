@@ -99,6 +99,24 @@ describe("loadConfig", () => {
     });
   });
 
+  it("loads Singularity planning config from environment", () => {
+    expect(
+      loadConfig({
+        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+        DOZERCLAW_SINGULARITY_API_BASE_URL: "http://127.0.0.1:9999",
+        DOZERCLAW_SINGULARITY_REQUEST_TIMEOUT_MS: "4000",
+        DOZERCLAW_SINGULARITY_MAX_RESULTS: "12"
+      }).planning
+    ).toEqual({
+      singularity: {
+        token: "singularity-token",
+        apiBaseUrl: "http://127.0.0.1:9999",
+        requestTimeoutMs: 4000,
+        maxResults: 12
+      }
+    });
+  });
+
   it("loads Google Drive user OAuth refresh token config", () => {
     expect(
       loadConfig({
@@ -167,5 +185,35 @@ describe("loadConfig", () => {
         DOZERCLAW_MEMPALACE_BEARER_TOKEN: "secret"
       }).memory?.mempalace?.endpointUrl
     ).toBe("https://mempalace.example/mcp");
+  });
+
+  it("rejects unsafe production Singularity API endpoints", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+        DOZERCLAW_SINGULARITY_API_BASE_URL: "http://127.0.0.1:9999"
+      })
+    ).toThrow(
+      "DOZERCLAW_SINGULARITY_API_BASE_URL must be https://api.singularity-app.com in production."
+    );
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+        DOZERCLAW_SINGULARITY_API_BASE_URL: "https://evil.example"
+      })
+    ).toThrow(
+      "DOZERCLAW_SINGULARITY_API_BASE_URL must be https://api.singularity-app.com in production."
+    );
+  });
+
+  it("allows the official production Singularity API endpoint", () => {
+    expect(
+      loadConfig({
+        NODE_ENV: "production",
+        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token"
+      }).planning?.singularity?.apiBaseUrl
+    ).toBe("https://api.singularity-app.com");
   });
 });
