@@ -21,10 +21,14 @@ export class QueryPlanningStateUseCase {
   async execute(
     input: QueryPlanningStateInput
   ): Promise<QueryPlanningStateResult> {
+    const interpretedQuery = interpretPlanningQuery(
+      input.query,
+      input.now ?? new Date()
+    );
     const result = await this.dependencies.planning.queryPlanningState({
-      text: input.query,
+      text: interpretedQuery.text,
       scope: input.scope ?? "family",
-      ...dateRangeForQuery(input.query, input.now ?? new Date())
+      ...interpretedQuery.dateRange
     });
 
     if (result.items.length === 0) {
@@ -44,18 +48,37 @@ export class QueryPlanningStateUseCase {
   }
 }
 
-function dateRangeForQuery(
+function interpretPlanningQuery(
   query: string,
   now: Date
-): { readonly startDateFrom?: string; readonly startDateTo?: string } {
+): {
+  readonly text: string;
+  readonly dateRange: {
+    readonly startDateFrom?: string;
+    readonly startDateTo?: string;
+  };
+} {
   if (!/\b(today|today's)\b|сегодня/iu.test(query)) {
-    return {};
+    return {
+      text: query,
+      dateRange: {}
+    };
   }
 
   const day = now.toISOString().slice(0, 10);
+  const text = query
+    .replace(/\b(today|today's)\b/giu, " ")
+    .replace(/сегодня/giu, " ")
+    .replace(/\b(what|what's|on|for)\b/giu, " ")
+    .replace(/(^|\s)(что|на|за|по)(?=\s|$)/giu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 
   return {
-    startDateFrom: day,
-    startDateTo: day
+    text,
+    dateRange: {
+      startDateFrom: day,
+      startDateTo: day
+    }
   };
 }

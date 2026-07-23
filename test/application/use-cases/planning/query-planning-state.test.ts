@@ -62,7 +62,24 @@ describe("QueryPlanningStateUseCase", () => {
     });
 
     expect(planning.seenQuery).toEqual({
-      text: "что на сегодня",
+      text: "",
+      scope: "family",
+      startDateFrom: "2026-07-23",
+      startDateTo: "2026-07-23"
+    });
+  });
+
+  it("keeps meaningful search terms in today queries", async () => {
+    const planning = new RecordingPlanningProvider([]);
+    const useCase = new QueryPlanningStateUseCase({ planning });
+
+    await useCase.execute({
+      query: "passport today",
+      now: new Date("2026-07-23T10:15:00.000Z")
+    });
+
+    expect(planning.seenQuery).toEqual({
+      text: "passport",
       scope: "family",
       startDateFrom: "2026-07-23",
       startDateTo: "2026-07-23"
