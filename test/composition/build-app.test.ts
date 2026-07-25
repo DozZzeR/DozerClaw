@@ -618,7 +618,7 @@ describe("buildApp", () => {
           body: {
             title: "Pack bags",
             projectId: "P-family",
-            start: "2026-07-24"
+            start: "2026-07-24T00:00:00.000Z"
           }
         },
         {

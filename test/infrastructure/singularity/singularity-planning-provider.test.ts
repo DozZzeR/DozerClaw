@@ -76,7 +76,7 @@ describe("SingularityPlanningProvider", () => {
     });
 
     expect(fetcher.requests[0]?.url).toBe(
-      "https://api.singularity-app.com/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false&startDateFrom=2026-07-23&startDateTo=2026-07-23&projectId=P-family"
+      "https://api.singularity-app.com/v2/task?maxCount=25&includeRemoved=false&includeArchived=false&includeAllRecurrenceInstances=false&startDateFrom=2026-07-23T00%3A00%3A00.000Z&startDateTo=2026-07-23T23%3A59%3A59.999Z&projectId=P-family"
     );
   });
 
@@ -114,7 +114,7 @@ describe("SingularityPlanningProvider", () => {
         body: {
           title: "Pack bags",
           projectId: "P-family",
-          start: "2026-07-24"
+          start: "2026-07-24T00:00:00.000Z"
         }
       }),
       expect.objectContaining({
@@ -169,8 +169,7 @@ describe("SingularityPlanningProvider", () => {
         method: "PATCH",
         body: {
           complete: 1,
-          checked: 1,
-          completeLast: "2026-07-23T10:00:00.000Z"
+          checked: 1
         }
       })
     );

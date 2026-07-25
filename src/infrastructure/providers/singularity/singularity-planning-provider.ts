@@ -77,7 +77,7 @@ export class SingularityPlanningProvider implements PlanningPort {
         ...(input.scope === "family" && this.options.familyProjectId
           ? { projectId: this.options.familyProjectId }
           : {}),
-        ...(input.date ? { start: input.date } : {})
+        ...(input.date ? { start: toSingularityDateTime(input.date) } : {})
       })
     });
 
@@ -114,8 +114,7 @@ export class SingularityPlanningProvider implements PlanningPort {
         headers: this.jsonHeaders(),
         body: JSON.stringify({
           complete: 1,
-          checked: 1,
-          completeLast: input.completedAt.toISOString()
+          checked: 1
         })
       }
     );
@@ -149,10 +148,16 @@ export class SingularityPlanningProvider implements PlanningPort {
     url.searchParams.set("includeArchived", "false");
     url.searchParams.set("includeAllRecurrenceInstances", "false");
     if (query.startDateFrom) {
-      url.searchParams.set("startDateFrom", query.startDateFrom);
+      url.searchParams.set(
+        "startDateFrom",
+        toSingularityDateTime(query.startDateFrom)
+      );
     }
     if (query.startDateTo) {
-      url.searchParams.set("startDateTo", query.startDateTo);
+      url.searchParams.set(
+        "startDateTo",
+        toSingularityEndOfDay(query.startDateTo)
+      );
     }
     if (query.scope === "family" && this.options.familyProjectId) {
       url.searchParams.set("projectId", this.options.familyProjectId);
@@ -344,4 +349,12 @@ function stringArrayField(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function toSingularityDateTime(date: string): string {
+  return `${date}T00:00:00.000Z`;
+}
+
+function toSingularityEndOfDay(date: string): string {
+  return `${date}T23:59:59.999Z`;
 }
