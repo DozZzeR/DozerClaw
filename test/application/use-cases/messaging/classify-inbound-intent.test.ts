@@ -77,6 +77,9 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("requests");
     expect(model.request?.input).toContain("query_planning");
     expect(model.request?.input).toContain("manage_planning");
+    expect(JSON.stringify(model.request?.outputSchema)).not.toContain(
+      "create_reminder"
+    );
     expect(model.request?.input).toContain("scan.jpg");
   });
 });
@@ -182,6 +185,19 @@ describe("parseInboundIntent", () => {
       title: "Pack bags",
       date: "2026-07-24",
       checklistItems: ["passports", "tickets"]
+    });
+
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "create_reminder",
+          summary: "починить пятку ребенку"
+        })
+      )
+    ).toEqual({
+      kind: "manage_planning",
+      action: "create",
+      title: "починить пятку ребенку"
     });
 
     expect(

@@ -347,8 +347,11 @@ export function parseInboundIntent(text: string): InboundIntent {
       typeof parsed.summary === "string"
     ) {
       return {
-        kind: "create_reminder",
-        summary: parsed.summary.trim()
+        kind: "manage_planning",
+        action: "create",
+        title: parsed.summary.trim(),
+        ...optionalIsoDate(parsed.date),
+        ...optionalStringArray("checklistItems", parsed.checklistItems)
       };
     }
 
@@ -539,7 +542,6 @@ const inboundIntentSchema = {
         "ask_clarification",
         "store_file",
         "record_fact",
-        "create_reminder",
         "answer_from_memory",
         "query_planning",
         "manage_planning",

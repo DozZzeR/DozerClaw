@@ -670,7 +670,10 @@ export class DispatchAcceptedCommandUseCase {
 
   private async managePlanningTask(
     context: AcceptedMessageContext,
-    intent: Extract<InboundIntent, { readonly kind: "manage_planning" }>
+    intent: Extract<
+      InboundIntent,
+      { readonly kind: "create_reminder" | "manage_planning" }
+    >
   ): Promise<OutboundReply> {
     if (!this.dependencies.planningTaskManager) {
       return {
@@ -680,12 +683,15 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const result =
-      intent.action === "create"
+      intent.kind === "create_reminder" || intent.action === "create"
         ? await this.dependencies.planningTaskManager.execute({
             action: "create",
-            title: intent.title ?? "",
-            ...(intent.date ? { date: intent.date } : {}),
-            ...(intent.checklistItems
+            title:
+              intent.kind === "create_reminder"
+                ? intent.summary
+                : intent.title ?? "",
+            ...planningDateFromIntent(context, intent),
+            ...(intent.kind === "manage_planning" && intent.checklistItems
               ? { checklistItems: intent.checklistItems }
               : {})
           })
@@ -1357,6 +1363,10 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (intent.kind === "manage_planning") {
+      return this.managePlanningTask(context, intent);
+    }
+
+    if (intent.kind === "create_reminder") {
       return this.managePlanningTask(context, intent);
     }
 
@@ -3089,6 +3099,7 @@ function requiredAccessActionForIntent(
     intent.kind === "register_document" ||
     intent.kind === "update_document" ||
     intent.kind === "archive_document" ||
+    intent.kind === "create_reminder" ||
     intent.kind === "manage_planning" ||
     intent.kind === "save_subject_alias" ||
     intent.kind === "delete_subject_alias"
@@ -3097,6 +3108,32 @@ function requiredAccessActionForIntent(
   }
 
   return undefined;
+}
+
+function planningDateFromIntent(
+  context: AcceptedMessageContext,
+  intent: Extract<
+    InboundIntent,
+    { readonly kind: "create_reminder" | "manage_planning" }
+  >
+): { readonly date?: string } {
+  if (intent.kind === "manage_planning" && intent.date) {
+    return {
+      date: intent.date
+    };
+  }
+
+  if (/\b(tomorrow)\b|завтра/iu.test(context.text)) {
+    const tomorrow = new Date(
+      context.receivedAt.getTime() + 24 * 60 * 60 * 1000
+    );
+
+    return {
+      date: tomorrow.toISOString().slice(0, 10)
+    };
+  }
+
+  return {};
 }
 
 function parseAdminSecret(text: string): string | undefined {

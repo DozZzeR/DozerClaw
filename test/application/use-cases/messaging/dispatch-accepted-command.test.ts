@@ -2548,6 +2548,65 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("routes legacy reminder creation intents to dated planning tasks", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "create_reminder",
+        summary: "починить пятку ребенку"
+      }),
+      planningTaskManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: 'привет, создай задачу на завтра "починить пятку ребенку"',
+          receivedAt: new Date("2026-07-26T00:14:00.000Z")
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Added to family tasks: Pack bags (T-created)"
+    });
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "create",
+      title: "починить пятку ребенку",
+      date: "2026-07-27"
+    });
+  });
+
+  it("adds tomorrow date to planning create intents when the model omits it", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "manage_planning",
+        action: "create",
+        title: "Pack bags"
+      }),
+      planningTaskManager
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "create task for tomorrow: Pack bags",
+        receivedAt: new Date("2026-07-26T00:14:00.000Z")
+      }
+    });
+
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "create",
+      title: "Pack bags",
+      date: "2026-07-27"
+    });
+  });
+
   it("completes planning tasks from a model intent", async () => {
     const planningTaskManager = new FakePlanningTaskManager();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -3440,6 +3499,7 @@ class FakeIntentClassifier {
           readonly subjectId?: string;
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
+      | { readonly kind: "create_reminder"; readonly summary: string }
       | { readonly kind: "query_planning"; readonly query: string }
       | {
           readonly kind: "manage_planning";
