@@ -609,7 +609,15 @@ describe("buildApp", () => {
         now: new Date("2026-07-23T10:00:00.000Z")
       });
 
-      expect(reply.text).toBe("Added to family tasks: Pack bags (T-created)");
+      expect(reply.text).toBe(
+        [
+          "Created family planning task:",
+          "Pack bags",
+          "External id: T-created",
+          "Date: 2026-07-24",
+          "Checklist items: 1"
+        ].join("\n")
+      );
       expect(singularity.requests).toEqual([
         {
           method: "POST",

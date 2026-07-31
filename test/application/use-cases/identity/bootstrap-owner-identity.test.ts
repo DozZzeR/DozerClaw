@@ -217,4 +217,21 @@ class FakeIdentityAccessRepository implements IdentityAccessRepositoryPort {
   async findActiveAdminSessionByActorAndChat(): Promise<AdminSession | undefined> {
     return undefined;
   }
+
+  async listActiveFamilyNotificationRecipients(): Promise<readonly Actor[]> {
+    return this.actors
+      .filter(
+        (actor) =>
+          actor.status === "active" &&
+          (actor.role === "owner" || actor.role === "family")
+      )
+      .sort((left, right) =>
+        left.displayName.localeCompare(right.displayName) ||
+        left.id.localeCompare(right.id)
+      );
+  }
+
+  async listNotificationDeliveryTargetsForActors() {
+    return [];
+  }
 }

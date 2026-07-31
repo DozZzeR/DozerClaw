@@ -4,6 +4,7 @@ import { TelegramAttachmentDownloader } from "../../infrastructure/providers/tel
 import { TelegramApiError } from "../../infrastructure/providers/telegram/telegram-api.js";
 import { TelegramBotApiClient } from "../../infrastructure/providers/telegram/telegram-api.js";
 import { TelegramBotRuntime } from "../../infrastructure/providers/telegram/telegram-bot-runtime.js";
+import { TelegramNotificationDelivery } from "../../infrastructure/providers/telegram/telegram-notification-delivery.js";
 
 export interface RunTelegramBotOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -34,7 +35,8 @@ export async function runTelegramBot(
   });
   const app = buildApp({
     env,
-    attachmentDownloader
+    attachmentDownloader,
+    notificationDelivery: new TelegramNotificationDelivery({ telegram })
   });
   const runtime = new TelegramBotRuntime({
     app,

@@ -144,6 +144,127 @@ describe("SqliteIdentityAccessRepository", () => {
     database.close();
   });
 
+  it("lists active family notification recipients", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteIdentityAccessRepository(database);
+
+    await repository.createActor({
+      id: "actor-owner",
+      displayName: "Owner",
+      role: "owner",
+      status: "active"
+    });
+    await repository.createActor({
+      id: "actor-family",
+      displayName: "Family",
+      role: "family",
+      status: "active"
+    });
+    await repository.createActor({
+      id: "actor-pending",
+      displayName: "Pending",
+      role: "family",
+      status: "pending"
+    });
+    await repository.createActor({
+      id: "actor-blocked",
+      displayName: "Blocked",
+      role: "family",
+      status: "blocked"
+    });
+
+    await expect(repository.listActiveFamilyNotificationRecipients()).resolves
+      .toEqual([
+        {
+          id: "actor-family",
+          displayName: "Family",
+          role: "family",
+          status: "active"
+        },
+        {
+          id: "actor-owner",
+          displayName: "Owner",
+          role: "owner",
+          status: "active"
+        }
+      ]);
+
+    database.close();
+  });
+
+  it("lists active approved private notification delivery targets", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteIdentityAccessRepository(database);
+
+    await repository.createActor({
+      id: "actor-owner",
+      displayName: "Owner",
+      role: "owner",
+      status: "active"
+    });
+    await repository.createActorIdentity({
+      id: "identity-owner",
+      actorId: "actor-owner",
+      provider: "telegram",
+      providerUserId: "tg-owner",
+      status: "active"
+    });
+    await repository.createMessengerChat({
+      id: "chat-owner",
+      provider: "telegram",
+      providerChatId: "tg-owner",
+      kind: "owner_private",
+      approved: true
+    });
+    await repository.createActor({
+      id: "actor-family",
+      displayName: "Family",
+      role: "family",
+      status: "active"
+    });
+    await repository.createActorIdentity({
+      id: "identity-family",
+      actorId: "actor-family",
+      provider: "telegram",
+      providerUserId: "tg-family",
+      status: "active"
+    });
+    await repository.createMessengerChat({
+      id: "chat-family",
+      provider: "telegram",
+      providerChatId: "tg-family",
+      kind: "family_private",
+      approved: true
+    });
+    await repository.createMessengerChat({
+      id: "chat-family-group",
+      provider: "telegram",
+      providerChatId: "tg-family-group",
+      kind: "family_group",
+      approved: true
+    });
+
+    await expect(
+      repository.listNotificationDeliveryTargetsForActors([
+        "actor-owner",
+        "actor-family"
+      ])
+    ).resolves.toEqual([
+      {
+        actorId: "actor-family",
+        provider: "telegram",
+        providerChatId: "tg-family"
+      },
+      {
+        actorId: "actor-owner",
+        provider: "telegram",
+        providerChatId: "tg-owner"
+      }
+    ]);
+
+    database.close();
+  });
+
   it("supports idempotent owner bootstrap", async () => {
     const database = createSqliteDatabase({ path: ":memory:" });
     const repository = new SqliteIdentityAccessRepository(database);

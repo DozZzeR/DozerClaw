@@ -95,6 +95,7 @@ import type {
   ManagePlanningTaskInput,
   ManagePlanningTaskResult
 } from "../planning/manage-planning-task.js";
+import type { NotificationRecord } from "../../../ports/notification-repository-port.js";
 
 export interface SystemHealthCommandHandler {
   execute(input: HandleSystemHealthCommandInput): Promise<OutboundReply>;
@@ -189,6 +190,16 @@ export interface PendingAccessRequestReviewer {
     readonly actorId: string;
     readonly decision: PendingIdentityDecision;
   }): Promise<ReviewPendingIdentityResult>;
+}
+
+export interface NotificationInbox {
+  listUnread(input: {
+    readonly actorId: string;
+  }): Promise<{ readonly notifications: readonly NotificationRecord[] }>;
+  markRead(input: {
+    readonly notificationId: string;
+    readonly actorId: string;
+  }): Promise<void>;
 }
 
 export interface AdminSessionActivator {
@@ -289,6 +300,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly subjectAliasManager?: SubjectAliasManager;
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
+  readonly notifications?: NotificationInbox;
   readonly adminSessionActivator?: AdminSessionActivator;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<PendingDecisionChoice>;
@@ -324,6 +336,14 @@ export class DispatchAcceptedCommandUseCase {
 
     if (input.route.kind === "pending_access_requests") {
       return this.listPendingAccessRequests(input.context.chat.id);
+    }
+
+    if (input.route.kind === "list_notifications") {
+      return this.listUnreadNotifications(input.context);
+    }
+
+    if (input.route.kind === "mark_notification_read") {
+      return this.markNotificationRead(input);
     }
 
     if (input.route.kind === "admin_mode_activate") {
@@ -690,6 +710,7 @@ export class DispatchAcceptedCommandUseCase {
               intent.kind === "create_reminder"
                 ? intent.summary
                 : intent.title ?? "",
+            actorId: context.actor.id,
             ...planningDateFromIntent(context, intent),
             ...(intent.kind === "manage_planning" && intent.checklistItems
               ? { checklistItems: intent.checklistItems }
@@ -854,6 +875,70 @@ export class DispatchAcceptedCommandUseCase {
         decision === "approve"
           ? `Approved access request for ${actorId}.`
           : `Rejected access request for ${actorId}.`
+    };
+  }
+
+  private async listUnreadNotifications(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.notifications) {
+      return {
+        chatId: context.chat.id,
+        text: "Notifications are not configured."
+      };
+    }
+
+    const result = await this.dependencies.notifications.listUnread({
+      actorId: context.actor.id
+    });
+
+    if (result.notifications.length === 0) {
+      return {
+        chatId: context.chat.id,
+        text: "No unread notifications."
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: [
+        "Unread notifications:",
+        ...result.notifications.flatMap((notification, index) => [
+          `${index + 1}. ${notification.title}`,
+          ...notification.body.split("\n").map((line) => `   ${line}`),
+          `   id: ${notification.id}`
+        ])
+      ].join("\n")
+    };
+  }
+
+  private async markNotificationRead(
+    input: DispatchAcceptedCommandInput
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.notifications) {
+      return {
+        chatId: input.context.chat.id,
+        text: "Notifications are not configured."
+      };
+    }
+
+    const notificationId = parseNotificationId(input.route.normalizedText);
+
+    if (!notificationId) {
+      return {
+        chatId: input.context.chat.id,
+        text: "Usage: /read <notificationId>."
+      };
+    }
+
+    await this.dependencies.notifications.markRead({
+      notificationId,
+      actorId: input.context.actor.id
+    });
+
+    return {
+      chatId: input.context.chat.id,
+      text: `Marked notification ${notificationId} as read.`
     };
   }
 
@@ -3141,6 +3226,13 @@ function parseAdminSecret(text: string): string | undefined {
   const secret = match?.[1]?.trim();
 
   return secret || undefined;
+}
+
+function parseNotificationId(text: string): string | undefined {
+  const match = /^(?:\/read|read)\s+(.+)$/i.exec(text.trim());
+  const notificationId = match?.[1]?.trim();
+
+  return notificationId || undefined;
 }
 
 function formatFamilyFactConfirmation(

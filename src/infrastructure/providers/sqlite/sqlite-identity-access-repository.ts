@@ -8,6 +8,9 @@ import type {
 import type { MessengerChat } from "../../../core/domain/identity/messenger-chat.js";
 import type { IdentityAccessRepositoryPort } from "../../../ports/identity-access-repository-port.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
+import type {
+  NotificationDeliveryTarget
+} from "../../../ports/notification-delivery-port.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 export class SqliteIdentityAccessRepository
@@ -327,6 +330,65 @@ export class SqliteIdentityAccessRepository
 
     return row ? adminSessionFromRow(row) : undefined;
   }
+
+  async listActiveFamilyNotificationRecipients(): Promise<readonly Actor[]> {
+    const rows = this.database
+      .prepare(
+        `
+          select id, display_name, role, status
+          from actors
+          where status = 'active'
+            and role in ('owner', 'family')
+          order by display_name, id
+        `
+      )
+      .all() as ActorRow[];
+
+    return rows.map(actorFromRow);
+  }
+
+  async listNotificationDeliveryTargetsForActors(
+    actorIds: readonly string[]
+  ): Promise<readonly NotificationDeliveryTarget[]> {
+    if (actorIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = actorIds
+      .map((_, index) => `@actorId${index}`)
+      .join(", ");
+    const parameters = Object.fromEntries(
+      actorIds.map((actorId, index) => [`actorId${index}`, actorId])
+    );
+    const rows = this.database
+      .prepare(
+        `
+          select
+            actors.id as actor_id,
+            actor_identities.provider,
+            messenger_chats.provider_chat_id
+          from actors
+          inner join actor_identities
+            on actor_identities.actor_id = actors.id
+          inner join messenger_chats
+            on messenger_chats.provider = actor_identities.provider
+            and messenger_chats.provider_chat_id = actor_identities.provider_user_id
+          where actors.id in (${placeholders})
+            and actors.status = 'active'
+            and actor_identities.status = 'active'
+            and messenger_chats.approved = 1
+            and messenger_chats.kind in ('owner_private', 'family_private')
+          order by actors.display_name, actors.id, actor_identities.provider
+        `
+      )
+      .all(parameters) as NotificationDeliveryTargetRow[];
+
+    return rows.map((row) => ({
+      actorId: row.actor_id,
+      provider: row.provider,
+      providerChatId: row.provider_chat_id
+    }));
+  }
 }
 
 interface ActorRow {
@@ -363,6 +425,12 @@ interface PendingAccessRequestRow {
   readonly provider_chat_id: string;
   readonly kind: ChatContextKind;
   readonly approved: 0 | 1;
+}
+
+interface NotificationDeliveryTargetRow {
+  readonly actor_id: string;
+  readonly provider: string;
+  readonly provider_chat_id: string;
 }
 
 function actorFromRow(row: ActorRow): Actor {

@@ -28,13 +28,57 @@ describe("ManagePlanningTaskUseCase", () => {
         checklistItems: ["passports", "tickets"]
       })
     ).resolves.toEqual({
-      text: "Added to family tasks: Pack bags (T-created)"
+      text: [
+        "Created family planning task:",
+        "Pack bags",
+        "External id: T-created",
+        "Date: 2026-07-24",
+        "Checklist items: 2"
+      ].join("\n")
     });
     expect(planning.created).toEqual({
       title: "Pack bags",
       scope: "family",
       date: "2026-07-24",
       checklistItems: ["passports", "tickets"]
+    });
+  });
+
+  it("emits family notifications when family planning tasks are created", async () => {
+    const planning = new RecordingPlanningProvider([
+      {
+        id: "T-created",
+        title: "Pack bags",
+        status: "open"
+      }
+    ]);
+    const notifications = new RecordingNotificationCreator();
+    const useCase = new ManagePlanningTaskUseCase({
+      planning,
+      notifications
+    });
+
+    await useCase.execute({
+      action: "create",
+      title: "Pack bags",
+      date: "2026-07-24",
+      checklistItems: ["passports"],
+      actorId: "actor-owner"
+    });
+
+    expect(notifications.created).toEqual({
+      scope: "family",
+      title: "Planning task created",
+      body: [
+        "Created family planning task:",
+        "Pack bags",
+        "External id: T-created",
+        "Date: 2026-07-24",
+        "Checklist items: 1"
+      ].join("\n"),
+      sourceKind: "planning_task",
+      sourceId: "T-created",
+      createdByActorId: "actor-owner"
     });
   });
 
@@ -124,6 +168,33 @@ class RecordingPlanningProvider implements PlanningPort {
 
     return {
       item: this.items[0]!
+    };
+  }
+}
+
+class RecordingNotificationCreator {
+  created:
+    | {
+        readonly scope: "family" | "personal";
+        readonly title: string;
+        readonly body: string;
+        readonly sourceKind?: string;
+        readonly sourceId?: string;
+        readonly createdByActorId?: string;
+        readonly recipientActorId?: string;
+      }
+    | undefined;
+
+  async execute(input: NonNullable<RecordingNotificationCreator["created"]>) {
+    this.created = input;
+
+    return {
+      notification: {
+        id: "notification-1",
+        ...input,
+        createdAt: new Date("2026-07-24T00:00:00.000Z")
+      },
+      recipientActorIds: ["actor-owner"]
     };
   }
 }

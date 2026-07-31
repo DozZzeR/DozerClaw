@@ -2,6 +2,9 @@ import type {
   PlanningPort,
   PlanningScope
 } from "../../../ports/planning-port.js";
+import type {
+  PlanningNotificationCreator
+} from "../notifications/notification-use-cases.js";
 
 export type ManagePlanningTaskInput =
   | {
@@ -10,6 +13,7 @@ export type ManagePlanningTaskInput =
       readonly scope?: PlanningScope;
       readonly date?: string;
       readonly checklistItems?: readonly string[];
+      readonly actorId?: string;
     }
   | {
       readonly action: "complete";
@@ -24,7 +28,10 @@ export interface ManagePlanningTaskResult {
 
 export class ManagePlanningTaskUseCase {
   constructor(
-    private readonly dependencies: { readonly planning: PlanningPort }
+    private readonly dependencies: {
+      readonly planning: PlanningPort;
+      readonly notifications?: PlanningNotificationCreator;
+    }
   ) {}
 
   async execute(
@@ -46,8 +53,41 @@ export class ManagePlanningTaskUseCase {
         ...(input.checklistItems ? { checklistItems: input.checklistItems } : {})
       });
 
+      const text = planningTaskCreationNotification({
+        scope,
+        title: result.item.title,
+        id: result.item.id,
+        ...(input.date ? { date: input.date } : {}),
+        ...(input.checklistItems
+          ? { checklistItemCount: input.checklistItems.length }
+          : {})
+      });
+
+      if (this.dependencies.notifications && scope === "family") {
+        await this.dependencies.notifications.execute({
+          scope,
+          title: "Planning task created",
+          body: text,
+          sourceKind: "planning_task",
+          sourceId: result.item.id,
+          ...(input.actorId ? { createdByActorId: input.actorId } : {})
+        });
+      }
+
+      if (this.dependencies.notifications && scope === "personal" && input.actorId) {
+        await this.dependencies.notifications.execute({
+          scope,
+          recipientActorId: input.actorId,
+          title: "Planning task created",
+          body: text,
+          sourceKind: "planning_task",
+          sourceId: result.item.id,
+          createdByActorId: input.actorId
+        });
+      }
+
       return {
-        text: `Added to ${scope} tasks: ${result.item.title} (${result.item.id})`
+        text
       };
     }
 
@@ -88,4 +128,22 @@ export class ManagePlanningTaskUseCase {
       text: `Completed ${scope} task: ${result.item.title} (${result.item.id})`
     };
   }
+}
+
+function planningTaskCreationNotification(input: {
+  readonly scope: PlanningScope;
+  readonly title: string;
+  readonly id: string;
+  readonly date?: string;
+  readonly checklistItemCount?: number;
+}): string {
+  return [
+    `Created ${input.scope} planning task:`,
+    input.title,
+    `External id: ${input.id}`,
+    ...(input.date ? [`Date: ${input.date}`] : []),
+    ...(input.checklistItemCount !== undefined
+      ? [`Checklist items: ${input.checklistItemCount}`]
+      : [])
+  ].join("\n");
 }

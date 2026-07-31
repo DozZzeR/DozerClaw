@@ -5,6 +5,9 @@ import type {
 } from "../core/domain/identity/actor-identity.js";
 import type { ChatContext } from "../core/domain/identity/chat-context.js";
 import type { MessengerChat } from "../core/domain/identity/messenger-chat.js";
+import type {
+  NotificationDeliveryTarget
+} from "./notification-delivery-port.js";
 
 export interface PendingAccessRequest {
   readonly actor: Actor;
@@ -44,4 +47,8 @@ export interface IdentityAccessRepositoryPort {
     chatId: string,
     now: Date
   ): Promise<AdminSession | undefined>;
+  listActiveFamilyNotificationRecipients(): Promise<readonly Actor[]>;
+  listNotificationDeliveryTargetsForActors(
+    actorIds: readonly string[]
+  ): Promise<readonly NotificationDeliveryTarget[]>;
 }

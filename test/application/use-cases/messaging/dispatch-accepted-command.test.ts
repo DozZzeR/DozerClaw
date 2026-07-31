@@ -2544,7 +2544,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
       action: "create",
       title: "Pack bags",
       date: "2026-07-24",
-      checklistItems: ["passports", "tickets"]
+      checklistItems: ["passports", "tickets"],
+      actorId: "actor-owner"
     });
   });
 
@@ -2575,7 +2576,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(planningTaskManager.seenInput).toEqual({
       action: "create",
       title: "починить пятку ребенку",
-      date: "2026-07-27"
+      date: "2026-07-27",
+      actorId: "actor-owner"
     });
   });
 
@@ -2603,7 +2605,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(planningTaskManager.seenInput).toEqual({
       action: "create",
       title: "Pack bags",
-      date: "2026-07-27"
+      date: "2026-07-27",
+      actorId: "actor-owner"
     });
   });
 
@@ -3371,6 +3374,85 @@ describe("DispatchAcceptedCommandUseCase", () => {
       { actorId: "actor-pending", decision: "reject" }
     ]);
   });
+
+  it("lists unread notifications for the current actor", async () => {
+    const notifications = new FakeNotificationInbox();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      notifications
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("list_notifications", "/notifications"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Unread notifications:",
+        "1. Planning task created",
+        "   Created family planning task:",
+        "   Pack bags",
+        "   id: notification-1"
+      ].join("\n")
+    });
+    expect(notifications.listActorIds).toEqual(["actor-owner"]);
+  });
+
+  it("marks one notification read for the current actor", async () => {
+    const notifications = new FakeNotificationInbox();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      notifications
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("mark_notification_read", "/read notification-1"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Marked notification notification-1 as read."
+    });
+    expect(notifications.readInputs).toEqual([
+      {
+        notificationId: "notification-1",
+        actorId: "actor-owner"
+      }
+    ]);
+  });
+
+  it("reports empty and unconfigured notification inboxes", async () => {
+    const emptyNotifications = new FakeNotificationInbox([]);
+    const configuredUseCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      notifications: emptyNotifications
+    });
+    const unconfiguredUseCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler
+    });
+
+    await expect(
+      configuredUseCase.execute({
+        route: route("list_notifications", "/notifications"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "No unread notifications."
+    });
+    await expect(
+      unconfiguredUseCase.execute({
+        route: route("list_notifications", "/notifications"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Notifications are not configured."
+    });
+  });
 });
 
 const acceptedContext: AcceptedMessageContext = {
@@ -3478,6 +3560,47 @@ class FakeAdminSessionActivator {
         expiresAt: new Date(input.now.getTime() + 5 * 60 * 1000)
       }
     };
+  }
+}
+
+class FakeNotificationInbox {
+  readonly listActorIds: string[] = [];
+  readonly readInputs: {
+    readonly notificationId: string;
+    readonly actorId: string;
+  }[] = [];
+
+  constructor(
+    private readonly unreadNotifications: readonly {
+      readonly id: string;
+      readonly scope: "family" | "personal";
+      readonly title: string;
+      readonly body: string;
+      readonly createdAt: Date;
+    }[] = [
+      {
+        id: "notification-1",
+        scope: "family",
+        title: "Planning task created",
+        body: "Created family planning task:\nPack bags",
+        createdAt: new Date("2026-08-01T10:00:00.000Z")
+      }
+    ]
+  ) {}
+
+  async listUnread(input: { readonly actorId: string }) {
+    this.listActorIds.push(input.actorId);
+
+    return {
+      notifications: this.unreadNotifications
+    };
+  }
+
+  async markRead(input: {
+    readonly notificationId: string;
+    readonly actorId: string;
+  }) {
+    this.readInputs.push(input);
   }
 }
 

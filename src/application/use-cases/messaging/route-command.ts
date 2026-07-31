@@ -6,6 +6,8 @@ export type CommandKind =
   | "admin_write"
   | "start"
   | "pending_access_requests"
+  | "list_notifications"
+  | "mark_notification_read"
   | "approve_access_request"
   | "reject_access_request"
   | "family_message";
@@ -53,6 +55,22 @@ export function routeCommand(text: string): CommandRoute {
     return {
       kind: "pending_access_requests",
       action: "owner_read",
+      normalizedText
+    };
+  }
+
+  if (comparable === "/notifications" || comparable === "notifications") {
+    return {
+      kind: "list_notifications",
+      action: "family_read",
+      normalizedText
+    };
+  }
+
+  if (comparable.startsWith("/read ") || comparable.startsWith("read ")) {
+    return {
+      kind: "mark_notification_read",
+      action: "family_read",
       normalizedText
     };
   }

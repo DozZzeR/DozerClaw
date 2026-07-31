@@ -43,6 +43,25 @@ describe("routeCommand", () => {
     });
   });
 
+  it.each(["/notifications", "notifications"])(
+    "routes %s to notification list family read",
+    (text) => {
+      expect(routeCommand(text)).toEqual({
+        kind: "list_notifications",
+        action: "family_read",
+        normalizedText: text
+      });
+    }
+  );
+
+  it("routes notification read command to family read", () => {
+    expect(routeCommand("/read notification-1")).toEqual({
+      kind: "mark_notification_read",
+      action: "family_read",
+      normalizedText: "/read notification-1"
+    });
+  });
+
   it("routes access review commands to admin write", () => {
     expect(routeCommand("/approve actor-1")).toEqual({
       kind: "approve_access_request",

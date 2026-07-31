@@ -100,6 +100,30 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingFamilyFactArchiveDecisionsTable(database);
   ensurePendingDocumentDecisionsTable(database);
   ensurePendingDocumentPlacementDecisionsTable(database);
+  ensureNotificationsTables(database);
+}
+
+function ensureNotificationsTables(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists notifications (
+      id text primary key,
+      scope text not null check (scope in ('family', 'personal')),
+      title text not null,
+      body text not null,
+      source_kind text,
+      source_id text,
+      created_by_actor_id text,
+      created_at text not null
+    );
+
+    create table if not exists notification_deliveries (
+      notification_id text not null references notifications(id) on delete cascade,
+      actor_id text not null references actors(id),
+      read_at text,
+      created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      primary key (notification_id, actor_id)
+    );
+  `);
 }
 
 function ensureDocumentsTable(database: SqliteDatabase): void {

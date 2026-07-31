@@ -21,6 +21,11 @@ import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases
 import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
 import { QueryPlanningStateUseCase } from "../application/use-cases/planning/query-planning-state.js";
 import { ManagePlanningTaskUseCase } from "../application/use-cases/planning/manage-planning-task.js";
+import {
+  CreateNotificationUseCase,
+  ListUnreadNotificationsUseCase,
+  MarkNotificationReadUseCase
+} from "../application/use-cases/notifications/notification-use-cases.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
@@ -48,6 +53,7 @@ import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sql
 import { SqliteFamilyMemoryRepository } from "../infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sqlite-file-inbox-repository.js";
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
+import { SqliteNotificationRepository } from "../infrastructure/providers/sqlite/sqlite-notification-repository.js";
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
@@ -57,6 +63,7 @@ import type { DocumentStoragePort } from "../ports/document-storage-port.js";
 import type { ModelPort } from "../ports/model-port.js";
 import type { PlanningPort } from "../ports/planning-port.js";
 import type { AdminSecretVerifierPort } from "../ports/admin-secret-verifier-port.js";
+import type { NotificationDeliveryPort } from "../ports/notification-delivery-port.js";
 
 export interface BuildAppOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -65,6 +72,7 @@ export interface BuildAppOptions {
   readonly documentFolderPolicy?: DocumentFolderPolicyPort;
   readonly modelProvider?: ModelPort;
   readonly planningProvider?: PlanningPort;
+  readonly notificationDelivery?: NotificationDeliveryPort;
 }
 
 export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
@@ -78,6 +86,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const fileInboxRepository = new SqliteFileInboxRepository(database);
   const familyMemoryRepository = new SqliteFamilyMemoryRepository(database);
   const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
+  const notificationRepository = new SqliteNotificationRepository(database);
   const generateId = () => randomUUID();
   const bootstrapOwnerIdentity = new BootstrapOwnerIdentityUseCase({
     repository: identityAccessRepository,
@@ -253,9 +262,26 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         planning: planningProvider
       })
     : undefined;
+  const notificationCreator = new CreateNotificationUseCase({
+    repository: notificationRepository,
+    identity: identityAccessRepository,
+    ...(options.notificationDelivery
+      ? { delivery: options.notificationDelivery }
+      : {}),
+    generateId,
+    now: () => new Date()
+  });
+  const notificationLister = new ListUnreadNotificationsUseCase({
+    repository: notificationRepository
+  });
+  const notificationReader = new MarkNotificationReadUseCase({
+    repository: notificationRepository,
+    now: () => new Date()
+  });
   const planningTaskManager = planningProvider
     ? new ManagePlanningTaskUseCase({
-        planning: planningProvider
+        planning: planningProvider,
+        notifications: notificationCreator
       })
     : undefined;
   const intentClassifier = modelProvider
@@ -282,6 +308,10 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     familyFactRecall,
     ...(planningQuery ? { planningQuery } : {}),
     ...(planningTaskManager ? { planningTaskManager } : {}),
+    notifications: {
+      listUnread: (input) => notificationLister.execute(input),
+      markRead: (input) => notificationReader.execute(input)
+    },
     familyFactArchiver,
     ...(documentRegistrar ? { documentRegistrar } : {}),
     documentLookup,
