@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { DocumentType } from "../../../core/domain/documents/document-record.js";
+import type { FamilyJournalCategory } from "../../../core/domain/family-journal/family-journal-entry.js";
 import type { FamilyFactCategory } from "../../../core/domain/family-memory/family-fact.js";
 import type { ModelPort } from "../../../ports/model-port.js";
 
@@ -32,8 +33,18 @@ export type InboundIntent =
       readonly subjectId?: string;
     }
   | {
+      readonly kind: "record_journal_entry";
+      readonly summary: string;
+      readonly journalCategory?: FamilyJournalCategory;
+      readonly subjectId?: string;
+    }
+  | {
       readonly kind: "create_reminder";
       readonly summary: string;
+    }
+  | {
+      readonly kind: "recall_journal_entries";
+      readonly query: string;
     }
   | {
       readonly kind: "answer_from_memory";
@@ -144,6 +155,22 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- If category is unclear, use `preference`; if subject is unclear, set `subjectId` to `null`."
     ].join("\n"),
     "",
+    "# record_journal_entry field rules",
+    [
+      "- Use `record_journal_entry` for chronological diary/log observations about health, child development, sleep, food, mood, school, and milestones.",
+      "- Use this for phrases like health diary, child diary, sleep log, food note, mood note, `дневник здоровья`, `дневник ребенка`, or `запиши в дневник`.",
+      "- `summary`: one concise observation sentence, preserving the useful concrete details.",
+      "- `journalCategory`: choose one of `health`, `child`, `sleep`, `food`, `mood`, `school`, `milestone`, or `other`.",
+      "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain."
+    ].join("\n"),
+    "",
+    "# recall_journal_entries field rules",
+    [
+      "- Use `recall_journal_entries` when the user asks what was saved in a family diary or journal.",
+      "- `query`: the shortest useful diary search phrase, including subject and category when present.",
+      "- Do not use journal intents for durable preferences, addresses, or reference links; use family memory fact intents for those."
+    ].join("\n"),
+    "",
     "# store_file field rules",
     [
       "- Use `store_file` for uploaded attachments.",
@@ -217,6 +244,13 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       '{"kind":"record_fact","summary":"Max started swimming lessons.","category":"event","subjectId":"max"}',
       '{"kind":"record_fact","summary":"Sofia likes pasta for lunch.","category":"preference","subjectId":"sofia"}',
       '{"kind":"record_fact","summary":"The family dentist is near Central Park.","category":"place","subjectId":"family"}'
+    ].join("\n"),
+    "",
+    "# family_journal examples",
+    [
+      '{"kind":"record_journal_entry","summary":"Sofia coughed at night but had no fever.","journalCategory":"health","subjectId":"sofia"}',
+      '{"kind":"record_journal_entry","summary":"Max slept through the night.","journalCategory":"sleep","subjectId":"max"}',
+      '{"kind":"recall_journal_entries","query":"health diary sofia cough"}'
     ].join("\n"),
     "",
     "# archive_fact examples",
@@ -343,6 +377,18 @@ export function parseInboundIntent(text: string): InboundIntent {
     }
 
     if (
+      parsed.kind === "record_journal_entry" &&
+      typeof parsed.summary === "string"
+    ) {
+      return {
+        kind: "record_journal_entry",
+        summary: parsed.summary.trim(),
+        journalCategory: parseFamilyJournalCategory(parsed.journalCategory),
+        ...optionalTrimmedText("subjectId", parsed.subjectId)
+      };
+    }
+
+    if (
       parsed.kind === "create_reminder" &&
       typeof parsed.summary === "string"
     ) {
@@ -361,6 +407,16 @@ export function parseInboundIntent(text: string): InboundIntent {
     ) {
       return {
         kind: "answer_from_memory",
+        query: parsed.query.trim()
+      };
+    }
+
+    if (
+      parsed.kind === "recall_journal_entries" &&
+      typeof parsed.query === "string"
+    ) {
+      return {
+        kind: "recall_journal_entries",
         query: parsed.query.trim()
       };
     }
@@ -542,7 +598,9 @@ const inboundIntentSchema = {
         "ask_clarification",
         "store_file",
         "record_fact",
+        "record_journal_entry",
         "answer_from_memory",
+        "recall_journal_entries",
         "query_planning",
         "manage_planning",
         "archive_fact",
@@ -566,6 +624,20 @@ const inboundIntentSchema = {
     category: {
       type: ["string", "null"],
       enum: ["event", "preference", "place", "reference_link", null]
+    },
+    journalCategory: {
+      type: ["string", "null"],
+      enum: [
+        "health",
+        "child",
+        "sleep",
+        "food",
+        "mood",
+        "school",
+        "milestone",
+        "other",
+        null
+      ]
     },
     subjectId: {
       type: ["string", "null"]
@@ -657,6 +729,7 @@ const inboundIntentSchema = {
     "question",
     "summary",
     "category",
+    "journalCategory",
     "subjectId",
     "aliasSubjectId",
     "canonicalSubjectId",
@@ -685,6 +758,27 @@ function isFamilyFactCategory(value: string): value is FamilyFactCategory {
     value === "preference" ||
     value === "place" ||
     value === "reference_link"
+  );
+}
+
+function parseFamilyJournalCategory(value: unknown): FamilyJournalCategory {
+  return typeof value === "string" && isFamilyJournalCategory(value)
+    ? value
+    : "other";
+}
+
+function isFamilyJournalCategory(
+  value: string
+): value is FamilyJournalCategory {
+  return (
+    value === "health" ||
+    value === "child" ||
+    value === "sleep" ||
+    value === "food" ||
+    value === "mood" ||
+    value === "school" ||
+    value === "milestone" ||
+    value === "other"
   );
 }
 

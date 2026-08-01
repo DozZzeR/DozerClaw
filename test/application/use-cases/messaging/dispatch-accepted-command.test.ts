@@ -11,6 +11,9 @@ import type { DocumentRecord } from "../../../../src/core/domain/documents/docum
 import type { DocumentType } from "../../../../src/core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyFactCategory } from "../../../../src/core/domain/family-memory/family-fact.js";
+import type {
+  FamilyJournalCategory
+} from "../../../../src/core/domain/family-journal/family-journal-entry.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
@@ -1635,6 +1638,70 @@ describe("DispatchAcceptedCommandUseCase", () => {
       sourceActorId: "actor-owner",
       sourceChatId: "chat-owner",
       sourceMessageText: "remember that Max started swimming lessons"
+    });
+  });
+
+  it("records a family journal entry from model intent", async () => {
+    const journalRecorder = new FakeFamilyJournalRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "record_journal_entry",
+        summary: "Sofia coughed at night but had no fever.",
+        journalCategory: "health",
+        subjectId: "sofia"
+      }),
+      familyJournalRecorder: journalRecorder,
+      now: () => new Date("2026-08-01T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "запиши в дневник здоровья софии кашель ночью"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family journal entry: Sofia coughed at night but had no fever."
+    });
+    expect(journalRecorder.seenInput).toEqual({
+      body: "Sofia coughed at night but had no fever.",
+      category: "health",
+      subjectId: "sofia",
+      sourceActorId: "actor-owner",
+      sourceChatId: "chat-owner",
+      sourceMessageText: "запиши в дневник здоровья софии кашель ночью"
+    });
+  });
+
+  it("recalls family journal entries from model intent", async () => {
+    const journalRecall = new FakeFamilyJournalRecall();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "recall_journal_entries",
+        query: "health diary sofia"
+      }),
+      familyJournalRecall: journalRecall
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "что было в дневнике здоровья софии?"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Recent family journal entries:\n- [health] Sofia coughed at night."
+    });
+    expect(journalRecall.seenInput).toEqual({
+      query: "health diary sofia"
     });
   });
 
@@ -3622,6 +3689,13 @@ class FakeIntentClassifier {
           readonly subjectId?: string;
         }
       | { readonly kind: "answer_from_memory"; readonly query: string }
+      | {
+          readonly kind: "record_journal_entry";
+          readonly summary: string;
+          readonly journalCategory?: FamilyJournalCategory;
+          readonly subjectId?: string;
+        }
+      | { readonly kind: "recall_journal_entries"; readonly query: string }
       | { readonly kind: "create_reminder"; readonly summary: string }
       | { readonly kind: "query_planning"; readonly query: string }
       | {
@@ -3736,6 +3810,52 @@ class FakeFamilyFactRecall {
 
     return {
       text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    };
+  }
+}
+
+class FakeFamilyJournalRecorder {
+  seenInput:
+    | {
+        body: string;
+        category?: FamilyJournalCategory;
+        subjectId?: string;
+        sourceActorId: string;
+        sourceChatId: string;
+        sourceMessageText: string;
+      }
+    | undefined;
+
+  async execute(input: NonNullable<FakeFamilyJournalRecorder["seenInput"]>) {
+    this.seenInput = input;
+
+    return {
+      status: "created" as const,
+      entry: {
+        id: "journal-1",
+        category: input.category ?? "other",
+        body: input.body,
+        ...(input.subjectId ? { subjectId: input.subjectId } : {}),
+        sourceActorId: input.sourceActorId,
+        sourceChatId: input.sourceChatId,
+        sourceMessageText: input.sourceMessageText,
+        status: "active" as const,
+        occurredAt: new Date("2026-08-01T10:00:00.000Z"),
+        createdAt: new Date("2026-08-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-08-01T10:00:00.000Z")
+      }
+    };
+  }
+}
+
+class FakeFamilyJournalRecall {
+  seenInput: { query: string } | undefined;
+
+  async execute(input: { query: string }) {
+    this.seenInput = input;
+
+    return {
+      text: "Recent family journal entries:\n- [health] Sofia coughed at night."
     };
   }
 }

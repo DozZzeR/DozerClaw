@@ -39,6 +39,11 @@ import type { PendingFileDestinationDecision } from "../../../ports/state-reposi
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
 import type { DocumentUploadFolderOption } from "../../../ports/document-folder-policy-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
+import type { RecallFamilyJournalEntriesInput } from "../family-journal/recall-family-journal-entries.js";
+import type {
+  RecordFamilyJournalEntryInput,
+  RecordFamilyJournalEntryResult
+} from "../family-journal/record-family-journal-entry.js";
 import type { RecallFamilyFactsInput } from "../family-memory/recall-family-facts.js";
 import type {
   ArchiveFamilyFactInput,
@@ -134,6 +139,18 @@ export interface FamilyFactRecorder {
 
 export interface FamilyFactRecall {
   execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
+}
+
+export interface FamilyJournalRecorder {
+  execute(
+    input: RecordFamilyJournalEntryInput
+  ): Promise<RecordFamilyJournalEntryResult>;
+}
+
+export interface FamilyJournalRecall {
+  execute(
+    input: RecallFamilyJournalEntriesInput
+  ): Promise<{ readonly text: string }>;
 }
 
 export interface PlanningStateQuery {
@@ -289,6 +306,8 @@ export interface DispatchAcceptedCommandDependencies {
   readonly documentSearchDescriptionRecorder?: DocumentSearchDescriptionRecorder;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactRecall?: FamilyFactRecall;
+  readonly familyJournalRecorder?: FamilyJournalRecorder;
+  readonly familyJournalRecall?: FamilyJournalRecall;
   readonly planningQuery?: PlanningStateQuery;
   readonly planningTaskManager?: PlanningTaskManager;
   readonly familyFactArchiver?: FamilyFactArchiver;
@@ -657,6 +676,53 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     const result = await this.dependencies.familyFactRecall.execute({
+      query: intent.query
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async recordFamilyJournalEntry(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "record_journal_entry" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.familyJournalRecorder) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.familyJournalRecorder.execute({
+      body: intent.summary,
+      ...(intent.journalCategory ? { category: intent.journalCategory } : {}),
+      ...(intent.subjectId ? { subjectId: intent.subjectId } : {}),
+      sourceActorId: context.actor.id,
+      sourceChatId: context.chat.id,
+      sourceMessageText: context.text
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: `Saved family journal entry: ${result.entry.body}`
+    };
+  }
+
+  private async recallFamilyJournalEntries(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "recall_journal_entries" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.familyJournalRecall) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.familyJournalRecall.execute({
       query: intent.query
     });
 
@@ -1439,8 +1505,16 @@ export class DispatchAcceptedCommandUseCase {
       return this.recordFamilyFact(context, intent);
     }
 
+    if (intent.kind === "record_journal_entry") {
+      return this.recordFamilyJournalEntry(context, intent);
+    }
+
     if (intent.kind === "answer_from_memory") {
       return this.recallFamilyFacts(context, intent);
+    }
+
+    if (intent.kind === "recall_journal_entries") {
+      return this.recallFamilyJournalEntries(context, intent);
     }
 
     if (intent.kind === "query_planning") {
@@ -3180,6 +3254,7 @@ function requiredAccessActionForIntent(
   if (
     intent.kind === "store_file" ||
     intent.kind === "record_fact" ||
+    intent.kind === "record_journal_entry" ||
     intent.kind === "archive_fact" ||
     intent.kind === "register_document" ||
     intent.kind === "update_document" ||

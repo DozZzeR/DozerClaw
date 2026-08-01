@@ -54,6 +54,7 @@ describe("ModelInboundIntentClassifier", () => {
           "question",
           "summary",
           "category",
+          "journalCategory",
           "subjectId",
           "aliasSubjectId",
           "canonicalSubjectId",
@@ -77,6 +78,8 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("requests");
     expect(model.request?.input).toContain("query_planning");
     expect(model.request?.input).toContain("manage_planning");
+    expect(model.request?.input).toContain("record_journal_entry");
+    expect(model.request?.input).toContain("recall_journal_entries");
     expect(JSON.stringify(model.request?.outputSchema)).not.toContain(
       "create_reminder"
     );
@@ -120,6 +123,35 @@ describe("parseInboundIntent", () => {
       summary: "Max started swimming lessons.",
       category: "event",
       subjectId: "max"
+    });
+  });
+
+  it("parses family journal intents", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "record_journal_entry",
+          summary: "Sofia coughed at night but had no fever.",
+          journalCategory: "health",
+          subjectId: " sofia "
+        })
+      )
+    ).toEqual({
+      kind: "record_journal_entry",
+      summary: "Sofia coughed at night but had no fever.",
+      journalCategory: "health",
+      subjectId: "sofia"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "recall_journal_entries",
+          query: "health diary sofia"
+        })
+      )
+    ).toEqual({
+      kind: "recall_journal_entries",
+      query: "health diary sofia"
     });
   });
 

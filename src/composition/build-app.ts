@@ -31,6 +31,8 @@ import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
 import { ManageSubjectAliasesUseCase } from "../application/use-cases/family-memory/manage-subject-aliases.js";
 import { ResolveFamilyFactDecisionUseCase } from "../application/use-cases/family-memory/resolve-family-fact-decision.js";
+import { RecordFamilyJournalEntryUseCase } from "../application/use-cases/family-journal/record-family-journal-entry.js";
+import { RecallFamilyJournalEntriesUseCase } from "../application/use-cases/family-journal/recall-family-journal-entries.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
 import { GetServiceHealthUseCase } from "../application/use-cases/health/get-service-health.js";
@@ -50,6 +52,7 @@ import { SingularityPlanningProvider } from "../infrastructure/providers/singula
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sqlite-document-repository.js";
+import { SqliteFamilyJournalRepository } from "../infrastructure/providers/sqlite/sqlite-family-journal-repository.js";
 import { SqliteFamilyMemoryRepository } from "../infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
 import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sqlite-file-inbox-repository.js";
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
@@ -85,6 +88,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const documentRepository = new SqliteDocumentRepository(database);
   const fileInboxRepository = new SqliteFileInboxRepository(database);
   const familyMemoryRepository = new SqliteFamilyMemoryRepository(database);
+  const familyJournalRepository = new SqliteFamilyJournalRepository(database);
   const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
   const notificationRepository = new SqliteNotificationRepository(database);
   const generateId = () => randomUUID();
@@ -131,6 +135,13 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     : undefined;
   const familyFactRecorder = new RecordFamilyFactUseCase({
     repository: familyMemoryRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
+    subjectAliases: subjectAliasRepository,
+    generateId,
+    now: () => new Date()
+  });
+  const familyJournalRecorder = new RecordFamilyJournalEntryUseCase({
+    repository: familyJournalRepository,
     ...(semanticMemory ? { semanticMemory } : {}),
     subjectAliases: subjectAliasRepository,
     generateId,
@@ -244,6 +255,14 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     semanticLimit: config.memory?.mempalace?.searchLimit ?? 5,
     ...(modelProvider ? { model: modelProvider } : {})
   });
+  const familyJournalRecall = new RecallFamilyJournalEntriesUseCase({
+    repository: familyJournalRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
+    subjectAliases: subjectAliasRepository,
+    recentLimit: 50,
+    resultLimit: 10,
+    semanticLimit: config.memory?.mempalace?.searchLimit ?? 5
+  });
   const familyFactArchiver = new ArchiveFamilyFactUseCase({
     repository: familyMemoryRepository,
     now: () => new Date(),
@@ -306,6 +325,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
     familyFactRecall,
+    familyJournalRecorder,
+    familyJournalRecall,
     ...(planningQuery ? { planningQuery } : {}),
     ...(planningTaskManager ? { planningTaskManager } : {}),
     notifications: {

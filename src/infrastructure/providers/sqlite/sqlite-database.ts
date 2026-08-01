@@ -92,6 +92,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensureFileInboxRecordsTable(database);
   ensureDocumentsTable(database);
   ensureFamilyFactsTable(database);
+  ensureFamilyJournalEntriesTable(database);
   ensureFamilySubjectAliasesTable(database);
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
@@ -281,6 +282,36 @@ function ensureFamilyFactsTable(database: SqliteDatabase): void {
     "semantic_memory_entry_id",
     "semantic_memory_entry_id text"
   );
+}
+
+function ensureFamilyJournalEntriesTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists family_journal_entries (
+      id text primary key,
+      category text not null check (
+        category in (
+          'health',
+          'child',
+          'sleep',
+          'food',
+          'mood',
+          'school',
+          'milestone',
+          'other'
+        )
+      ),
+      body text not null,
+      subject_id text,
+      semantic_memory_entry_id text,
+      source_actor_id text not null,
+      source_chat_id text not null,
+      source_message_text text not null,
+      status text not null check (status in ('active', 'archived')),
+      occurred_at text not null,
+      created_at text not null,
+      updated_at text not null
+    );
+  `);
 }
 
 function ensureFamilySubjectAliasesTable(database: SqliteDatabase): void {
