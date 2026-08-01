@@ -261,7 +261,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     subjectAliases: subjectAliasRepository,
     recentLimit: 50,
     resultLimit: 10,
-    semanticLimit: config.memory?.mempalace?.searchLimit ?? 5
+    semanticLimit: config.memory?.mempalace?.searchLimit ?? 5,
+    ...(modelProvider ? { model: modelProvider } : {})
   });
   const familyFactArchiver = new ArchiveFamilyFactUseCase({
     repository: familyMemoryRepository,

@@ -9,6 +9,7 @@ import type {
   MemoryPort,
   MemorySearchQuery
 } from "../../../../src/ports/memory-port.js";
+import type { ModelPort, ModelTextRequest } from "../../../../src/ports/model-port.js";
 import type { SubjectAliasRepositoryPort } from "../../../../src/ports/subject-alias-repository-port.js";
 
 describe("family journal use cases", () => {
@@ -128,6 +129,72 @@ describe("family journal use cases", () => {
       ].join("\n")
     });
   });
+
+  it("synthesizes a grounded journal recall answer with a model", async () => {
+    const model = new RecordingModel(
+      JSON.stringify({
+        answer: "Sofia coughed at night, but there was no fever.",
+        usedJournalEntryIds: ["journal-1"]
+      })
+    );
+    const repository = new RecordingFamilyJournalRepository([
+      journalEntry({
+        id: "journal-1",
+        category: "health",
+        body: "Sofia coughed at night but had no fever.",
+        subjectId: "sofia"
+      })
+    ]);
+    const useCase = new RecallFamilyJournalEntriesUseCase({
+      repository,
+      model,
+      recentLimit: 10,
+      resultLimit: 5
+    });
+
+    await expect(useCase.execute({ query: "sofia cough fever" })).resolves.toEqual({
+      text: "Sofia coughed at night, but there was no fever."
+    });
+    expect(model.request?.purpose).toBe(
+      "Synthesize DozerClaw family journal answer"
+    );
+    expect(model.request?.input).toContain("journal-1");
+    expect(model.request?.input).toContain("health");
+    expect(model.request?.input).toContain("sofia");
+    expect(model.request?.outputSchema?.name).toBe(
+      "dozerclaw_family_journal_synthesis"
+    );
+  });
+
+  it("falls back to journal bullets when model synthesis is ungrounded", async () => {
+    const model = new RecordingModel(
+      JSON.stringify({
+        answer: "Sofia had a fever.",
+        usedJournalEntryIds: ["unknown-journal"]
+      })
+    );
+    const repository = new RecordingFamilyJournalRepository([
+      journalEntry({
+        id: "journal-1",
+        category: "health",
+        body: "Sofia coughed at night but had no fever.",
+        subjectId: "sofia"
+      })
+    ]);
+    const useCase = new RecallFamilyJournalEntriesUseCase({
+      repository,
+      model,
+      recentLimit: 10,
+      resultLimit: 5
+    });
+
+    await expect(useCase.execute({ query: "sofia cough fever" })).resolves.toEqual({
+      text: [
+        "Recent family journal entries:",
+        "- [health] Sofia coughed at night but had no fever. (subject: sofia)"
+      ].join("\n")
+    });
+  });
 });
 
 class RecordingFamilyJournalRepository implements FamilyJournalRepositoryPort {
@@ -158,6 +225,20 @@ class RecordingSemanticMemory implements MemoryPort {
 
   async search(_query: MemorySearchQuery) {
     return [];
+  }
+}
+
+class RecordingModel implements ModelPort {
+  request: ModelTextRequest | undefined;
+
+  constructor(private readonly responseText: string) {}
+
+  async runTextRequest(request: ModelTextRequest) {
+    this.request = request;
+
+    return {
+      text: this.responseText
+    };
   }
 }
 

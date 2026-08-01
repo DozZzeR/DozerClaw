@@ -2,6 +2,7 @@ import type { FamilyJournalEntry } from "../../../core/domain/family-journal/fam
 import { normalizeSubjectId } from "../../../core/domain/family-memory/subject-id.js";
 import type { FamilyJournalRepositoryPort } from "../../../ports/family-journal-repository-port.js";
 import type { MemoryPort, MemorySearchResult } from "../../../ports/memory-port.js";
+import type { ModelPort } from "../../../ports/model-port.js";
 import type { SubjectAliasRepositoryPort } from "../../../ports/subject-alias-repository-port.js";
 
 export interface RecallFamilyJournalEntriesDependencies {
@@ -11,6 +12,7 @@ export interface RecallFamilyJournalEntriesDependencies {
   readonly recentLimit: number;
   readonly resultLimit?: number;
   readonly semanticLimit?: number;
+  readonly model?: ModelPort;
 }
 
 export interface RecallFamilyJournalEntriesInput {
@@ -51,6 +53,17 @@ export class RecallFamilyJournalEntriesUseCase {
     );
 
     if (selectedEntries.length > 0) {
+      const synthesized = await this.synthesizeAnswer(
+        input.query,
+        selectedEntries
+      );
+
+      if (synthesized) {
+        return {
+          text: synthesized
+        };
+      }
+
       return {
         text: formatJournalEntries(selectedEntries)
       };
@@ -130,6 +143,35 @@ export class RecallFamilyJournalEntriesUseCase {
   private resultLimit(): number {
     return this.dependencies.resultLimit ?? 5;
   }
+
+  private async synthesizeAnswer(
+    query: string,
+    entries: readonly FamilyJournalEntry[]
+  ): Promise<string | undefined> {
+    if (!this.dependencies.model) {
+      return undefined;
+    }
+
+    try {
+      const response = await this.dependencies.model.runTextRequest({
+        purpose: "Synthesize DozerClaw family journal answer",
+        input: buildSynthesisPrompt(query, entries),
+        outputSchema: {
+          name: "dozerclaw_family_journal_synthesis",
+          schema: synthesisSchema
+        }
+      });
+      const parsed = parseSynthesizedAnswer(response.text);
+
+      if (!parsed || !isGroundedSynthesis(parsed, entries)) {
+        return undefined;
+      }
+
+      return parsed.answer;
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 interface RankedFamilyJournalEntry {
@@ -178,6 +220,103 @@ function formatSemanticResults(
     ...limit(results, resultLimit).map((result) => `- ${result.entry.body}`)
   ].join("\n");
 }
+
+function buildSynthesisPrompt(
+  query: string,
+  entries: readonly FamilyJournalEntry[]
+): string {
+  return [
+    "Answer the user query using only the provided family journal entries.",
+    "If the entries do not fully answer the query, say what is known and do not invent details.",
+    "Do not provide medical advice.",
+    "",
+    "# User query",
+    query,
+    "",
+    "# Family journal context",
+    JSON.stringify(
+      entries.map((entry) => ({
+        id: entry.id,
+        category: entry.category,
+        body: entry.body,
+        ...(entry.subjectId ? { subjectId: entry.subjectId } : {}),
+        occurredAt: entry.occurredAt.toISOString()
+      }))
+    )
+  ].join("\n");
+}
+
+interface ParsedSynthesizedAnswer {
+  readonly answer: string;
+  readonly usedJournalEntryIds: readonly string[];
+}
+
+function parseSynthesizedAnswer(
+  text: string
+): ParsedSynthesizedAnswer | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.answer !== "string" ||
+      !Array.isArray(parsed.usedJournalEntryIds)
+    ) {
+      return undefined;
+    }
+
+    const answer = parsed.answer.trim();
+    const usedJournalEntryIds = parsed.usedJournalEntryIds.filter(
+      (id): id is string => typeof id === "string"
+    );
+
+    if (!answer) {
+      return undefined;
+    }
+
+    return {
+      answer,
+      usedJournalEntryIds
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isGroundedSynthesis(
+  parsed: ParsedSynthesizedAnswer,
+  entries: readonly FamilyJournalEntry[]
+): boolean {
+  if (parsed.usedJournalEntryIds.length === 0) {
+    return false;
+  }
+
+  const entryIds = new Set(entries.map((entry) => entry.id));
+
+  return parsed.usedJournalEntryIds.every((id) => entryIds.has(id));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+const synthesisSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    answer: {
+      type: "string"
+    },
+    usedJournalEntryIds: {
+      type: "array",
+      items: {
+        type: "string"
+      },
+      minItems: 1
+    }
+  },
+  required: ["answer", "usedJournalEntryIds"]
+};
 
 function limit<T>(items: readonly T[], count: number): readonly T[] {
   return items.slice(0, Math.max(0, count));
