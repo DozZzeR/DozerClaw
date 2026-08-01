@@ -6,6 +6,13 @@ import type { DocumentUploadFolderOption } from "./document-folder-policy-port.j
 
 export interface StateRepositoryPort {
   healthCheck(): Promise<StateRepositoryHealth>;
+  findActiveLastOperationContext(
+    chatId: string,
+    actorId: string,
+    now: Date
+  ): Promise<LastOperationContext | undefined>;
+  saveLastOperationContext(input: LastOperationContext): Promise<void>;
+  clearLastOperationContext(chatId: string, actorId: string): Promise<void>;
   findActivePendingClarificationByChatId(
     chatId: string,
     now: Date
@@ -63,6 +70,33 @@ export interface StateRepositoryPort {
 export interface StateRepositoryHealth {
   readonly ok: boolean;
   readonly detail?: string;
+}
+
+export type LastOperationKind =
+  | "file_stored"
+  | "document_uploaded"
+  | "document_registered"
+  | "family_fact_recorded"
+  | "family_journal_entry_recorded"
+  | "planning_task_created";
+
+export type LastOperationEntityKind =
+  | "file_inbox_record"
+  | "document"
+  | "family_fact"
+  | "family_journal_entry"
+  | "planning_task";
+
+export interface LastOperationContext {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly operationKind: LastOperationKind;
+  readonly entityKind: LastOperationEntityKind;
+  readonly entityId: string;
+  readonly entityLabel?: string;
+  readonly document?: DocumentRecord;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
 }
 
 export interface PendingClarification {

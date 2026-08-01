@@ -81,7 +81,7 @@ export type InboundIntent =
     }
   | {
       readonly kind: "update_document";
-      readonly query: string;
+      readonly query?: string;
       readonly documentType?: DocumentType;
       readonly subjectId?: string;
     }
@@ -112,6 +112,14 @@ export type InboundIntent =
 export interface ClassifyInboundIntentInput {
   readonly text: string;
   readonly attachments: readonly MessageAttachment[];
+  readonly lastOperation?: LastOperationPromptContext;
+}
+
+export interface LastOperationPromptContext {
+  readonly operationKind: string;
+  readonly entityKind: string;
+  readonly entityId: string;
+  readonly entityLabel?: string;
 }
 
 export interface InboundIntentClassifier {
@@ -214,6 +222,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `update_document` when the user asks to correct, change, set, or update metadata for a registered document.",
       "- `update_document.query`: the shortest phrase identifying the existing registered document.",
+      "- If the user clearly refers to the provided `lastOperation` document with words like it, this file, that document, or `его`, set `update_document.query` to `null`.",
       "- `update_document.documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when not changing type.",
       "- `update_document.subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when not changing subject.",
       "- Use `archive_document` when the user asks to archive, remove, hide, or stop showing a registered document record.",
@@ -276,6 +285,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "# document mutation examples",
     [
       '{"kind":"update_document","query":"Max passport","documentType":"identity","subjectId":"max"}',
+      '{"kind":"update_document","query":null,"documentType":"health","subjectId":null}',
       '{"kind":"archive_document","query":"old passport"}'
     ].join("\n"),
     "",
@@ -321,7 +331,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
         mimeType: attachment.mimeType,
         sizeBytes: attachment.sizeBytes,
         hasProviderFileId: Boolean(attachment.providerFileId)
-      }))
+      })),
+      lastOperation: input.lastOperation ?? null
     })
   ].join("\n\n");
 }
@@ -508,13 +519,19 @@ export function parseInboundIntent(text: string): InboundIntent {
       };
     }
 
-    if (parsed.kind === "update_document" && typeof parsed.query === "string") {
-      const query = parsed.query.trim();
+    if (parsed.kind === "update_document") {
+      const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
 
-      if (query) {
+      if (
+        query ||
+        (typeof parsed.documentType === "string" &&
+          isDocumentType(parsed.documentType)) ||
+        (typeof parsed.subjectId === "string" &&
+          normalizeDocumentSubjectId(parsed.subjectId))
+      ) {
         return {
           kind: "update_document",
-          query,
+          ...(query ? { query } : {}),
           ...optionalDocumentType(parsed.documentType),
           ...optionalTrimmedText("subjectId", parsed.subjectId)
         };

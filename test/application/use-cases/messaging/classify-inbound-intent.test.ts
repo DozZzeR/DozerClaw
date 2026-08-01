@@ -27,7 +27,13 @@ describe("ModelInboundIntentClassifier", () => {
             mimeType: "image/jpeg",
             sizeBytes: 123
           }
-        ]
+        ],
+        lastOperation: {
+          operationKind: "document_uploaded",
+          entityKind: "document",
+          entityId: "document-1",
+          entityLabel: "scan.jpg"
+        }
       })
     ).resolves.toEqual({
       kind: "ask_clarification",
@@ -84,6 +90,8 @@ describe("ModelInboundIntentClassifier", () => {
       "create_reminder"
     );
     expect(model.request?.input).toContain("scan.jpg");
+    expect(model.request?.input).toContain("lastOperation");
+    expect(model.request?.input).toContain("document_uploaded");
   });
 });
 

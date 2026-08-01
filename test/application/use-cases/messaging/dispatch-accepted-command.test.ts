@@ -20,6 +20,7 @@ import type { ClassifyInboundIntentInput } from "../../../../src/application/use
 import type { ClassifyPendingChoiceInput } from "../../../../src/application/use-cases/messaging/classify-pending-choice.js";
 import type { OperationalEvent } from "../../../../src/ports/event-log-port.js";
 import type {
+  LastOperationContext,
   PendingDocumentDecision,
   PendingDocumentPlacementDecision,
   PendingFamilyFactArchiveDecision,
@@ -76,13 +77,16 @@ describe("DispatchAcceptedCommandUseCase", () => {
 
   it("stores family message attachments when an attachment store is configured", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
+    const lastOperations = new FakeLastOperations(undefined);
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: {
         async execute() {
           throw new Error("should not be called");
         }
       },
-      attachmentStore
+      attachmentStore,
+      lastOperations,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
     });
 
     await expect(
@@ -118,6 +122,16 @@ describe("DispatchAcceptedCommandUseCase", () => {
           sizeBytes: 1234
         }
       ]
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "file_stored",
+      entityKind: "file_inbox_record",
+      entityId: "file-1",
+      entityLabel: "file-1.txt",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
     });
   });
 
@@ -2758,6 +2772,77 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("passes latest operation context to model classification", async () => {
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "ask_clarification",
+      question: "What should I change?"
+    });
+    const lastOperations = new FakeLastOperations(
+      lastDocumentOperationContext()
+    );
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      lastOperations,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "change its type to health"
+      }
+    });
+
+    expect(lastOperations.findInputs).toEqual([
+      {
+        chatId: "chat-owner",
+        actorId: "actor-owner",
+        now: new Date("2026-07-14T07:05:00.000Z")
+      }
+    ]);
+    expect(intentClassifier.seenInput?.lastOperation).toEqual({
+      operationKind: "document_uploaded",
+      entityKind: "document",
+      entityId: "document-1",
+      entityLabel: "Max Passport.pdf"
+    });
+  });
+
+  it("uses latest document operation for document metadata follow-up without query", async () => {
+    const documentManager = new FakeDocumentManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_document",
+        documentType: "health"
+      }),
+      documentManager,
+      lastOperations: new FakeLastOperations(lastDocumentOperationContext()),
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "change its type to health"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated document: Max Passport.pdf (identity, subject: max)"
+    });
+    expect(documentManager.seenInput).toEqual({
+      action: "update_metadata",
+      query: "Max Passport.pdf",
+      document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+      documentType: "health"
+    });
+  });
+
   it("archives a document from a model intent", async () => {
     const documentManager = new FakeDocumentManager();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -2874,6 +2959,34 @@ describe("DispatchAcceptedCommandUseCase", () => {
       subjectId: "max"
     });
     expect(pendingDocumentDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("does not load last operation context while a pending document decision is active", async () => {
+    const pendingDocumentDecisions = new FakePendingDocumentDecisions();
+    pendingDocumentDecisions.pending = pendingDocumentDecision();
+    const lastOperations = new FakeLastOperations(lastDocumentOperationContext());
+    const documentManager = new FakeDocumentManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentManager,
+      pendingDocumentDecisions,
+      lastOperations,
+      now: () => new Date("2026-07-14T07:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "2"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated document: Sofia Passport.pdf (identity, subject: max)"
+    });
+    expect(lastOperations.findInputs).toEqual([]);
   });
 
   it("keeps pending document decision when document manager fails", async () => {
@@ -3726,7 +3839,7 @@ class FakeIntentClassifier {
         }
       | {
           readonly kind: "update_document";
-          readonly query: string;
+          readonly query?: string;
           readonly documentType?: DocumentType;
           readonly subjectId?: string;
         }
@@ -4154,6 +4267,20 @@ function uploadedDocumentRecord(): DocumentRecord {
   };
 }
 
+function lastDocumentOperationContext(): LastOperationContext {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    operationKind: "document_uploaded",
+    entityKind: "document",
+    entityId: "document-1",
+    entityLabel: "Max Passport.pdf",
+    document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+    createdAt: new Date("2026-07-14T07:00:00.000Z"),
+    expiresAt: new Date("2026-07-14T07:30:00.000Z")
+  };
+}
+
 function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
   return {
     id: input.id,
@@ -4536,6 +4663,49 @@ class FakePendingFileDestinationDecisions {
   async clearByChatId(chatId: string) {
     this.deletedChatIds.push(chatId);
     this.pending = undefined;
+  }
+}
+
+class FakeLastOperations {
+  readonly findInputs: {
+    readonly chatId: string;
+    readonly actorId: string;
+    readonly now: Date;
+  }[] = [];
+  saved: LastOperationContext | undefined;
+  cleared:
+    | {
+        readonly chatId: string;
+        readonly actorId: string;
+      }
+    | undefined;
+
+  constructor(private readonly active: LastOperationContext | undefined) {}
+
+  async findActiveByChatAndActor(
+    chatId: string,
+    actorId: string,
+    now: Date
+  ) {
+    this.findInputs.push({ chatId, actorId, now });
+
+    if (
+      this.active?.chatId === chatId &&
+      this.active.actorId === actorId &&
+      this.active.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.active;
+    }
+
+    return undefined;
+  }
+
+  async save(input: LastOperationContext): Promise<void> {
+    this.saved = input;
+  }
+
+  async clear(chatId: string, actorId: string): Promise<void> {
+    this.cleared = { chatId, actorId };
   }
 }
 

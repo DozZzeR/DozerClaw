@@ -18,6 +18,101 @@ describe("SqliteStateRepository", () => {
     database.close();
   });
 
+  it("stores, supersedes, expires, and clears last operation context by chat and actor", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.saveLastOperationContext({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      operationKind: "document_uploaded",
+      entityKind: "document",
+      entityId: "document-1",
+      entityLabel: "Max Passport.pdf",
+      document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await repository.saveLastOperationContext({
+      chatId: "chat-1",
+      actorId: "actor-2",
+      operationKind: "file_stored",
+      entityKind: "file_inbox_record",
+      entityId: "file-1",
+      entityLabel: "receipt.jpg",
+      createdAt: new Date("2026-07-14T07:01:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:31:00.000Z")
+    });
+
+    await expect(
+      repository.findActiveLastOperationContext(
+        "chat-1",
+        "actor-1",
+        new Date("2026-07-14T07:10:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      operationKind: "document_uploaded",
+      entityKind: "document",
+      entityId: "document-1",
+      entityLabel: "Max Passport.pdf",
+      document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
+      createdAt: new Date("2026-07-14T07:00:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActiveLastOperationContext(
+        "chat-1",
+        "actor-1",
+        new Date("2026-07-14T07:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.saveLastOperationContext({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      operationKind: "document_registered",
+      entityKind: "document",
+      entityId: "document-2",
+      entityLabel: "Sofia Passport.pdf",
+      document: documentRecord({
+        id: "document-2",
+        name: "Sofia Passport.pdf"
+      }),
+      createdAt: new Date("2026-07-14T07:20:00.000Z"),
+      expiresAt: new Date("2026-07-14T07:50:00.000Z")
+    });
+
+    await expect(
+      repository.findActiveLastOperationContext(
+        "chat-1",
+        "actor-1",
+        new Date("2026-07-14T07:25:00.000Z")
+      )
+    ).resolves.toMatchObject({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      operationKind: "document_registered",
+      entityKind: "document",
+      entityId: "document-2",
+      entityLabel: "Sofia Passport.pdf"
+    });
+
+    await repository.clearLastOperationContext("chat-1", "actor-1");
+    await expect(
+      repository.findActiveLastOperationContext(
+        "chat-1",
+        "actor-1",
+        new Date("2026-07-14T07:25:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
+
   it("stores and clears active pending clarifications by chat", async () => {
     const database = createSqliteDatabase({ path: ":memory:" });
     const repository = new SqliteStateRepository(database);

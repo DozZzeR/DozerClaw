@@ -333,6 +333,13 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       listUnread: (input) => notificationLister.execute(input),
       markRead: (input) => notificationReader.execute(input)
     },
+    lastOperations: {
+      findActiveByChatAndActor: (chatId, actorId, now) =>
+        stateRepository.findActiveLastOperationContext(chatId, actorId, now),
+      save: (input) => stateRepository.saveLastOperationContext(input),
+      clear: (chatId, actorId) =>
+        stateRepository.clearLastOperationContext(chatId, actorId)
+    },
     familyFactArchiver,
     ...(documentRegistrar ? { documentRegistrar } : {}),
     documentLookup,

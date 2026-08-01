@@ -2,6 +2,7 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import type { DocumentRecord } from "../../../core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
 import type {
+  LastOperationContext,
   PendingClarification,
   PendingDocumentDecision,
   PendingDocumentPlacementDecision,
@@ -30,6 +31,103 @@ export class SqliteStateRepository implements StateRepositoryPort {
         detail: error instanceof Error ? error.message : "SQLite unreachable"
       };
     }
+  }
+
+  async findActiveLastOperationContext(
+    chatId: string,
+    actorId: string,
+    now: Date
+  ): Promise<LastOperationContext | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            operation_kind as operationKind,
+            entity_kind as entityKind,
+            entity_id as entityId,
+            entity_label as entityLabel,
+            document_json as documentJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from last_operation_contexts
+          where chat_id = ? and actor_id = ? and expires_at > ?
+        `
+      )
+      .get(
+        chatId,
+        actorId,
+        now.toISOString()
+      ) as LastOperationContextRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      operationKind: row.operationKind,
+      entityKind: row.entityKind,
+      entityId: row.entityId,
+      ...(row.entityLabel ? { entityLabel: row.entityLabel } : {}),
+      ...(row.documentJson ? { document: parseDocument(row.documentJson) } : {}),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async saveLastOperationContext(
+    input: LastOperationContext
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into last_operation_contexts (
+            chat_id,
+            actor_id,
+            operation_kind,
+            entity_kind,
+            entity_id,
+            entity_label,
+            document_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(chat_id, actor_id) do update set
+            operation_kind = excluded.operation_kind,
+            entity_kind = excluded.entity_kind,
+            entity_id = excluded.entity_id,
+            entity_label = excluded.entity_label,
+            document_json = excluded.document_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        input.operationKind,
+        input.entityKind,
+        input.entityId,
+        input.entityLabel ?? null,
+        input.document ? JSON.stringify(documentRecordToJson(input.document)) : null,
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearLastOperationContext(
+    chatId: string,
+    actorId: string
+  ): Promise<void> {
+    this.database
+      .prepare(
+        "delete from last_operation_contexts where chat_id = ? and actor_id = ?"
+      )
+      .run(chatId, actorId);
   }
 
   async findActivePendingClarificationByChatId(
@@ -614,6 +712,18 @@ interface PendingClarificationRow {
   readonly expiresAt: string;
 }
 
+interface LastOperationContextRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly operationKind: LastOperationContext["operationKind"];
+  readonly entityKind: LastOperationContext["entityKind"];
+  readonly entityId: string;
+  readonly entityLabel: string | null;
+  readonly documentJson: string | null;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
 interface PendingFileDuplicateDecisionRow {
   readonly chatId: string;
   readonly actorId: string;
@@ -800,6 +910,16 @@ function parseDocumentRecords(json: string): readonly DocumentRecord[] {
 
     return [baseDocument];
   });
+}
+
+function parseDocument(json: string): DocumentRecord {
+  const document = parseDocumentRecords(`[${json}]`)[0];
+
+  if (!document) {
+    throw new Error("Invalid last operation document payload");
+  }
+
+  return document;
 }
 
 function documentRecordToJson(document: DocumentRecord): Record<string, unknown> {

@@ -94,6 +94,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensureFamilyFactsTable(database);
   ensureFamilyJournalEntriesTable(database);
   ensureFamilySubjectAliasesTable(database);
+  ensureLastOperationContextsTable(database);
   ensurePendingClarificationsTable(database);
   ensurePendingFileDuplicateDecisionsTable(database);
   ensurePendingFileDestinationDecisionsTable(database);
@@ -319,6 +320,40 @@ function ensureFamilySubjectAliasesTable(database: SqliteDatabase): void {
     create table if not exists family_subject_aliases (
       alias_subject_id text primary key,
       canonical_subject_id text not null
+    );
+  `);
+}
+
+function ensureLastOperationContextsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists last_operation_contexts (
+      chat_id text not null,
+      actor_id text not null,
+      operation_kind text not null check (
+        operation_kind in (
+          'file_stored',
+          'document_uploaded',
+          'document_registered',
+          'family_fact_recorded',
+          'family_journal_entry_recorded',
+          'planning_task_created'
+        )
+      ),
+      entity_kind text not null check (
+        entity_kind in (
+          'file_inbox_record',
+          'document',
+          'family_fact',
+          'family_journal_entry',
+          'planning_task'
+        )
+      ),
+      entity_id text not null,
+      entity_label text,
+      document_json text,
+      created_at text not null,
+      expires_at text not null,
+      primary key (chat_id, actor_id)
     );
   `);
 }

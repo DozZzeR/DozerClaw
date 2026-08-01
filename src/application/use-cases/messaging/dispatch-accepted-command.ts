@@ -30,6 +30,7 @@ import type {
 } from "../documents/upload-file-inbox-document.js";
 import type { PendingAccessRequest } from "../../../ports/identity-access-repository-port.js";
 import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
+import type { LastOperationContext } from "../../../ports/state-repository-port.js";
 import type { PendingClarification } from "../../../ports/state-repository-port.js";
 import type { PendingDocumentDecision } from "../../../ports/state-repository-port.js";
 import type { PendingDocumentPlacementDecision } from "../../../ports/state-repository-port.js";
@@ -292,6 +293,16 @@ export interface PendingDocumentPlacementDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface LastOperationStore {
+  findActiveByChatAndActor(
+    chatId: string,
+    actorId: string,
+    now: Date
+  ): Promise<LastOperationContext | undefined>;
+  save(input: LastOperationContext): Promise<void>;
+  clear(chatId: string, actorId: string): Promise<void>;
+}
+
 export interface DispatchAcceptedCommandInput {
   readonly route: CommandRoute;
   readonly context: AcceptedMessageContext;
@@ -320,6 +331,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly factDecisionResolver?: FamilyFactDecisionResolver;
   readonly pendingAccessRequests?: PendingAccessRequestReviewer;
   readonly notifications?: NotificationInbox;
+  readonly lastOperations?: LastOperationStore;
   readonly adminSessionActivator?: AdminSessionActivator;
   readonly intentClassifier?: InboundIntentClassifier;
   readonly pendingChoiceClassifier?: PendingChoiceClassifier<PendingDecisionChoice>;
@@ -499,11 +511,21 @@ export class DispatchAcceptedCommandUseCase {
           text: context.text,
           attachments: context.attachments
         };
+    const lastOperation = pending
+      ? undefined
+      : await this.dependencies.lastOperations?.findActiveByChatAndActor(
+          context.chat.id,
+          context.actor.id,
+          now
+        );
     let intent: InboundIntent;
     try {
       intent = await this.dependencies.intentClassifier!.execute({
         text: classifierInput.text,
-        attachments: classifierInput.attachments
+        attachments: classifierInput.attachments,
+        ...(lastOperation
+          ? { lastOperation: toClassifierLastOperation(lastOperation) }
+          : {})
       });
     } catch {
       return this.dispatchModelFailure(context, classifierInput.attachments);
@@ -513,6 +535,7 @@ export class DispatchAcceptedCommandUseCase {
       context,
       intent,
       pendingClarification: pending,
+      lastOperation,
       attachments: classifierInput.attachments,
       allowFileOrClarification: true
     });
@@ -1161,6 +1184,16 @@ export class DispatchAcceptedCommandUseCase {
     const storedRecords = results.flatMap((result) =>
       result.status === "stored" ? [result.record] : []
     );
+    const firstStoredRecord = storedRecords[0];
+
+    if (firstStoredRecord) {
+      await this.saveLastOperationContext(context, {
+        operationKind: "file_stored",
+        entityKind: "file_inbox_record",
+        entityId: firstStoredRecord.id,
+        entityLabel: firstStoredRecord.originalFileName
+      });
+    }
 
     return {
       chatId: context.chat.id,
@@ -1168,6 +1201,55 @@ export class DispatchAcceptedCommandUseCase {
         ? `Saved ${storedRecords.length} attachment(s): ${intent.summary}.`
         : `Saved ${storedRecords.length} attachment(s).`
     };
+  }
+
+  private async saveLastDocumentOperationContext(
+    context: AcceptedMessageContext,
+    documents: readonly NonNullable<LastOperationContext["document"]>[],
+    operationKind: Extract<
+      LastOperationContext["operationKind"],
+      "document_uploaded" | "document_registered"
+    >
+  ): Promise<void> {
+    const document = documents[0];
+
+    if (!document) {
+      return;
+    }
+
+    await this.saveLastOperationContext(context, {
+      operationKind,
+      entityKind: "document",
+      entityId: document.id,
+      entityLabel: document.name,
+      document
+    });
+  }
+
+  private async saveLastOperationContext(
+    context: AcceptedMessageContext,
+    input: Pick<
+      LastOperationContext,
+      "operationKind" | "entityKind" | "entityId" | "entityLabel" | "document"
+    >
+  ): Promise<void> {
+    if (!this.dependencies.lastOperations) {
+      return;
+    }
+
+    const now = this.dependencies.now?.() ?? new Date();
+
+    try {
+      await this.dependencies.lastOperations.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        ...input,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+    } catch {
+      return;
+    }
   }
 
   private operationDeniedReply(
@@ -1306,6 +1388,11 @@ export class DispatchAcceptedCommandUseCase {
       !metadata.subjectId &&
       this.dependencies.documentSearchDescriptionRecorder
     ) {
+      await this.saveLastDocumentOperationContext(
+        context,
+        uploadedDocuments,
+        "document_uploaded"
+      );
       const now = this.dependencies.now?.() ?? new Date();
       await this.dependencies.pendingDocumentDecisions?.save({
         chatId: context.chat.id,
@@ -1327,6 +1414,11 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (!metadata.documentType && !metadata.subjectId) {
+      await this.saveLastDocumentOperationContext(
+        context,
+        uploadedDocuments,
+        "document_uploaded"
+      );
       const now = this.dependencies.now?.() ?? new Date();
       await this.dependencies.pendingDocumentDecisions?.save({
         chatId: context.chat.id,
@@ -1350,6 +1442,11 @@ export class DispatchAcceptedCommandUseCase {
     const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
       context,
       uploadedDocuments
+    );
+    await this.saveLastDocumentOperationContext(
+      context,
+      uploadedDocuments,
+      "document_uploaded"
     );
 
     return {
@@ -1437,6 +1534,7 @@ export class DispatchAcceptedCommandUseCase {
     readonly context: AcceptedMessageContext;
     readonly intent: InboundIntent;
     readonly pendingClarification?: PendingClarification | undefined;
+    readonly lastOperation?: LastOperationContext | undefined;
     readonly attachments: readonly MessageAttachment[];
     readonly allowFileOrClarification: boolean;
   }): Promise<OutboundReply> {
@@ -1542,7 +1640,7 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (intent.kind === "update_document" || intent.kind === "archive_document") {
-      return this.manageDocument(context, intent);
+      return this.manageDocument(context, intent, input.lastOperation);
     }
 
     if (
@@ -1915,6 +2013,13 @@ export class DispatchAcceptedCommandUseCase {
       ...(intent.documentType ? { documentType: intent.documentType } : {}),
       ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
     });
+    await this.saveLastOperationContext(context, {
+      operationKind: "document_registered",
+      entityKind: "document",
+      entityId: result.document.id,
+      entityLabel: result.document.name,
+      document: result.document
+    });
 
     return {
       chatId: context.chat.id,
@@ -1951,7 +2056,8 @@ export class DispatchAcceptedCommandUseCase {
     intent: Extract<
       InboundIntent,
       { readonly kind: "update_document" | "archive_document" }
-    >
+    >,
+    lastOperation?: LastOperationContext
   ): Promise<OutboundReply> {
     if (!this.dependencies.documentManager) {
       return {
@@ -1960,15 +2066,29 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    const lastDocument =
+      intent.kind === "update_document" && !intent.query
+        ? documentFromLastOperation(lastOperation)
+        : undefined;
+    const query = intent.query ?? lastDocument?.name;
+
+    if (!query) {
+      return {
+        chatId: context.chat.id,
+        text: "Which document should I update?"
+      };
+    }
+
     const result = await this.dependencies.documentManager.execute(
       intent.kind === "archive_document"
         ? {
             action: "archive",
-            query: intent.query
+            query
           }
         : {
             action: "update_metadata",
-            query: intent.query,
+            query,
+            ...(lastDocument ? { document: lastDocument } : {}),
             ...(intent.documentType ? { documentType: intent.documentType } : {}),
             ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
           }
@@ -3265,6 +3385,30 @@ function requiredAccessActionForIntent(
     intent.kind === "delete_subject_alias"
   ) {
     return "family_write";
+  }
+
+  return undefined;
+}
+
+function toClassifierLastOperation(input: LastOperationContext) {
+  return {
+    operationKind: input.operationKind,
+    entityKind: input.entityKind,
+    entityId: input.entityId,
+    ...(input.entityLabel ? { entityLabel: input.entityLabel } : {})
+  };
+}
+
+function documentFromLastOperation(
+  input: LastOperationContext | undefined
+): LastOperationContext["document"] | undefined {
+  if (
+    input?.entityKind === "document" &&
+    (input.operationKind === "document_uploaded" ||
+      input.operationKind === "document_registered") &&
+    input.document
+  ) {
+    return input.document;
   }
 
   return undefined;
