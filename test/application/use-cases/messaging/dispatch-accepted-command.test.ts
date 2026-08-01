@@ -1621,6 +1621,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
 
   it("records a family fact from model record_fact intent", async () => {
     const factRecorder = new FakeFamilyFactRecorder();
+    const lastOperations = new FakeLastOperations(undefined);
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
@@ -1630,6 +1631,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
         subjectId: "max"
       }),
       familyFactRecorder: factRecorder,
+      lastOperations,
       now: () => new Date("2026-07-07T10:00:00.000Z")
     });
 
@@ -1653,10 +1655,21 @@ describe("DispatchAcceptedCommandUseCase", () => {
       sourceChatId: "chat-owner",
       sourceMessageText: "remember that Max started swimming lessons"
     });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "family_fact_recorded",
+      entityKind: "family_fact",
+      entityId: "fact-1",
+      entityLabel: "Max started swimming lessons.",
+      createdAt: new Date("2026-07-07T10:00:00.000Z"),
+      expiresAt: new Date("2026-07-07T10:30:00.000Z")
+    });
   });
 
   it("records a family journal entry from model intent", async () => {
     const journalRecorder = new FakeFamilyJournalRecorder();
+    const lastOperations = new FakeLastOperations(undefined);
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
@@ -1666,6 +1679,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
         subjectId: "sofia"
       }),
       familyJournalRecorder: journalRecorder,
+      lastOperations,
       now: () => new Date("2026-08-01T10:00:00.000Z")
     });
 
@@ -1688,6 +1702,16 @@ describe("DispatchAcceptedCommandUseCase", () => {
       sourceActorId: "actor-owner",
       sourceChatId: "chat-owner",
       sourceMessageText: "запиши в дневник здоровья софии кашель ночью"
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "family_journal_entry_recorded",
+      entityKind: "family_journal_entry",
+      entityId: "journal-1",
+      entityLabel: "Sofia coughed at night but had no fever.",
+      createdAt: new Date("2026-08-01T10:00:00.000Z"),
+      expiresAt: new Date("2026-08-01T10:30:00.000Z")
     });
   });
 
@@ -1754,6 +1778,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
 
   it("asks for confirmation when recording a related family fact", async () => {
     const pendingFamilyFactDecisions = new FakePendingFamilyFactDecisions();
+    const lastOperations = new FakeLastOperations(undefined);
     const factRecorder = new FakeFamilyFactRecorder({
       status: "needs_confirmation",
       newFact: familyFact({
@@ -1774,6 +1799,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
         summary: "Max prefers tea before bedtime."
       }),
       familyFactRecorder: factRecorder,
+      lastOperations,
       pendingFamilyFactDecisions,
       now: () => new Date("2026-07-07T10:00:00.000Z")
     });
@@ -1812,6 +1838,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       createdAt: new Date("2026-07-07T10:00:00.000Z"),
       expiresAt: new Date("2026-07-07T10:30:00.000Z")
     });
+    expect(lastOperations.saved).toBeUndefined();
   });
 
   it("updates an existing family fact from a pending memory decision", async () => {
@@ -2600,6 +2627,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
 
   it("creates planning tasks from a model intent", async () => {
     const planningTaskManager = new FakePlanningTaskManager();
+    const lastOperations = new FakeLastOperations(undefined);
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       intentClassifier: new FakeIntentClassifier({
@@ -2609,7 +2637,9 @@ describe("DispatchAcceptedCommandUseCase", () => {
         date: "2026-07-24",
         checklistItems: ["passports", "tickets"]
       }),
-      planningTaskManager
+      planningTaskManager,
+      lastOperations,
+      now: () => new Date("2026-07-02T20:00:00.000Z")
     });
 
     await expect(
@@ -2627,6 +2657,16 @@ describe("DispatchAcceptedCommandUseCase", () => {
       date: "2026-07-24",
       checklistItems: ["passports", "tickets"],
       actorId: "actor-owner"
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "planning_task_created",
+      entityKind: "planning_task",
+      entityId: "T-created",
+      entityLabel: "Pack bags",
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
     });
   });
 

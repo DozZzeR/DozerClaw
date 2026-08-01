@@ -681,6 +681,13 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    await this.saveLastOperationContext(context, {
+      operationKind: "family_fact_recorded",
+      entityKind: "family_fact",
+      entityId: result.fact.id,
+      entityLabel: result.fact.body
+    });
+
     return {
       chatId: context.chat.id,
       text: `Saved family fact: ${result.fact.body}`
@@ -726,6 +733,12 @@ export class DispatchAcceptedCommandUseCase {
       sourceActorId: context.actor.id,
       sourceChatId: context.chat.id,
       sourceMessageText: context.text
+    });
+    await this.saveLastOperationContext(context, {
+      operationKind: "family_journal_entry_recorded",
+      entityKind: "family_journal_entry",
+      entityId: result.entry.id,
+      entityLabel: result.entry.body
     });
 
     return {
@@ -810,6 +823,22 @@ export class DispatchAcceptedCommandUseCase {
             query: intent.query ?? "",
             now: context.receivedAt
           });
+
+    if (intent.kind === "create_reminder" || intent.action === "create") {
+      const taskId = parseCreatedPlanningTaskId(result.text);
+      const title = intent.kind === "create_reminder"
+        ? intent.summary
+        : intent.title ?? "";
+
+      if (taskId && title) {
+        await this.saveLastOperationContext(context, {
+          operationKind: "planning_task_created",
+          entityKind: "planning_task",
+          entityId: taskId,
+          entityLabel: title
+        });
+      }
+    }
 
     return {
       chatId: context.chat.id,
@@ -3438,6 +3467,14 @@ function planningDateFromIntent(
   }
 
   return {};
+}
+
+function parseCreatedPlanningTaskId(text: string): string | undefined {
+  const externalIdMatch = /^External id:\s*(.+)$/imu.exec(text);
+  const parenthesizedIdMatch = /\(([^()\s]+)\)\s*$/u.exec(text.trim());
+  const taskId = externalIdMatch?.[1]?.trim() ?? parenthesizedIdMatch?.[1]?.trim();
+
+  return taskId || undefined;
 }
 
 function parseAdminSecret(text: string): string | undefined {
