@@ -106,24 +106,27 @@ export class RecallFamilyFactsUseCase {
   ): Promise<readonly RecallMemoryItem[]> {
     const rankedFacts = rankFacts(queryProfile, facts);
     const deterministicFacts = matchingFacts(rankedFacts);
-    const fallbackItems = [
-      ...limitFacts(
-        deterministicFacts.length > 0
-          ? deterministicFacts
-          : rankedFacts.map((item) => item.fact),
-        this.resultLimit()
-      ).map(toLocalMemoryItem),
-      ...semanticResults.map(toSemanticMemoryItem)
-    ];
+    const fallbackItems = limitItems(
+      deduplicateMemoryItems([
+        ...limitFacts(
+          deterministicFacts.length > 0
+            ? deterministicFacts
+            : rankedFacts.map((item) => item.fact),
+          this.resultLimit()
+        ).map(toLocalMemoryItem),
+        ...semanticResults.map(toSemanticMemoryItem)
+      ]),
+      this.resultLimit()
+    );
 
     if (!this.dependencies.model) {
       return fallbackItems;
     }
 
-    const candidateItems = [
-      ...rankedFacts.map((item) => toLocalMemoryItem(item.fact)),
-      ...semanticResults.map(toSemanticMemoryItem)
-    ];
+    const candidateItems = deduplicateMemoryItems([
+      ...semanticResults.map(toSemanticMemoryItem),
+      ...rankedFacts.map((item) => toLocalMemoryItem(item.fact))
+    ]);
 
     if (candidateItems.length === 0) {
       return fallbackItems;
@@ -403,6 +406,27 @@ function limitItems(
   limit: number
 ): readonly RecallMemoryItem[] {
   return items.slice(0, limit);
+}
+
+function deduplicateMemoryItems(
+  items: readonly RecallMemoryItem[]
+): readonly RecallMemoryItem[] {
+  const seenBodies = new Set<string>();
+
+  return items.filter((item) => {
+    const body = canonicalMemoryBody(item.body);
+
+    if (seenBodies.has(body)) {
+      return false;
+    }
+
+    seenBodies.add(body);
+    return true;
+  });
+}
+
+function canonicalMemoryBody(body: string): string {
+  return normalizeText(body.replace(/^\s*family\s+fact\s*:\s*/iu, ""));
 }
 
 function toLocalMemoryItem(fact: FamilyFact): RecallMemoryItem {

@@ -388,6 +388,35 @@ describe("RecallFamilyFactsUseCase", () => {
     });
   });
 
+  it("does not repeat a structured fact from its semantic mirror", async () => {
+    const useCase = new RecallFamilyFactsUseCase({
+      repository: new StubFamilyMemoryRepository([
+        familyFact({
+          id: "fact-local",
+          category: "preference",
+          body: "Max prefers chamomile tea before sleep."
+        })
+      ]),
+      semanticMemory: new StubSemanticMemory([
+        {
+          entry: {
+            id: "drawer-1",
+            body: "Family fact: Max prefers chamomile tea before sleep."
+          },
+          score: 0.9
+        }
+      ]),
+      recentLimit: 10,
+      semanticLimit: 5
+    });
+
+    await expect(
+      useCase.execute({ query: "what tea does Max like?" })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
+    });
+  });
+
   it("falls back to local facts when semantic memory search fails", async () => {
     const useCase = new RecallFamilyFactsUseCase({
       repository: new StubFamilyMemoryRepository([
