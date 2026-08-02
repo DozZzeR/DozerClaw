@@ -6,7 +6,8 @@ import type {
   PlanningPort,
   PlanningQuery,
   PlanningTaskComplete,
-  PlanningTaskCreate
+  PlanningTaskCreate,
+  PlanningTaskUpdate
 } from "../../../../src/ports/planning-port.js";
 
 describe("ManagePlanningTaskUseCase", () => {
@@ -112,6 +113,32 @@ describe("ManagePlanningTaskUseCase", () => {
     });
   });
 
+  it("updates a planning task title by id", async () => {
+    const planning = new RecordingPlanningProvider([
+      {
+        id: "T-1",
+        title: "Pack beach bags",
+        status: "open"
+      }
+    ]);
+    const useCase = new ManagePlanningTaskUseCase({ planning });
+
+    await expect(
+      useCase.execute({
+        action: "update",
+        taskId: "T-1",
+        title: "Pack beach bags"
+      })
+    ).resolves.toEqual({
+      text: "Updated family task: Pack beach bags (T-1)"
+    });
+    expect(planning.updated).toEqual({
+      taskId: "T-1",
+      title: "Pack beach bags",
+      scope: "family"
+    });
+  });
+
   it("refuses ambiguous task completion", async () => {
     const planning = new RecordingPlanningProvider([
       {
@@ -143,6 +170,7 @@ describe("ManagePlanningTaskUseCase", () => {
 class RecordingPlanningProvider implements PlanningPort {
   seenQuery: PlanningQuery | undefined;
   created: PlanningTaskCreate | undefined;
+  updated: PlanningTaskUpdate | undefined;
   completed: PlanningTaskComplete | undefined;
 
   constructor(private readonly items: readonly PlanningItem[]) {}
@@ -165,6 +193,14 @@ class RecordingPlanningProvider implements PlanningPort {
 
   async completePlanningTask(input: PlanningTaskComplete) {
     this.completed = input;
+
+    return {
+      item: this.items[0]!
+    };
+  }
+
+  async updatePlanningTask(input: PlanningTaskUpdate) {
+    this.updated = input;
 
     return {
       item: this.items[0]!

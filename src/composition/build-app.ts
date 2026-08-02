@@ -27,11 +27,13 @@ import {
   MarkNotificationReadUseCase
 } from "../application/use-cases/notifications/notification-use-cases.js";
 import { RecordFamilyFactUseCase } from "../application/use-cases/family-memory/record-family-fact.js";
+import { UpdateFamilyFactUseCase } from "../application/use-cases/family-memory/update-family-fact.js";
 import { RecallFamilyFactsUseCase } from "../application/use-cases/family-memory/recall-family-facts.js";
 import { ArchiveFamilyFactUseCase } from "../application/use-cases/family-memory/archive-family-fact.js";
 import { ManageSubjectAliasesUseCase } from "../application/use-cases/family-memory/manage-subject-aliases.js";
 import { ResolveFamilyFactDecisionUseCase } from "../application/use-cases/family-memory/resolve-family-fact-decision.js";
 import { RecordFamilyJournalEntryUseCase } from "../application/use-cases/family-journal/record-family-journal-entry.js";
+import { UpdateFamilyJournalEntryUseCase } from "../application/use-cases/family-journal/update-family-journal-entry.js";
 import { RecallFamilyJournalEntriesUseCase } from "../application/use-cases/family-journal/recall-family-journal-entries.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
@@ -145,6 +147,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(semanticMemory ? { semanticMemory } : {}),
     subjectAliases: subjectAliasRepository,
     generateId,
+    now: () => new Date()
+  });
+  const familyFactUpdater = new UpdateFamilyFactUseCase({
+    repository: familyMemoryRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
+    now: () => new Date()
+  });
+  const familyJournalUpdater = new UpdateFamilyJournalEntryUseCase({
+    repository: familyJournalRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     now: () => new Date()
   });
   const factDecisionResolver = new ResolveFamilyFactDecisionUseCase({
@@ -325,8 +337,10 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
+    familyFactUpdater,
     familyFactRecall,
     familyJournalRecorder,
+    familyJournalUpdater,
     familyJournalRecall,
     ...(planningQuery ? { planningQuery } : {}),
     ...(planningTaskManager ? { planningTaskManager } : {}),

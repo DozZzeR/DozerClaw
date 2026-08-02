@@ -1,6 +1,7 @@
 export interface PlanningPort {
   queryPlanningState(query: PlanningQuery): Promise<PlanningQueryResult>;
   createPlanningTask?(input: PlanningTaskCreate): Promise<PlanningTaskMutationResult>;
+  updatePlanningTask?(input: PlanningTaskUpdate): Promise<PlanningTaskMutationResult>;
   completePlanningTask?(input: PlanningTaskComplete): Promise<PlanningTaskMutationResult>;
 }
 
@@ -34,6 +35,12 @@ export interface PlanningTaskComplete {
   readonly taskId: string;
   readonly scope: PlanningScope;
   readonly completedAt: Date;
+}
+
+export interface PlanningTaskUpdate {
+  readonly taskId: string;
+  readonly scope: PlanningScope;
+  readonly title: string;
 }
 
 export interface PlanningTaskMutationResult {

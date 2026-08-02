@@ -63,6 +63,10 @@ export type InboundIntent =
       readonly checklistItems?: readonly string[];
     }
   | {
+      readonly kind: "update_last_operation";
+      readonly summary: string;
+    }
+  | {
       readonly kind: "archive_fact";
       readonly query: string;
     }
@@ -230,6 +234,15 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Do not use these intents to move, delete, or edit the actual Drive file."
     ].join("\n"),
     "",
+    "# last operation follow-up rules",
+    [
+      "- Use `update_last_operation` when the user asks to correct, change, rename, or replace the item referenced by `lastOperation`.",
+      "- Only use it when the user clearly refers to the last saved thing with words like last, latest, it, that, `последнее`, `последнюю`, `его`, or `ее`.",
+      "- `summary`: the full replacement text/title to save on the last operation target.",
+      "- `operationAction`: use `replace_text`.",
+      "- Do not use this intent when no `lastOperation` is provided; ask a clarification instead."
+    ].join("\n"),
+    "",
     "# subject_alias field rules",
     [
       "- Use `save_subject_alias` when the user says one subject name is another subject, for example `Maksim is Max`.",
@@ -287,6 +300,12 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       '{"kind":"update_document","query":"Max passport","documentType":"identity","subjectId":"max"}',
       '{"kind":"update_document","query":null,"documentType":"health","subjectId":null}',
       '{"kind":"archive_document","query":"old passport"}'
+    ].join("\n"),
+    "",
+    "# last operation follow-up examples",
+    [
+      '{"kind":"update_last_operation","summary":"Max prefers mint tea before bedtime.","operationAction":"replace_text"}',
+      '{"kind":"update_last_operation","summary":"Pack beach bags","operationAction":"replace_text"}'
     ].join("\n"),
     "",
     "# query_planning field rules",
@@ -480,6 +499,20 @@ export function parseInboundIntent(text: string): InboundIntent {
       }
     }
 
+    if (
+      parsed.kind === "update_last_operation" &&
+      typeof parsed.summary === "string"
+    ) {
+      const summary = parsed.summary.trim();
+
+      if (summary) {
+        return {
+          kind: "update_last_operation",
+          summary
+        };
+      }
+    }
+
     if (parsed.kind === "archive_fact" && typeof parsed.query === "string") {
       const query = parsed.query.trim();
 
@@ -620,6 +653,7 @@ const inboundIntentSchema = {
         "recall_journal_entries",
         "query_planning",
         "manage_planning",
+        "update_last_operation",
         "archive_fact",
         "register_document",
         "find_document",
@@ -706,6 +740,10 @@ const inboundIntentSchema = {
         type: "string"
       }
     },
+    operationAction: {
+      type: ["string", "null"],
+      enum: ["replace_text", null]
+    },
     reason: {
       type: ["string", "null"]
     },
@@ -758,6 +796,7 @@ const inboundIntentSchema = {
     "title",
     "date",
     "checklistItems",
+    "operationAction",
     "requests",
     "reason"
   ]

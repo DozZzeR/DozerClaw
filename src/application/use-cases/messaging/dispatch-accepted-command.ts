@@ -64,6 +64,14 @@ import type {
   RecordFamilyFactResult
 } from "../family-memory/record-family-fact.js";
 import type {
+  UpdateFamilyFactInput,
+  UpdateFamilyFactResult
+} from "../family-memory/update-family-fact.js";
+import type {
+  UpdateFamilyJournalEntryInput,
+  UpdateFamilyJournalEntryResult
+} from "../family-journal/update-family-journal-entry.js";
+import type {
   FileDuplicateMutationDecision,
   ResolveFileDuplicateDecisionInput,
   ResolveFileDuplicateDecisionResult
@@ -138,6 +146,10 @@ export interface FamilyFactRecorder {
   execute(input: RecordFamilyFactInput): Promise<RecordFamilyFactResult>;
 }
 
+export interface FamilyFactUpdater {
+  execute(input: UpdateFamilyFactInput): Promise<UpdateFamilyFactResult>;
+}
+
 export interface FamilyFactRecall {
   execute(input: RecallFamilyFactsInput): Promise<{ readonly text: string }>;
 }
@@ -146,6 +158,12 @@ export interface FamilyJournalRecorder {
   execute(
     input: RecordFamilyJournalEntryInput
   ): Promise<RecordFamilyJournalEntryResult>;
+}
+
+export interface FamilyJournalUpdater {
+  execute(
+    input: UpdateFamilyJournalEntryInput
+  ): Promise<UpdateFamilyJournalEntryResult>;
 }
 
 export interface FamilyJournalRecall {
@@ -316,8 +334,10 @@ export interface DispatchAcceptedCommandDependencies {
   readonly fileInboxDocumentUploader?: FileInboxDocumentUploader;
   readonly documentSearchDescriptionRecorder?: DocumentSearchDescriptionRecorder;
   readonly familyFactRecorder?: FamilyFactRecorder;
+  readonly familyFactUpdater?: FamilyFactUpdater;
   readonly familyFactRecall?: FamilyFactRecall;
   readonly familyJournalRecorder?: FamilyJournalRecorder;
+  readonly familyJournalUpdater?: FamilyJournalUpdater;
   readonly familyJournalRecall?: FamilyJournalRecall;
   readonly planningQuery?: PlanningStateQuery;
   readonly planningTaskManager?: PlanningTaskManager;
@@ -1656,6 +1676,10 @@ export class DispatchAcceptedCommandUseCase {
       return this.managePlanningTask(context, intent);
     }
 
+    if (intent.kind === "update_last_operation") {
+      return this.updateLastOperation(context, intent, input.lastOperation);
+    }
+
     if (intent.kind === "archive_fact") {
       return this.archiveFamilyFact(context, intent);
     }
@@ -2149,6 +2173,119 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: result.text
+    };
+  }
+
+  private async updateLastOperation(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "update_last_operation" }>,
+    lastOperation?: LastOperationContext
+  ): Promise<OutboundReply> {
+    if (!lastOperation) {
+      return {
+        chatId: context.chat.id,
+        text: "What should I update?"
+      };
+    }
+
+    if (lastOperation.entityKind === "family_fact") {
+      if (!this.dependencies.familyFactUpdater) {
+        return {
+          chatId: context.chat.id,
+          text: "Family fact updates are not connected yet."
+        };
+      }
+
+      const result = await this.dependencies.familyFactUpdater.execute({
+        factId: lastOperation.entityId,
+        body: intent.summary
+      });
+
+      if (result.status !== "updated") {
+        return {
+          chatId: context.chat.id,
+          text: "I could not find the latest family fact to update."
+        };
+      }
+
+      await this.saveLastOperationContext(context, {
+        operationKind: "family_fact_recorded",
+        entityKind: "family_fact",
+        entityId: result.fact.id,
+        entityLabel: result.fact.body
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: `Updated family fact: ${result.fact.body}`
+      };
+    }
+
+    if (lastOperation.entityKind === "family_journal_entry") {
+      if (!this.dependencies.familyJournalUpdater) {
+        return {
+          chatId: context.chat.id,
+          text: "Family journal updates are not connected yet."
+        };
+      }
+
+      const result = await this.dependencies.familyJournalUpdater.execute({
+        entryId: lastOperation.entityId,
+        body: intent.summary
+      });
+
+      if (result.status !== "updated") {
+        return {
+          chatId: context.chat.id,
+          text: "I could not find the latest family journal entry to update."
+        };
+      }
+
+      await this.saveLastOperationContext(context, {
+        operationKind: "family_journal_entry_recorded",
+        entityKind: "family_journal_entry",
+        entityId: result.entry.id,
+        entityLabel: result.entry.body
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: `Updated family journal entry: ${result.entry.body}`
+      };
+    }
+
+    if (lastOperation.entityKind === "planning_task") {
+      if (!this.dependencies.planningTaskManager) {
+        return {
+          chatId: context.chat.id,
+          text: "Planning writes are not connected yet."
+        };
+      }
+
+      const result = await this.dependencies.planningTaskManager.execute({
+        action: "update",
+        taskId: lastOperation.entityId,
+        title: intent.summary
+      });
+
+      if (result.text.startsWith("Updated ")) {
+        await this.saveLastOperationContext(context, {
+          operationKind: "planning_task_created",
+          entityKind: "planning_task",
+          entityId: lastOperation.entityId,
+          entityLabel: intent.summary
+        });
+      }
+
+      return {
+        chatId: context.chat.id,
+        text: result.text
+      };
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: "I cannot update that latest operation yet."
     };
   }
 
@@ -3410,6 +3547,7 @@ function requiredAccessActionForIntent(
     intent.kind === "archive_document" ||
     intent.kind === "create_reminder" ||
     intent.kind === "manage_planning" ||
+    intent.kind === "update_last_operation" ||
     intent.kind === "save_subject_alias" ||
     intent.kind === "delete_subject_alias"
   ) {

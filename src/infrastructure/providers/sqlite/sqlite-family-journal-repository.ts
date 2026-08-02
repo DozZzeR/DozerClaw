@@ -112,6 +112,34 @@ export class SqliteFamilyJournalRepository
 
     return rows.map(toFamilyJournalEntry);
   }
+
+  async findFamilyJournalEntryById(
+    id: string
+  ): Promise<FamilyJournalEntry | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            id,
+            category,
+            body,
+            subject_id,
+            semantic_memory_entry_id,
+            source_actor_id,
+            source_chat_id,
+            source_message_text,
+            status,
+            occurred_at,
+            created_at,
+            updated_at
+          from family_journal_entries
+          where id = ?
+        `
+      )
+      .get(id) as FamilyJournalEntryRow | undefined;
+
+    return row ? toFamilyJournalEntry(row) : undefined;
+  }
 }
 
 function toFamilyJournalEntry(

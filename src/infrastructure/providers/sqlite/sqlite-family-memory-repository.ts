@@ -106,6 +106,31 @@ export class SqliteFamilyMemoryRepository
 
     return rows.map(toFamilyFact);
   }
+
+  async findFamilyFactById(id: string): Promise<FamilyFact | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            id,
+            category,
+            body,
+            subject_id,
+            semantic_memory_entry_id,
+            source_actor_id,
+            source_chat_id,
+            source_message_text,
+            status,
+            created_at,
+            updated_at
+          from family_facts
+          where id = ?
+        `
+      )
+      .get(id) as FamilyFactRow | undefined;
+
+    return row ? toFamilyFact(row) : undefined;
+  }
 }
 
 function toFamilyFact(row: FamilyFactRow): FamilyFact {

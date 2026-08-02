@@ -2,6 +2,9 @@ import type { FamilyJournalEntry } from "../core/domain/family-journal/family-jo
 
 export interface FamilyJournalRepositoryPort {
   saveFamilyJournalEntry(entry: FamilyJournalEntry): Promise<void>;
+  findFamilyJournalEntryById?(
+    id: string
+  ): Promise<FamilyJournalEntry | undefined>;
   listRecentActiveFamilyJournalEntries(
     limit: number
   ): Promise<readonly FamilyJournalEntry[]>;

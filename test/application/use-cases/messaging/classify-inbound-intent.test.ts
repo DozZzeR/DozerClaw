@@ -72,6 +72,7 @@ describe("ModelInboundIntentClassifier", () => {
           "title",
           "date",
           "checklistItems",
+          "operationAction",
           "requests",
           "reason"
         ]
@@ -84,6 +85,7 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("requests");
     expect(model.request?.input).toContain("query_planning");
     expect(model.request?.input).toContain("manage_planning");
+    expect(model.request?.input).toContain("update_last_operation");
     expect(model.request?.input).toContain("record_journal_entry");
     expect(model.request?.input).toContain("recall_journal_entries");
     expect(JSON.stringify(model.request?.outputSchema)).not.toContain(
@@ -451,6 +453,20 @@ describe("parseInboundIntent", () => {
     ).toEqual({
       kind: "archive_document",
       query: "old passport"
+    });
+  });
+
+  it("parses last operation update intents", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "update_last_operation",
+          summary: "Max prefers mint tea before bedtime."
+        })
+      )
+    ).toEqual({
+      kind: "update_last_operation",
+      summary: "Max prefers mint tea before bedtime."
     });
   });
 

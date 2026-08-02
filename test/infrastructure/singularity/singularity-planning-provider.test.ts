@@ -175,6 +175,40 @@ describe("SingularityPlanningProvider", () => {
     );
   });
 
+  it("updates task titles", async () => {
+    const fetcher = new RecordingFetch(
+      task({ id: "T-1", title: "Pack beach bags" })
+    );
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.updatePlanningTask({
+        taskId: "T-1",
+        scope: "family",
+        title: "Pack beach bags"
+      })
+    ).resolves.toEqual({
+      item: {
+        id: "T-1",
+        title: "Pack beach bags",
+        status: "open"
+      }
+    });
+    expect(fetcher.requests[0]).toEqual(
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/task/T-1",
+        method: "PATCH",
+        body: {
+          title: "Pack beach bags"
+        }
+      })
+    );
+  });
+
   it("filters inactive, note-only, and locally non-matching tasks", async () => {
     const fetcher = new RecordingFetch({
       tasks: [

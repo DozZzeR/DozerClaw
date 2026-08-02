@@ -20,6 +20,12 @@ export type ManagePlanningTaskInput =
       readonly query: string;
       readonly scope?: PlanningScope;
       readonly now?: Date;
+    }
+  | {
+      readonly action: "update";
+      readonly taskId: string;
+      readonly title: string;
+      readonly scope?: PlanningScope;
     };
 
 export interface ManagePlanningTaskResult {
@@ -88,6 +94,24 @@ export class ManagePlanningTaskUseCase {
 
       return {
         text
+      };
+    }
+
+    if (input.action === "update") {
+      if (!this.dependencies.planning.updatePlanningTask) {
+        return {
+          text: "Planning writes are not connected yet."
+        };
+      }
+
+      const result = await this.dependencies.planning.updatePlanningTask({
+        taskId: input.taskId,
+        title: input.title,
+        scope
+      });
+
+      return {
+        text: `Updated ${scope} task: ${result.item.title} (${result.item.id})`
       };
     }
 

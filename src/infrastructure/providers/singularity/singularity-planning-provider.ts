@@ -5,7 +5,8 @@ import type {
   PlanningQueryResult,
   PlanningTaskComplete,
   PlanningTaskCreate,
-  PlanningTaskMutationResult
+  PlanningTaskMutationResult,
+  PlanningTaskUpdate
 } from "../../../ports/planning-port.js";
 
 export interface SingularityPlanningProviderOptions {
@@ -131,6 +132,39 @@ export class SingularityPlanningProvider implements PlanningPort {
 
     if (!task) {
       throw new Error("Singularity task complete response was incomplete");
+    }
+
+    return {
+      item: task
+    };
+  }
+
+  async updatePlanningTask(
+    input: PlanningTaskUpdate
+  ): Promise<PlanningTaskMutationResult> {
+    const response = await this.fetchWithTimeout(
+      this.url(`/v2/task/${encodeURIComponent(input.taskId)}`),
+      {
+        method: "PATCH",
+        headers: this.jsonHeaders(),
+        body: JSON.stringify({
+          title: input.title
+        })
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Singularity task update request failed: HTTP ${response.status}`
+      );
+    }
+
+    const task = toPlanningItem((await response.json()) as unknown, {
+      includeInactive: true
+    });
+
+    if (!task) {
+      throw new Error("Singularity task update response was incomplete");
     }
 
     return {

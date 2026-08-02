@@ -12,6 +12,7 @@ import type { DocumentType } from "../../../../src/core/domain/documents/documen
 import type { FamilyFact } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type { FamilyFactCategory } from "../../../../src/core/domain/family-memory/family-fact.js";
 import type {
+  FamilyJournalEntry,
   FamilyJournalCategory
 } from "../../../../src/core/domain/family-journal/family-journal-entry.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
@@ -2883,6 +2884,187 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("updates latest family fact from a follow-up intent", async () => {
+    const familyFactUpdater = new FakeFamilyFactUpdater();
+    const lastOperations = new FakeLastOperations(lastFamilyFactOperationContext());
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        summary: "Max prefers mint tea before bedtime."
+      }),
+      familyFactUpdater,
+      lastOperations,
+      now: () => new Date("2026-08-02T09:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "исправь последнее: Max prefers mint tea before bedtime."
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated family fact: Max prefers mint tea before bedtime."
+    });
+    expect(familyFactUpdater.seenInput).toEqual({
+      factId: "fact-1",
+      body: "Max prefers mint tea before bedtime."
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "family_fact_recorded",
+      entityKind: "family_fact",
+      entityId: "fact-1",
+      entityLabel: "Max prefers mint tea before bedtime.",
+      createdAt: new Date("2026-08-02T09:00:00.000Z"),
+      expiresAt: new Date("2026-08-02T09:30:00.000Z")
+    });
+  });
+
+  it("updates latest family journal entry from a follow-up intent", async () => {
+    const familyJournalUpdater = new FakeFamilyJournalUpdater();
+    const lastOperations = new FakeLastOperations(
+      lastFamilyJournalOperationContext()
+    );
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        summary: "Sofia coughed twice at night and had no fever."
+      }),
+      familyJournalUpdater,
+      lastOperations,
+      now: () => new Date("2026-08-02T09:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "исправь последнюю запись"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated family journal entry: Sofia coughed twice at night and had no fever."
+    });
+    expect(familyJournalUpdater.seenInput).toEqual({
+      entryId: "journal-1",
+      body: "Sofia coughed twice at night and had no fever."
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "family_journal_entry_recorded",
+      entityKind: "family_journal_entry",
+      entityId: "journal-1",
+      entityLabel: "Sofia coughed twice at night and had no fever.",
+      createdAt: new Date("2026-08-02T09:00:00.000Z"),
+      expiresAt: new Date("2026-08-02T09:30:00.000Z")
+    });
+  });
+
+  it("updates latest planning task from a follow-up intent", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const lastOperations = new FakeLastOperations(lastPlanningTaskOperationContext());
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        summary: "Pack beach bags"
+      }),
+      planningTaskManager,
+      lastOperations,
+      now: () => new Date("2026-08-02T09:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "переименуй последнюю задачу в Pack beach bags"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Updated family task: Pack beach bags (T-created)"
+    });
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "update",
+      taskId: "T-created",
+      title: "Pack beach bags"
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "planning_task_created",
+      entityKind: "planning_task",
+      entityId: "T-created",
+      entityLabel: "Pack beach bags",
+      createdAt: new Date("2026-08-02T09:00:00.000Z"),
+      expiresAt: new Date("2026-08-02T09:30:00.000Z")
+    });
+  });
+
+  it("does not refresh latest planning operation when planning update is unavailable", async () => {
+    const planningTaskManager = new FakePlanningTaskManager("not_connected");
+    const lastOperations = new FakeLastOperations(lastPlanningTaskOperationContext());
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        summary: "Pack beach bags"
+      }),
+      planningTaskManager,
+      lastOperations,
+      now: () => new Date("2026-08-02T09:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "переименуй последнюю задачу в Pack beach bags"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Planning writes are not connected yet."
+    });
+    expect(lastOperations.saved).toBeUndefined();
+  });
+
+  it("asks what to update when a follow-up intent has no latest operation", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        summary: "Pack beach bags"
+      })
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "исправь последнее"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "What should I update?"
+    });
+  });
+
   it("archives a document from a model intent", async () => {
     const documentManager = new FakeDocumentManager();
     const useCase = new DispatchAcceptedCommandUseCase({
@@ -3859,6 +4041,10 @@ class FakeIntentClassifier {
           readonly date?: string;
           readonly checklistItems?: readonly string[];
         }
+      | {
+          readonly kind: "update_last_operation";
+          readonly summary: string;
+        }
       | { readonly kind: "archive_fact"; readonly query: string }
       | {
           readonly kind: "register_document";
@@ -4013,6 +4199,22 @@ class FakeFamilyJournalRecall {
   }
 }
 
+class FakeFamilyJournalUpdater {
+  seenInput: { entryId: string; body: string } | undefined;
+
+  async execute(input: { entryId: string; body: string }) {
+    this.seenInput = input;
+
+    return {
+      status: "updated" as const,
+      entry: familyJournalEntry({
+        id: input.entryId,
+        body: input.body
+      })
+    };
+  }
+}
+
 class FakeDocumentRegistrar {
   seenInput:
     | {
@@ -4098,8 +4300,22 @@ class FakePlanningQuery {
 class FakePlanningTaskManager {
   seenInput: unknown;
 
+  constructor(private readonly status: "ok" | "not_connected" = "ok") {}
+
   async execute(input: unknown) {
     this.seenInput = input;
+
+    if (this.status === "not_connected") {
+      return {
+        text: "Planning writes are not connected yet."
+      };
+    }
+
+    if (isRecord(input) && input.action === "update") {
+      return {
+        text: "Updated family task: Pack beach bags (T-created)"
+      };
+    }
 
     if (isRecord(input) && input.action === "complete") {
       return {
@@ -4277,6 +4493,39 @@ class FakeFamilyFactRecorder {
   }
 }
 
+class FakeFamilyFactUpdater {
+  seenInput: { factId: string; body: string } | undefined;
+
+  async execute(input: { factId: string; body: string }) {
+    this.seenInput = input;
+
+    return {
+      status: "updated" as const,
+      fact: familyFact({
+        id: input.factId,
+        body: input.body
+      })
+    };
+  }
+}
+
+function familyJournalEntry(
+  input: Pick<FamilyJournalEntry, "id" | "body">
+): FamilyJournalEntry {
+  return {
+    id: input.id,
+    category: "health",
+    body: input.body,
+    sourceActorId: "actor-owner",
+    sourceChatId: "chat-owner",
+    sourceMessageText: input.body,
+    status: "active",
+    occurredAt: new Date("2026-08-01T10:00:00.000Z"),
+    createdAt: new Date("2026-08-01T10:00:00.000Z"),
+    updatedAt: new Date("2026-08-02T09:00:00.000Z")
+  };
+}
+
 function documentRecord(
   input: Pick<DocumentRecord, "id" | "name">
 ): DocumentRecord {
@@ -4318,6 +4567,45 @@ function lastDocumentOperationContext(): LastOperationContext {
     document: documentRecord({ id: "document-1", name: "Max Passport.pdf" }),
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     expiresAt: new Date("2026-07-14T07:30:00.000Z")
+  };
+}
+
+function lastFamilyFactOperationContext(): LastOperationContext {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    operationKind: "family_fact_recorded",
+    entityKind: "family_fact",
+    entityId: "fact-1",
+    entityLabel: "Max prefers chamomile tea before sleep.",
+    createdAt: new Date("2026-08-02T08:55:00.000Z"),
+    expiresAt: new Date("2026-08-02T09:25:00.000Z")
+  };
+}
+
+function lastFamilyJournalOperationContext(): LastOperationContext {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    operationKind: "family_journal_entry_recorded",
+    entityKind: "family_journal_entry",
+    entityId: "journal-1",
+    entityLabel: "Sofia coughed at night but had no fever.",
+    createdAt: new Date("2026-08-02T08:55:00.000Z"),
+    expiresAt: new Date("2026-08-02T09:25:00.000Z")
+  };
+}
+
+function lastPlanningTaskOperationContext(): LastOperationContext {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    operationKind: "planning_task_created",
+    entityKind: "planning_task",
+    entityId: "T-created",
+    entityLabel: "Pack bags",
+    createdAt: new Date("2026-08-02T08:55:00.000Z"),
+    expiresAt: new Date("2026-08-02T09:25:00.000Z")
   };
 }
 
