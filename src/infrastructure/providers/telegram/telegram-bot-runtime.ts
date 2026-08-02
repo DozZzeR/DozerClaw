@@ -75,6 +75,17 @@ export class TelegramBotRuntime {
     const providerChatId = String(message.chat.id);
     const displayName = displayNameFromUser(from);
 
+    if (containsAdminSecret(message.text ?? message.caption ?? "")) {
+      try {
+        await this.options.telegram.deleteMessage(
+          providerChatId,
+          message.message_id
+        );
+      } catch (error) {
+        this.options.onError?.(error);
+      }
+    }
+
     if (
       this.options.ownerUserId &&
       providerUserId === this.options.ownerUserId &&
@@ -107,6 +118,10 @@ export class TelegramBotRuntime {
 
     await this.options.telegram.sendMessage(providerChatId, reply.text);
   }
+}
+
+function containsAdminSecret(text: string): boolean {
+  return /^(?:\/admin|admin)\s+\S/iu.test(text.trim());
 }
 
 function chatKindFromTelegram(

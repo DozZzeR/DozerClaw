@@ -50,6 +50,30 @@ describe("TelegramBotApiClient", () => {
     expect(requests[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("deletes Telegram messages by chat and message id", async () => {
+    const requests: { readonly url: string; readonly body: unknown }[] = [];
+    const client = new TelegramBotApiClient({
+      token: "bot-token",
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)) as unknown
+        });
+
+        return new Response(JSON.stringify({ ok: true, result: true }));
+      }
+    });
+
+    await client.deleteMessage("300", 20);
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.telegram.org/botbot-token/deleteMessage",
+        body: { chat_id: "300", message_id: 20 }
+      }
+    ]);
+  });
+
   it("keeps getUpdates request timeout above the long polling timeout", async () => {
     vi.useFakeTimers();
     let requestSignal: AbortSignal | undefined;

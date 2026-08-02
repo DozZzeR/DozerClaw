@@ -38,4 +38,8 @@ class RecordingTelegramApi implements TelegramApi {
   async sendMessage(chatId: string, text: string): Promise<void> {
     this.sent.push({ chatId, text });
   }
+
+  async deleteMessage(): Promise<void> {
+    throw new Error("should not delete");
+  }
 }

@@ -148,6 +148,9 @@ describe("TelegramBotRuntime", () => {
         },
         async sendMessage() {
           throw new Error("should not send");
+        },
+        async deleteMessage() {
+          throw new Error("should not delete");
         }
       },
       onError(error) {
@@ -281,6 +284,66 @@ describe("TelegramBotRuntime", () => {
       { chatId: "300", text: "saved once" }
     ]);
   });
+
+  it("deletes an admin secret message before processing it", async () => {
+    const app = new FakeApp({ chatId: "internal-chat", text: "Admin active" });
+    const telegram = new FakeTelegramApi([
+      {
+        update_id: 10,
+        message: {
+          message_id: 20,
+          date: 1783152000,
+          chat: { id: 300, type: "private" },
+          from: { id: 400, first_name: "Alex" },
+          text: "/admin top-secret"
+        }
+      }
+    ]);
+    const runtime = new TelegramBotRuntime({ app, telegram });
+
+    await runtime.pollOnce();
+
+    expect(telegram.deletedMessages).toEqual([
+      { chatId: "300", messageId: 20 }
+    ]);
+    expect(app.messageInputs).toHaveLength(1);
+    expect(telegram.sentMessages).toEqual([
+      { chatId: "300", text: "Admin active" }
+    ]);
+  });
+
+  it("reports admin secret deletion failures without suppressing the reply", async () => {
+    const errors: unknown[] = [];
+    const app = new FakeApp({ chatId: "internal-chat", text: "Admin active" });
+    const telegram = new FakeTelegramApi(
+      [
+        {
+          update_id: 10,
+          message: {
+            message_id: 20,
+            date: 1783152000,
+            chat: { id: 300, type: "private" },
+            from: { id: 400, first_name: "Alex" },
+            text: "admin top-secret"
+          }
+        }
+      ],
+      0,
+      1
+    );
+    const runtime = new TelegramBotRuntime({
+      app,
+      telegram,
+      onError: (error) => errors.push(error)
+    });
+
+    await runtime.pollOnce();
+
+    expect(errors).toEqual([expect.objectContaining({ message: "delete failed" })]);
+    expect(telegram.sentMessages).toEqual([
+      { chatId: "300", text: "Admin active" }
+    ]);
+  });
 });
 
 class FakeApp implements DozerClawApp {
@@ -337,11 +400,13 @@ class FakeApp implements DozerClawApp {
 
 class FakeTelegramApi {
   readonly sentMessages: { chatId: string; text: string }[] = [];
+  readonly deletedMessages: { chatId: string; messageId: number }[] = [];
   readonly getUpdatesInputs: unknown[] = [];
 
   constructor(
     private readonly updates: readonly TelegramUpdate[],
-    private remainingSendFailures = 0
+    private remainingSendFailures = 0,
+    private remainingDeleteFailures = 0
   ) {}
 
   async getUpdates(input?: unknown) {
@@ -356,5 +421,14 @@ class FakeTelegramApi {
     }
 
     this.sentMessages.push({ chatId, text });
+  }
+
+  async deleteMessage(chatId: string, messageId: number) {
+    if (this.remainingDeleteFailures > 0) {
+      this.remainingDeleteFailures -= 1;
+      throw new Error("delete failed");
+    }
+
+    this.deletedMessages.push({ chatId, messageId });
   }
 }

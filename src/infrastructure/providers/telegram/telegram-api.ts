@@ -1,6 +1,7 @@
 export interface TelegramApi {
   getUpdates(input?: TelegramGetUpdatesInput): Promise<readonly TelegramUpdate[]>;
   sendMessage(chatId: string, text: string): Promise<void>;
+  deleteMessage(chatId: string, messageId: number): Promise<void>;
 }
 
 export interface TelegramFileApi {
@@ -143,6 +144,13 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
     await this.callTelegram("sendMessage", {
       chat_id: chatId,
       text
+    });
+  }
+
+  async deleteMessage(chatId: string, messageId: number): Promise<void> {
+    await this.callTelegram("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId
     });
   }
 
