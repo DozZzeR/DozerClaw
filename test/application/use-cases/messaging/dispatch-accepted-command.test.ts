@@ -2650,7 +2650,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Added to family tasks: Pack bags (T-created)"
+      text: "Added to family tasks: Pack bags"
     });
     expect(planningTaskManager.seenInput).toEqual({
       action: "create",
@@ -2693,7 +2693,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Added to family tasks: Pack bags (T-created)"
+      text: "Added to family tasks: Pack bags"
     });
     expect(planningTaskManager.seenInput).toEqual({
       action: "create",
@@ -2751,7 +2751,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Completed family task: Pack bags (T-created)"
+      text: "Completed family task: Pack bags"
     });
     expect(planningTaskManager.seenInput).toEqual({
       action: "complete",
@@ -2994,7 +2994,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Updated family task: Pack beach bags (T-created)"
+      text: "Updated family task: Pack beach bags"
     });
     expect(planningTaskManager.seenInput).toEqual({
       action: "update",
@@ -4307,24 +4307,43 @@ class FakePlanningTaskManager {
 
     if (this.status === "not_connected") {
       return {
+        status: "not_connected" as const,
         text: "Planning writes are not connected yet."
       };
     }
 
     if (isRecord(input) && input.action === "update") {
       return {
-        text: "Updated family task: Pack beach bags (T-created)"
+        status: "updated" as const,
+        item: {
+          id: "T-created",
+          title: "Pack beach bags",
+          status: "open"
+        },
+        text: "Updated family task: Pack beach bags"
       };
     }
 
     if (isRecord(input) && input.action === "complete") {
       return {
-        text: "Completed family task: Pack bags (T-created)"
+        status: "completed" as const,
+        item: {
+          id: "T-created",
+          title: "Pack bags",
+          status: "completed"
+        },
+        text: "Completed family task: Pack bags"
       };
     }
 
     return {
-      text: "Added to family tasks: Pack bags (T-created)"
+      status: "created" as const,
+      item: {
+        id: "T-created",
+        title: "Pack bags",
+        status: "open"
+      },
+      text: "Added to family tasks: Pack bags"
     };
   }
 }

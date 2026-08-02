@@ -29,6 +29,12 @@ describe("ManagePlanningTaskUseCase", () => {
         checklistItems: ["passports", "tickets"]
       })
     ).resolves.toEqual({
+      status: "created",
+      item: {
+        id: "T-created",
+        title: "Pack bags",
+        status: "open"
+      },
       text: [
         "Created family planning task:",
         "Pack bags",
@@ -100,6 +106,12 @@ describe("ManagePlanningTaskUseCase", () => {
         now: new Date("2026-07-23T10:00:00.000Z")
       })
     ).resolves.toEqual({
+      status: "completed",
+      item: {
+        id: "T-1",
+        title: "Pack bags",
+        status: "open"
+      },
       text: "Completed family task: Pack bags (T-1)"
     });
     expect(planning.seenQuery).toEqual({
@@ -130,6 +142,12 @@ describe("ManagePlanningTaskUseCase", () => {
         title: "Pack beach bags"
       })
     ).resolves.toEqual({
+      status: "updated",
+      item: {
+        id: "T-1",
+        title: "Pack beach bags",
+        status: "open"
+      },
       text: "Updated family task: Pack beach bags (T-1)"
     });
     expect(planning.updated).toEqual({
@@ -157,6 +175,19 @@ describe("ManagePlanningTaskUseCase", () => {
     await expect(
       useCase.execute({ action: "complete", query: "pack" })
     ).resolves.toEqual({
+      status: "ambiguous",
+      items: [
+        {
+          id: "T-1",
+          title: "Pack bags",
+          status: "open"
+        },
+        {
+          id: "T-2",
+          title: "Pack lunch",
+          status: "open"
+        }
+      ],
       text: [
         "More than one planning item matched. Please be more specific:",
         "- Pack bags (T-1)",

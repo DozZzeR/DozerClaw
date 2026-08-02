@@ -1,4 +1,5 @@
 import type {
+  PlanningItem,
   PlanningPort,
   PlanningScope
 } from "../../../ports/planning-port.js";
@@ -28,9 +29,25 @@ export type ManagePlanningTaskInput =
       readonly scope?: PlanningScope;
     };
 
-export interface ManagePlanningTaskResult {
-  readonly text: string;
-}
+export type ManagePlanningTaskResult =
+  | {
+      readonly status: "not_connected";
+      readonly text: string;
+    }
+  | {
+      readonly status: "created" | "updated" | "completed";
+      readonly item: PlanningItem;
+      readonly text: string;
+    }
+  | {
+      readonly status: "not_found";
+      readonly text: string;
+    }
+  | {
+      readonly status: "ambiguous";
+      readonly items: readonly PlanningItem[];
+      readonly text: string;
+    };
 
 export class ManagePlanningTaskUseCase {
   constructor(
@@ -48,6 +65,7 @@ export class ManagePlanningTaskUseCase {
     if (input.action === "create") {
       if (!this.dependencies.planning.createPlanningTask) {
         return {
+          status: "not_connected",
           text: "Planning writes are not connected yet."
         };
       }
@@ -93,6 +111,8 @@ export class ManagePlanningTaskUseCase {
       }
 
       return {
+        status: "created",
+        item: result.item,
         text
       };
     }
@@ -100,6 +120,7 @@ export class ManagePlanningTaskUseCase {
     if (input.action === "update") {
       if (!this.dependencies.planning.updatePlanningTask) {
         return {
+          status: "not_connected",
           text: "Planning writes are not connected yet."
         };
       }
@@ -111,12 +132,15 @@ export class ManagePlanningTaskUseCase {
       });
 
       return {
+        status: "updated",
+        item: result.item,
         text: `Updated ${scope} task: ${result.item.title} (${result.item.id})`
       };
     }
 
     if (!this.dependencies.planning.completePlanningTask) {
       return {
+        status: "not_connected",
         text: "Planning writes are not connected yet."
       };
     }
@@ -128,12 +152,15 @@ export class ManagePlanningTaskUseCase {
 
     if (matches.items.length === 0) {
       return {
+        status: "not_found",
         text: "No matching planning item found to complete."
       };
     }
 
     if (matches.items.length > 1) {
       return {
+        status: "ambiguous",
+        items: matches.items,
         text: [
           "More than one planning item matched. Please be more specific:",
           ...matches.items.map((item) => `- ${item.title} (${item.id})`)
@@ -149,6 +176,8 @@ export class ManagePlanningTaskUseCase {
     });
 
     return {
+      status: "completed",
+      item: result.item,
       text: `Completed ${scope} task: ${result.item.title} (${result.item.id})`
     };
   }

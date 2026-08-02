@@ -845,17 +845,16 @@ export class DispatchAcceptedCommandUseCase {
           });
 
     if (intent.kind === "create_reminder" || intent.action === "create") {
-      const taskId = parseCreatedPlanningTaskId(result.text);
       const title = intent.kind === "create_reminder"
         ? intent.summary
         : intent.title ?? "";
 
-      if (taskId && title) {
+      if (result.status === "created" && title) {
         await this.saveLastOperationContext(context, {
           operationKind: "planning_task_created",
           entityKind: "planning_task",
-          entityId: taskId,
-          entityLabel: title
+          entityId: result.item.id,
+          entityLabel: result.item.title
         });
       }
     }
@@ -2268,12 +2267,12 @@ export class DispatchAcceptedCommandUseCase {
         title: intent.summary
       });
 
-      if (result.text.startsWith("Updated ")) {
+      if (result.status === "updated") {
         await this.saveLastOperationContext(context, {
           operationKind: "planning_task_created",
           entityKind: "planning_task",
-          entityId: lastOperation.entityId,
-          entityLabel: intent.summary
+          entityId: result.item.id,
+          entityLabel: result.item.title
         });
       }
 
@@ -3605,14 +3604,6 @@ function planningDateFromIntent(
   }
 
   return {};
-}
-
-function parseCreatedPlanningTaskId(text: string): string | undefined {
-  const externalIdMatch = /^External id:\s*(.+)$/imu.exec(text);
-  const parenthesizedIdMatch = /\(([^()\s]+)\)\s*$/u.exec(text.trim());
-  const taskId = externalIdMatch?.[1]?.trim() ?? parenthesizedIdMatch?.[1]?.trim();
-
-  return taskId || undefined;
 }
 
 function parseAdminSecret(text: string): string | undefined {
