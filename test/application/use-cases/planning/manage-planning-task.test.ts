@@ -255,6 +255,36 @@ describe("ManagePlanningTaskUseCase", () => {
     });
     expect(planning.completed).toBeUndefined();
   });
+
+  it.each([
+    {
+      action: "create" as const,
+      title: "Pack bags"
+    },
+    {
+      action: "update" as const,
+      taskId: "T-1",
+      title: "Pack beach bags"
+    },
+    {
+      action: "add_checklist_items" as const,
+      taskId: "T-1",
+      checklistItems: ["passports"]
+    },
+    {
+      action: "complete" as const,
+      query: "Pack bags"
+    }
+  ])("reports provider failure for $action as unavailable", async (input) => {
+    const useCase = new ManagePlanningTaskUseCase({
+      planning: new FailingPlanningProvider()
+    });
+
+    await expect(useCase.execute(input)).resolves.toEqual({
+      status: "unavailable",
+      text: "Planning is temporarily unavailable. Please try again later."
+    });
+  });
 });
 
 class RecordingPlanningProvider implements PlanningPort {
@@ -313,6 +343,28 @@ class RecordingPlanningProvider implements PlanningPort {
         ? { failedChecklistItem: this.failedChecklistItem }
         : {})
     };
+  }
+}
+
+class FailingPlanningProvider implements PlanningPort {
+  async queryPlanningState(): Promise<never> {
+    throw new Error("provider unavailable");
+  }
+
+  async createPlanningTask(): Promise<never> {
+    throw new Error("provider unavailable");
+  }
+
+  async completePlanningTask(): Promise<never> {
+    throw new Error("provider unavailable");
+  }
+
+  async updatePlanningTask(): Promise<never> {
+    throw new Error("provider unavailable");
+  }
+
+  async addPlanningTaskChecklistItems(): Promise<never> {
+    throw new Error("provider unavailable");
   }
 }
 

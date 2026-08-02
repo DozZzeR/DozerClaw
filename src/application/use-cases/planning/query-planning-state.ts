@@ -9,9 +9,15 @@ export interface QueryPlanningStateInput {
   readonly now?: Date;
 }
 
-export interface QueryPlanningStateResult {
-  readonly text: string;
-}
+export type QueryPlanningStateResult =
+  | {
+      readonly status: "available";
+      readonly text: string;
+    }
+  | {
+      readonly status: "unavailable";
+      readonly text: string;
+    };
 
 export class QueryPlanningStateUseCase {
   constructor(
@@ -25,19 +31,30 @@ export class QueryPlanningStateUseCase {
       input.query,
       input.now ?? new Date()
     );
-    const result = await this.dependencies.planning.queryPlanningState({
-      text: interpretedQuery.text,
-      scope: input.scope ?? "family",
-      ...interpretedQuery.dateRange
-    });
+    let result;
+
+    try {
+      result = await this.dependencies.planning.queryPlanningState({
+        text: interpretedQuery.text,
+        scope: input.scope ?? "family",
+        ...interpretedQuery.dateRange
+      });
+    } catch {
+      return {
+        status: "unavailable",
+        text: "Planning is temporarily unavailable. Please try again later."
+      };
+    }
 
     if (result.items.length === 0) {
       return {
+        status: "available",
         text: "No planning items found."
       };
     }
 
     return {
+      status: "available",
       text: [
         "Planning items:",
         ...result.items.map(

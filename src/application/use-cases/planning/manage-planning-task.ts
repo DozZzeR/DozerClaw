@@ -56,6 +56,10 @@ export type ManagePlanningTaskResult =
       readonly text: string;
     }
   | {
+      readonly status: "unavailable";
+      readonly text: string;
+    }
+  | {
       readonly status: "not_found";
       readonly text: string;
     }
@@ -86,12 +90,22 @@ export class ManagePlanningTaskUseCase {
         };
       }
 
-      const result = await this.dependencies.planning.createPlanningTask({
-        title: input.title,
-        scope,
-        ...(input.date ? { date: input.date } : {}),
-        ...(input.checklistItems ? { checklistItems: input.checklistItems } : {})
-      });
+      const planningCall = await callPlanning(() =>
+        this.dependencies.planning.createPlanningTask!({
+          title: input.title,
+          scope,
+          ...(input.date ? { date: input.date } : {}),
+          ...(input.checklistItems
+            ? { checklistItems: input.checklistItems }
+            : {})
+        })
+      );
+
+      if (!planningCall.ok) {
+        return planningUnavailable();
+      }
+
+      const result = planningCall.value;
 
       const text = planningTaskCreationNotification({
         scope,
@@ -141,11 +155,19 @@ export class ManagePlanningTaskUseCase {
         };
       }
 
-      const result = await this.dependencies.planning.updatePlanningTask({
-        taskId: input.taskId,
-        title: input.title,
-        scope
-      });
+      const planningCall = await callPlanning(() =>
+        this.dependencies.planning.updatePlanningTask!({
+          taskId: input.taskId,
+          title: input.title,
+          scope
+        })
+      );
+
+      if (!planningCall.ok) {
+        return planningUnavailable();
+      }
+
+      const result = planningCall.value;
 
       return {
         status: "updated",
@@ -162,13 +184,20 @@ export class ManagePlanningTaskUseCase {
         };
       }
 
-      const result =
-        await this.dependencies.planning.addPlanningTaskChecklistItems({
+      const planningCall = await callPlanning(() =>
+        this.dependencies.planning.addPlanningTaskChecklistItems!({
           taskId: input.taskId,
           ...(input.taskTitle ? { taskTitle: input.taskTitle } : {}),
           checklistItems: input.checklistItems,
           scope
-        });
+        })
+      );
+
+      if (!planningCall.ok) {
+        return planningUnavailable();
+      }
+
+      const result = planningCall.value;
 
       if (result.failedChecklistItem) {
         return {
@@ -195,10 +224,18 @@ export class ManagePlanningTaskUseCase {
       };
     }
 
-    const matches = await this.dependencies.planning.queryPlanningState({
-      text: input.query,
-      scope
-    });
+    const queryCall = await callPlanning(() =>
+      this.dependencies.planning.queryPlanningState({
+        text: input.query,
+        scope
+      })
+    );
+
+    if (!queryCall.ok) {
+      return planningUnavailable();
+    }
+
+    const matches = queryCall.value;
 
     if (matches.items.length === 0) {
       return {
@@ -219,11 +256,19 @@ export class ManagePlanningTaskUseCase {
     }
 
     const item = matches.items[0]!;
-    const result = await this.dependencies.planning.completePlanningTask({
-      taskId: item.id,
-      scope,
-      completedAt: input.now ?? new Date()
-    });
+    const planningCall = await callPlanning(() =>
+      this.dependencies.planning.completePlanningTask!({
+        taskId: item.id,
+        scope,
+        completedAt: input.now ?? new Date()
+      })
+    );
+
+    if (!planningCall.ok) {
+      return planningUnavailable();
+    }
+
+    const result = planningCall.value;
 
     return {
       status: "completed",
@@ -231,6 +276,29 @@ export class ManagePlanningTaskUseCase {
       text: `Completed ${scope} task: ${result.item.title} (${result.item.id})`
     };
   }
+}
+
+async function callPlanning<T>(
+  operation: () => Promise<T>
+): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false }> {
+  try {
+    return {
+      ok: true,
+      value: await operation()
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function planningUnavailable(): Extract<
+  ManagePlanningTaskResult,
+  { readonly status: "unavailable" }
+> {
+  return {
+    status: "unavailable",
+    text: "Planning is temporarily unavailable. Please try again later."
+  };
 }
 
 function planningTaskCreationNotification(input: {

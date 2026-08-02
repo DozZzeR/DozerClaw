@@ -25,6 +25,7 @@ describe("QueryPlanningStateUseCase", () => {
     await expect(
       useCase.execute({ query: "family tasks" })
     ).resolves.toEqual({
+      status: "available",
       text: [
         "Planning items:",
         "- [open] Renew Max passport (task-1)",
@@ -92,7 +93,19 @@ describe("QueryPlanningStateUseCase", () => {
     });
 
     await expect(useCase.execute({ query: "done" })).resolves.toEqual({
+      status: "available",
       text: "No planning items found."
+    });
+  });
+
+  it("reports planning provider failures as unavailable", async () => {
+    const useCase = new QueryPlanningStateUseCase({
+      planning: new FailingPlanningProvider()
+    });
+
+    await expect(useCase.execute({ query: "today" })).resolves.toEqual({
+      status: "unavailable",
+      text: "Planning is temporarily unavailable. Please try again later."
     });
   });
 });
@@ -112,5 +125,11 @@ class RecordingPlanningProvider implements PlanningPort {
     return {
       items: this.items
     };
+  }
+}
+
+class FailingPlanningProvider implements PlanningPort {
+  async queryPlanningState(): Promise<never> {
+    throw new Error("provider unavailable");
   }
 }
