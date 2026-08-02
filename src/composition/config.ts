@@ -56,7 +56,7 @@ export interface SingularityPlanningConfig {
   readonly apiBaseUrl: string;
   readonly requestTimeoutMs: number;
   readonly maxResults: number;
-  readonly familyProjectId?: string;
+  readonly familyProjectId: string;
 }
 
 export interface GoogleDriveConfig {
@@ -268,6 +268,13 @@ function singularityPlanningConfig(
     "https://api.singularity-app.com";
   const familyProjectId =
     env.DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID?.trim();
+
+  if (!familyProjectId) {
+    throw new Error(
+      "DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID is required when Singularity planning is enabled."
+    );
+  }
+
   validateSingularityApiBaseUrl(apiBaseUrl, environment);
 
   return {
@@ -281,7 +288,7 @@ function singularityPlanningConfig(
       env.DOZERCLAW_SINGULARITY_MAX_RESULTS,
       25
     ),
-    ...(familyProjectId ? { familyProjectId } : {})
+    familyProjectId
   };
 }
 

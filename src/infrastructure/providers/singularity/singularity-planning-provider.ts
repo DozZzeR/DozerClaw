@@ -16,7 +16,7 @@ export interface SingularityPlanningProviderOptions {
   readonly apiBaseUrl?: string;
   readonly requestTimeoutMs?: number;
   readonly maxResults?: number;
-  readonly familyProjectId?: string;
+  readonly familyProjectId: string;
   readonly fetch?: typeof fetch;
 }
 
@@ -29,6 +29,10 @@ export class SingularityPlanningProvider implements PlanningPort {
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: SingularityPlanningProviderOptions) {
+    if (!options.familyProjectId.trim()) {
+      throw new Error("Singularity familyProjectId is required");
+    }
+
     this.apiBaseUrl = options.apiBaseUrl ?? "https://api.singularity-app.com";
     this.fetchImpl = options.fetch ?? fetch;
   }
@@ -77,7 +81,7 @@ export class SingularityPlanningProvider implements PlanningPort {
       headers: this.jsonHeaders(),
       body: JSON.stringify({
         title: input.title,
-        ...(input.scope === "family" && this.options.familyProjectId
+        ...(input.scope === "family"
           ? { projectId: this.options.familyProjectId }
           : {}),
         ...(input.date ? { start: toSingularityDateTime(input.date) } : {})
@@ -231,7 +235,7 @@ export class SingularityPlanningProvider implements PlanningPort {
         toSingularityEndOfDay(query.startDateTo)
       );
     }
-    if (query.scope === "family" && this.options.familyProjectId) {
+    if (query.scope === "family") {
       url.searchParams.set("projectId", this.options.familyProjectId);
     }
 

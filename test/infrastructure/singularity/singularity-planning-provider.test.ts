@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { SingularityPlanningProvider } from "../../../src/infrastructure/providers/singularity/singularity-planning-provider.js";
 
 describe("SingularityPlanningProvider", () => {
+  it("rejects an empty family project boundary", () => {
+    expect(
+      () =>
+        new SingularityPlanningProvider({
+          token: "singularity-token",
+          familyProjectId: "",
+          fetch
+        })
+    ).toThrow("Singularity familyProjectId is required");
+  });
+
   it("lists active Singularity tasks as planning items", async () => {
     const fetcher = new RecordingFetch({
       tasks: [
@@ -147,6 +158,7 @@ describe("SingularityPlanningProvider", () => {
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 
@@ -182,6 +194,7 @@ describe("SingularityPlanningProvider", () => {
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 
@@ -217,6 +230,7 @@ describe("SingularityPlanningProvider", () => {
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 
@@ -265,6 +279,7 @@ describe("SingularityPlanningProvider", () => {
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 
@@ -304,6 +319,7 @@ describe("SingularityPlanningProvider", () => {
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
       maxResults: 10,
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 
@@ -324,6 +340,7 @@ describe("SingularityPlanningProvider", () => {
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
       fetch: async () =>
         new Response(JSON.stringify({ message: "unauthorized" }), {
           status: 401
@@ -339,6 +356,7 @@ describe("SingularityPlanningProvider", () => {
     const provider = new SingularityPlanningProvider({
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
       fetch: async () => new Response(JSON.stringify({ items: [] }))
     });
 
@@ -353,6 +371,7 @@ describe("SingularityPlanningProvider", () => {
       token: "singularity-token",
       apiBaseUrl: "https://api.singularity-app.com",
       requestTimeoutMs: 1,
+      familyProjectId: "P-family",
       fetch: fetcher.fetch
     });
 

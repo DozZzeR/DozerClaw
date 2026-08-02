@@ -119,6 +119,16 @@ describe("loadConfig", () => {
     });
   });
 
+  it("rejects Singularity planning without a family project boundary", () => {
+    expect(() =>
+      loadConfig({
+        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token"
+      })
+    ).toThrow(
+      "DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID is required when Singularity planning is enabled."
+    );
+  });
+
   it("loads Google Drive user OAuth refresh token config", () => {
     expect(
       loadConfig({
@@ -194,6 +204,7 @@ describe("loadConfig", () => {
       loadConfig({
         NODE_ENV: "production",
         DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+        DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID: "P-family",
         DOZERCLAW_SINGULARITY_API_BASE_URL: "http://127.0.0.1:9999"
       })
     ).toThrow(
@@ -203,6 +214,7 @@ describe("loadConfig", () => {
       loadConfig({
         NODE_ENV: "production",
         DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+        DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID: "P-family",
         DOZERCLAW_SINGULARITY_API_BASE_URL: "https://evil.example"
       })
     ).toThrow(
@@ -214,7 +226,8 @@ describe("loadConfig", () => {
     expect(
       loadConfig({
         NODE_ENV: "production",
-        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token"
+        DOZERCLAW_SINGULARITY_API_TOKEN: "singularity-token",
+        DOZERCLAW_SINGULARITY_FAMILY_PROJECT_ID: "P-family"
       }).planning?.singularity?.apiBaseUrl
     ).toBe("https://api.singularity-app.com");
   });
