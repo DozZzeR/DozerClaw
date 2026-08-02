@@ -429,6 +429,99 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
     const now = this.dependencies.now?.() ?? new Date();
+    const pendingReply = await this.dispatchDeterministicPendingDecision(
+      context,
+      now
+    );
+
+    if (pendingReply) {
+      return pendingReply;
+    }
+
+    const pending =
+      await this.dependencies.pendingClarifications?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+    const pendingDeniedReply = pending
+      ? this.pendingActorDeniedReply(context, pending)
+      : undefined;
+    if (pendingDeniedReply) {
+      return pendingDeniedReply;
+    }
+    const classifierInput = pending
+      ? {
+          text: buildClarificationClassifierText(pending, context.text),
+          attachments: mergeAttachments(
+            pending.originalAttachments,
+            context.attachments
+          )
+        }
+      : {
+          text: context.text,
+          attachments: context.attachments
+        };
+    const lastOperation = pending
+      ? undefined
+      : await this.dependencies.lastOperations?.findActiveByChatAndActor(
+          context.chat.id,
+          context.actor.id,
+          now
+        );
+    let intent: InboundIntent;
+    try {
+      intent = await this.dependencies.intentClassifier!.execute({
+        text: classifierInput.text,
+        attachments: classifierInput.attachments,
+        ...(lastOperation
+          ? { lastOperation: toClassifierLastOperation(lastOperation) }
+          : {})
+      });
+    } catch {
+      return this.dispatchModelFailure(context, classifierInput.attachments);
+    }
+
+    return this.dispatchClassifiedModelIntent({
+      context,
+      intent,
+      pendingClarification: pending,
+      lastOperation,
+      attachments: classifierInput.attachments,
+      allowFileOrClarification: true
+    });
+  }
+
+  private async dispatchFamilyMessageWithoutModel(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply> {
+    const now = this.dependencies.now?.() ?? new Date();
+    const pendingReply = await this.dispatchDeterministicPendingDecision(
+      context,
+      now
+    );
+
+    if (pendingReply) {
+      return pendingReply;
+    }
+
+    if (
+      context.attachments.length > 0 &&
+      (this.dependencies.attachmentStore ||
+        this.dependencies.documentAttachmentStore)
+    ) {
+      return this.storeFamilyMessageAttachments(context);
+    }
+
+    return Promise.resolve({
+      chatId: context.chat.id,
+      text: "Command not implemented yet: family_message."
+    });
+  }
+
+  private async dispatchDeterministicPendingDecision(
+    context: AcceptedMessageContext,
+    now: Date
+  ): Promise<OutboundReply | undefined> {
     const pendingDestination =
       await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
         context.chat.id,
@@ -508,134 +601,7 @@ export class DispatchAcceptedCommandUseCase {
       return this.dispatchPendingDocumentDecision(context, pendingDocument);
     }
 
-    const pending =
-      await this.dependencies.pendingClarifications?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-    const pendingDeniedReply = pending
-      ? this.pendingActorDeniedReply(context, pending)
-      : undefined;
-    if (pendingDeniedReply) {
-      return pendingDeniedReply;
-    }
-    const classifierInput = pending
-      ? {
-          text: buildClarificationClassifierText(pending, context.text),
-          attachments: mergeAttachments(
-            pending.originalAttachments,
-            context.attachments
-          )
-        }
-      : {
-          text: context.text,
-          attachments: context.attachments
-        };
-    const lastOperation = pending
-      ? undefined
-      : await this.dependencies.lastOperations?.findActiveByChatAndActor(
-          context.chat.id,
-          context.actor.id,
-          now
-        );
-    let intent: InboundIntent;
-    try {
-      intent = await this.dependencies.intentClassifier!.execute({
-        text: classifierInput.text,
-        attachments: classifierInput.attachments,
-        ...(lastOperation
-          ? { lastOperation: toClassifierLastOperation(lastOperation) }
-          : {})
-      });
-    } catch {
-      return this.dispatchModelFailure(context, classifierInput.attachments);
-    }
-
-    return this.dispatchClassifiedModelIntent({
-      context,
-      intent,
-      pendingClarification: pending,
-      lastOperation,
-      attachments: classifierInput.attachments,
-      allowFileOrClarification: true
-    });
-  }
-
-  private async dispatchFamilyMessageWithoutModel(
-    context: AcceptedMessageContext
-  ): Promise<OutboundReply> {
-    const now = this.dependencies.now?.() ?? new Date();
-    const pendingDestination =
-      await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingDestination && context.attachments.length === 0) {
-      return this.dispatchPendingFileDestinationDecision(
-        context,
-        pendingDestination
-      );
-    }
-
-    const pendingPlacement =
-      await this.dependencies.pendingDocumentPlacementDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingPlacement && context.attachments.length === 0) {
-      return this.dispatchPendingDocumentPlacementDecision(
-        context,
-        pendingPlacement
-      );
-    }
-
-    const pendingFamilyFact =
-      await this.dependencies.pendingFamilyFactDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingFamilyFact && context.attachments.length === 0) {
-      return this.dispatchPendingFamilyFactDecision(context, pendingFamilyFact);
-    }
-
-    const pendingFamilyFactArchive =
-      await this.dependencies.pendingFamilyFactArchiveDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingFamilyFactArchive && context.attachments.length === 0) {
-      return this.dispatchPendingFamilyFactArchiveDecision(
-        context,
-        pendingFamilyFactArchive
-      );
-    }
-
-    const pendingDocument =
-      await this.dependencies.pendingDocumentDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingDocument && context.attachments.length === 0) {
-      return this.dispatchPendingDocumentDecision(context, pendingDocument);
-    }
-
-    if (
-      context.attachments.length > 0 &&
-      (this.dependencies.attachmentStore ||
-        this.dependencies.documentAttachmentStore)
-    ) {
-      return this.storeFamilyMessageAttachments(context);
-    }
-
-    return Promise.resolve({
-      chatId: context.chat.id,
-      text: "Command not implemented yet: family_message."
-    });
+    return undefined;
   }
 
   private async dispatchModelFailure(

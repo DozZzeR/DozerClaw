@@ -3574,6 +3574,50 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("resolves a pending duplicate when model routing is disabled", async () => {
+    const pendingFileDuplicateDecisions =
+      new FakePendingFileDuplicateDecisions();
+    pendingFileDuplicateDecisions.pending = {
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      fileName: "report.pdf",
+      suggestedCopyName: "report (2).pdf",
+      existingRecordId: "file-existing",
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      sourceAttachment: {
+        id: "attachment-1",
+        providerFileId: "telegram-file-1",
+        fileName: "report.pdf"
+      },
+      createdAt: new Date("2026-07-02T20:00:00.000Z"),
+      expiresAt: new Date("2026-07-02T20:30:00.000Z")
+    };
+    const duplicateDecisionResolver =
+      new FakeDuplicateDecisionResolver("overwritten");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      duplicateDecisionResolver,
+      pendingFileDuplicateDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "перезапиши"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Готово: перезаписал report.pdf."
+    });
+    expect(duplicateDecisionResolver.seenInput?.decision).toBe("overwrite");
+    expect(pendingFileDuplicateDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
   it("uses model choice classification when duplicate answer parsing is unclear", async () => {
     const pendingFileDuplicateDecisions =
       new FakePendingFileDuplicateDecisions();
