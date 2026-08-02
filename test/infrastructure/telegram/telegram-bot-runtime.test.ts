@@ -5,6 +5,7 @@ import { TelegramApiError } from "../../../src/infrastructure/providers/telegram
 import type { TelegramUpdate } from "../../../src/infrastructure/providers/telegram/telegram-api.js";
 import type { DozerClawApp } from "../../../src/composition/app.js";
 import type { OutboundReply } from "../../../src/core/domain/messaging/reply.js";
+import { HandleNormalizedInboundMessageUseCase } from "../../../src/application/use-cases/messaging/handle-normalized-inbound-message.js";
 
 describe("TelegramBotRuntime", () => {
   it("normalizes a private owner text update and sends the app reply", async () => {
@@ -168,6 +169,118 @@ describe("TelegramBotRuntime", () => {
     ]);
     expect(sleeps).toEqual([30000]);
   });
+
+  it("retries the same update after message handling fails", async () => {
+    const app = new FakeApp(
+      { chatId: "internal-chat", text: "ok" },
+      1
+    );
+    const telegram = new FakeTelegramApi([
+      {
+        update_id: 10,
+        message: {
+          message_id: 20,
+          date: 1783152000,
+          chat: { id: 300, type: "private" },
+          from: { id: 400, first_name: "Alex" },
+          text: "remember this"
+        }
+      }
+    ]);
+    const runtime = new TelegramBotRuntime({ app, telegram });
+
+    await expect(runtime.pollOnce()).rejects.toThrow("message failed");
+    await expect(runtime.pollOnce()).resolves.toBeUndefined();
+
+    expect(telegram.getUpdatesInputs).toEqual([
+      { timeoutSeconds: 30 },
+      { timeoutSeconds: 30 }
+    ]);
+    expect(app.messageInputs).toHaveLength(2);
+  });
+
+  it("reuses a stored reply when Telegram sending fails after processing", async () => {
+    let pipelineCalls = 0;
+    let dispatcherCalls = 0;
+    let storedReply: OutboundReply | undefined;
+    const handler = new HandleNormalizedInboundMessageUseCase({
+      pipeline: {
+        async execute(input) {
+          pipelineCalls += 1;
+
+          return {
+            status: "accepted" as const,
+            context: {
+              actor: {
+                id: "actor-owner",
+                displayName: "Owner",
+                role: "owner" as const,
+                status: "active" as const
+              },
+              chat: {
+                id: "internal-chat",
+                kind: "owner_private" as const,
+                approved: true
+              },
+              action: input.action,
+              provider: input.provider,
+              receivedAt: input.receivedAt,
+              text: input.text,
+              attachments: input.attachments
+            }
+          };
+        }
+      },
+      dispatcher: {
+        async execute() {
+          dispatcherCalls += 1;
+          return { chatId: "internal-chat", text: "saved once" };
+        }
+      },
+      receipts: {
+        async find() {
+          return storedReply;
+        },
+        async save(input) {
+          storedReply = input.reply;
+        }
+      }
+    });
+    const app: DozerClawApp = {
+      async getStartupDiagnostics() {
+        return [];
+      },
+      async bootstrapOwnerIdentity() {
+        throw new Error("should not bootstrap");
+      },
+      handleNormalizedInboundMessage: (input) => handler.execute(input)
+    };
+    const telegram = new FakeTelegramApi(
+      [
+        {
+          update_id: 10,
+          message: {
+            message_id: 20,
+            date: 1783152000,
+            chat: { id: 300, type: "private" },
+            from: { id: 400, first_name: "Alex" },
+            text: "remember this"
+          }
+        }
+      ],
+      1
+    );
+    const runtime = new TelegramBotRuntime({ app, telegram });
+
+    await expect(runtime.pollOnce()).rejects.toThrow("send failed");
+    await expect(runtime.pollOnce()).resolves.toBeUndefined();
+
+    expect(pipelineCalls).toBe(1);
+    expect(dispatcherCalls).toBe(1);
+    expect(telegram.sentMessages).toEqual([
+      { chatId: "300", text: "saved once" }
+    ]);
+  });
 });
 
 class FakeApp implements DozerClawApp {
@@ -176,7 +289,10 @@ class FakeApp implements DozerClawApp {
   readonly messageInputs: Parameters<DozerClawApp["handleNormalizedInboundMessage"]>[0][] =
     [];
 
-  constructor(private readonly reply: OutboundReply) {}
+  constructor(
+    private readonly reply: OutboundReply,
+    private remainingMessageFailures = 0
+  ) {}
 
   async getStartupDiagnostics() {
     return [];
@@ -210,20 +326,35 @@ class FakeApp implements DozerClawApp {
   ) {
     this.messageInputs.push(input);
 
+    if (this.remainingMessageFailures > 0) {
+      this.remainingMessageFailures -= 1;
+      throw new Error("message failed");
+    }
+
     return this.reply;
   }
 }
 
 class FakeTelegramApi {
   readonly sentMessages: { chatId: string; text: string }[] = [];
+  readonly getUpdatesInputs: unknown[] = [];
 
-  constructor(private readonly updates: readonly TelegramUpdate[]) {}
+  constructor(
+    private readonly updates: readonly TelegramUpdate[],
+    private remainingSendFailures = 0
+  ) {}
 
-  async getUpdates() {
+  async getUpdates(input?: unknown) {
+    this.getUpdatesInputs.push(input);
     return this.updates;
   }
 
   async sendMessage(chatId: string, text: string) {
+    if (this.remainingSendFailures > 0) {
+      this.remainingSendFailures -= 1;
+      throw new Error("send failed");
+    }
+
     this.sentMessages.push({ chatId, text });
   }
 }

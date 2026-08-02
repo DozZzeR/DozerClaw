@@ -54,62 +54,58 @@ export class TelegramBotRuntime {
     });
 
     for (const update of updates) {
-      this.nextOffset = update.update_id + 1;
       await this.handleUpdate(update);
+      this.nextOffset = update.update_id + 1;
     }
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
-    try {
-      if (!update.message) {
-        return;
-      }
+    if (!update.message) {
+      return;
+    }
 
-      const message = update.message;
-      const from = message.from;
+    const message = update.message;
+    const from = message.from;
 
-      if (!from) {
-        return;
-      }
+    if (!from) {
+      return;
+    }
 
-      const providerUserId = String(from.id);
-      const providerChatId = String(message.chat.id);
-      const displayName = displayNameFromUser(from);
+    const providerUserId = String(from.id);
+    const providerChatId = String(message.chat.id);
+    const displayName = displayNameFromUser(from);
 
-      if (
-        this.options.ownerUserId &&
-        providerUserId === this.options.ownerUserId &&
-        message.chat.type === "private"
-      ) {
-        await this.options.app.bootstrapOwnerIdentity({
-          provider: "telegram",
-          providerUserId,
-          providerChatId,
-          displayName
-        });
-      }
-
-      const reply = await this.options.app.handleNormalizedInboundMessage({
-        messageId: String(message.message_id),
+    if (
+      this.options.ownerUserId &&
+      providerUserId === this.options.ownerUserId &&
+      message.chat.type === "private"
+    ) {
+      await this.options.app.bootstrapOwnerIdentity({
         provider: "telegram",
         providerUserId,
         providerChatId,
-        chatKind: chatKindFromTelegram(message.chat.type, {
-          isConfiguredOwner:
-            this.options.ownerUserId !== undefined &&
-            providerUserId === this.options.ownerUserId
-        }),
-        displayName,
-        text: message.text ?? message.caption ?? "",
-        attachments: attachmentsFromMessage(message),
-        receivedAt: new Date(message.date * 1000),
-        now: this.now()
+        displayName
       });
-
-      await this.options.telegram.sendMessage(providerChatId, reply.text);
-    } catch (error) {
-      this.options.onError?.(error);
     }
+
+    const reply = await this.options.app.handleNormalizedInboundMessage({
+      messageId: String(message.message_id),
+      provider: "telegram",
+      providerUserId,
+      providerChatId,
+      chatKind: chatKindFromTelegram(message.chat.type, {
+        isConfiguredOwner:
+          this.options.ownerUserId !== undefined &&
+          providerUserId === this.options.ownerUserId
+      }),
+      displayName,
+      text: message.text ?? message.caption ?? "",
+      attachments: attachmentsFromMessage(message),
+      receivedAt: new Date(message.date * 1000),
+      now: this.now()
+    });
+
+    await this.options.telegram.sendMessage(providerChatId, reply.text);
   }
 }
 

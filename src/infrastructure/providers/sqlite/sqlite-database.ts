@@ -103,6 +103,21 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingDocumentDecisionsTable(database);
   ensurePendingDocumentPlacementDecisionsTable(database);
   ensureNotificationsTables(database);
+  ensureProcessedMessageReceiptsTable(database);
+}
+
+function ensureProcessedMessageReceiptsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists processed_message_receipts (
+      provider text not null,
+      provider_chat_id text not null,
+      message_id text not null,
+      reply_chat_id text not null,
+      reply_text text not null,
+      processed_at text not null,
+      primary key (provider, provider_chat_id, message_id)
+    );
+  `);
 }
 
 function ensureNotificationsTables(database: SqliteDatabase): void {

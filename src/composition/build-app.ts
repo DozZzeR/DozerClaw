@@ -59,6 +59,7 @@ import { SqliteFamilyMemoryRepository } from "../infrastructure/providers/sqlite
 import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sqlite-file-inbox-repository.js";
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
 import { SqliteNotificationRepository } from "../infrastructure/providers/sqlite/sqlite-notification-repository.js";
+import { SqliteMessageReceiptRepository } from "../infrastructure/providers/sqlite/sqlite-message-receipt-repository.js";
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
@@ -93,6 +94,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const familyJournalRepository = new SqliteFamilyJournalRepository(database);
   const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
   const notificationRepository = new SqliteNotificationRepository(database);
+  const messageReceiptRepository = new SqliteMessageReceiptRepository(database);
   const generateId = () => randomUUID();
   const bootstrapOwnerIdentity = new BootstrapOwnerIdentityUseCase({
     repository: identityAccessRepository,
@@ -426,7 +428,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const handleNormalizedInboundMessage = new HandleNormalizedInboundMessageUseCase(
     {
       pipeline: processInboundMessage,
-      dispatcher: dispatchAcceptedCommand
+      dispatcher: dispatchAcceptedCommand,
+      receipts: messageReceiptRepository
     }
   );
 

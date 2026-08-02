@@ -71,6 +71,35 @@ describe("HandleNormalizedInboundMessageUseCase", () => {
     });
     expect(dispatcher.seenInput).toBeUndefined();
   });
+
+  it("returns a stored receipt without repeating message processing", async () => {
+    const pipeline = new FakePipeline({
+      status: "accepted",
+      context: acceptedContext
+    });
+    const dispatcher = new FakeDispatcher();
+    const receipts = new FakeMessageReceiptRepository();
+    const useCase = new HandleNormalizedInboundMessageUseCase({
+      pipeline,
+      dispatcher,
+      receipts
+    });
+    const input = baseInput();
+
+    const first = await useCase.execute(input);
+    const second = await useCase.execute(input);
+
+    expect(second).toEqual(first);
+    expect(pipeline.callCount).toBe(1);
+    expect(dispatcher.callCount).toBe(1);
+    expect(receipts.savedKeys).toEqual([
+      {
+        provider: "telegram",
+        providerChatId: "tg-chat-1",
+        messageId: "message-1"
+      }
+    ]);
+  });
 });
 
 const acceptedContext: AcceptedMessageContext = {
@@ -112,10 +141,12 @@ function baseInput(
 
 class FakePipeline {
   seenInput: ProcessInboundMessageInput | undefined;
+  callCount = 0;
 
   constructor(private readonly result: ProcessInboundMessageResult) {}
 
   async execute(input: ProcessInboundMessageInput): Promise<ProcessInboundMessageResult> {
+    this.callCount += 1;
     this.seenInput = input;
 
     return this.result;
@@ -124,13 +155,42 @@ class FakePipeline {
 
 class FakeDispatcher {
   seenInput: DispatchAcceptedCommandInput | undefined;
+  callCount = 0;
 
   async execute(input: DispatchAcceptedCommandInput) {
+    this.callCount += 1;
     this.seenInput = input;
 
     return {
       chatId: input.context.chat.id,
       text: `dispatched ${input.route.kind}`
     };
+  }
+}
+
+class FakeMessageReceiptRepository {
+  private reply: { readonly chatId: string; readonly text: string } | undefined;
+  readonly savedKeys: {
+    readonly provider: string;
+    readonly providerChatId: string;
+    readonly messageId: string;
+  }[] = [];
+
+  async find() {
+    return this.reply;
+  }
+
+  async save(input: {
+    readonly provider: string;
+    readonly providerChatId: string;
+    readonly messageId: string;
+    readonly reply: { readonly chatId: string; readonly text: string };
+  }) {
+    this.savedKeys.push({
+      provider: input.provider,
+      providerChatId: input.providerChatId,
+      messageId: input.messageId
+    });
+    this.reply = input.reply;
   }
 }
