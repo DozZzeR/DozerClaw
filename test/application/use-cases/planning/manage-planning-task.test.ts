@@ -193,6 +193,29 @@ describe("ManagePlanningTaskUseCase", () => {
     });
   });
 
+  it("reports a partial checklist append without claiming full success", async () => {
+    const planning = new RecordingPlanningProvider(
+      [{ id: "T-1", title: "Pack bags", status: "open" }],
+      "tickets"
+    );
+    const useCase = new ManagePlanningTaskUseCase({ planning });
+
+    await expect(
+      useCase.execute({
+        action: "add_checklist_items",
+        taskId: "T-1",
+        taskTitle: "Pack bags",
+        checklistItems: ["passports", "tickets"]
+      })
+    ).resolves.toEqual({
+      status: "checklist_items_partially_added",
+      item: { id: "T-1", title: "Pack bags", status: "open" },
+      checklistItems: ["passports"],
+      failedChecklistItem: "tickets",
+      text: "Added 1 checklist item(s) to family task Pack bags (T-1), then failed on: tickets"
+    });
+  });
+
   it("refuses ambiguous task completion", async () => {
     const planning = new RecordingPlanningProvider([
       {
@@ -241,7 +264,10 @@ class RecordingPlanningProvider implements PlanningPort {
   addedChecklistItems: PlanningTaskChecklistItemsAdd | undefined;
   completed: PlanningTaskComplete | undefined;
 
-  constructor(private readonly items: readonly PlanningItem[]) {}
+  constructor(
+    private readonly items: readonly PlanningItem[],
+    private readonly failedChecklistItem?: string
+  ) {}
 
   async queryPlanningState(query: PlanningQuery) {
     this.seenQuery = query;
@@ -280,7 +306,12 @@ class RecordingPlanningProvider implements PlanningPort {
 
     return {
       item: this.items[0]!,
-      checklistItems: input.checklistItems
+      checklistItems: this.failedChecklistItem
+        ? input.checklistItems.slice(0, input.checklistItems.indexOf(this.failedChecklistItem))
+        : input.checklistItems,
+      ...(this.failedChecklistItem
+        ? { failedChecklistItem: this.failedChecklistItem }
+        : {})
     };
   }
 }

@@ -47,9 +47,12 @@ export type ManagePlanningTaskResult =
       readonly text: string;
     }
   | {
-      readonly status: "checklist_items_added";
+      readonly status:
+        | "checklist_items_added"
+        | "checklist_items_partially_added";
       readonly item: PlanningItem;
       readonly checklistItems: readonly string[];
+      readonly failedChecklistItem?: string;
       readonly text: string;
     }
   | {
@@ -166,6 +169,16 @@ export class ManagePlanningTaskUseCase {
           checklistItems: input.checklistItems,
           scope
         });
+
+      if (result.failedChecklistItem) {
+        return {
+          status: "checklist_items_partially_added",
+          item: result.item,
+          checklistItems: result.checklistItems,
+          failedChecklistItem: result.failedChecklistItem,
+          text: `Added ${result.checklistItems.length} checklist item(s) to ${scope} task ${result.item.title} (${result.item.id}), then failed on: ${result.failedChecklistItem}`
+        };
+      }
 
       return {
         status: "checklist_items_added",

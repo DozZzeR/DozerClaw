@@ -60,4 +60,5 @@ export interface PlanningTaskMutationResult {
 export interface PlanningTaskChecklistItemsAddResult
   extends PlanningTaskMutationResult {
   readonly checklistItems: readonly string[];
+  readonly failedChecklistItem?: string;
 }

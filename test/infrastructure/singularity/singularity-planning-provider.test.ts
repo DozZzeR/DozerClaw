@@ -242,8 +242,7 @@ describe("SingularityPlanningProvider", () => {
         body: {
           parent: "T-1",
           title: "passports",
-          done: false,
-          parentOrder: 1
+          done: false
         }
       }),
       expect.objectContaining({
@@ -252,11 +251,40 @@ describe("SingularityPlanningProvider", () => {
         body: {
           parent: "T-1",
           title: "tickets",
-          done: false,
-          parentOrder: 2
+          done: false
         }
       })
     ]);
+  });
+
+  it("reports checklist rows added before a later append failure", async () => {
+    const fetcher = new RecordingFetchSequence([
+      { id: "C-1", parent: "T-1", title: "passports", done: false },
+      new Response(JSON.stringify({ message: "failed" }), { status: 503 })
+    ]);
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.addPlanningTaskChecklistItems({
+        taskId: "T-1",
+        scope: "family",
+        taskTitle: "Pack bags",
+        checklistItems: ["passports", "tickets", "medicine"]
+      })
+    ).resolves.toEqual({
+      item: {
+        id: "T-1",
+        title: "Pack bags",
+        status: "open"
+      },
+      checklistItems: ["passports"],
+      failedChecklistItem: "tickets"
+    });
+    expect(fetcher.requests).toHaveLength(2);
   });
 
   it("filters inactive, note-only, and locally non-matching tasks", async () => {
@@ -409,7 +437,11 @@ class RecordingFetchSequence {
       body: parseBody(init?.body)
     });
 
-    return new Response(JSON.stringify(this.responseQueue.shift()));
+    const response = this.responseQueue.shift();
+
+    return response instanceof Response
+      ? response
+      : new Response(JSON.stringify(response));
   };
 }
 

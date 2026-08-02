@@ -177,8 +177,27 @@ export class SingularityPlanningProvider implements PlanningPort {
   async addPlanningTaskChecklistItems(
     input: PlanningTaskChecklistItemsAdd
   ): Promise<PlanningTaskChecklistItemsAddResult> {
-    for (const [index, title] of input.checklistItems.entries()) {
-      await this.createChecklistItem(input.taskId, title, index + 1);
+    const checklistItems: string[] = [];
+
+    for (const title of input.checklistItems) {
+      try {
+        await this.createChecklistItem(input.taskId, title);
+        checklistItems.push(title);
+      } catch (error) {
+        if (checklistItems.length === 0) {
+          throw error;
+        }
+
+        return {
+          item: {
+            id: input.taskId,
+            title: input.taskTitle ?? input.taskId,
+            status: "open"
+          },
+          checklistItems,
+          failedChecklistItem: title
+        };
+      }
     }
 
     return {
@@ -187,7 +206,7 @@ export class SingularityPlanningProvider implements PlanningPort {
         title: input.taskTitle ?? input.taskId,
         status: "open"
       },
-      checklistItems: input.checklistItems
+      checklistItems
     };
   }
 
@@ -222,7 +241,7 @@ export class SingularityPlanningProvider implements PlanningPort {
   private async createChecklistItem(
     parent: string,
     title: string,
-    parentOrder: number
+    parentOrder?: number
   ): Promise<void> {
     const response = await this.fetchWithTimeout(this.url("/v2/checklist-item"), {
       method: "POST",
@@ -231,7 +250,7 @@ export class SingularityPlanningProvider implements PlanningPort {
         parent,
         title,
         done: false,
-        parentOrder
+        ...(parentOrder !== undefined ? { parentOrder } : {})
       })
     });
 
