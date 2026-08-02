@@ -27,6 +27,13 @@ export type ManagePlanningTaskInput =
       readonly taskId: string;
       readonly title: string;
       readonly scope?: PlanningScope;
+    }
+  | {
+      readonly action: "add_checklist_items";
+      readonly taskId: string;
+      readonly taskTitle?: string;
+      readonly checklistItems: readonly string[];
+      readonly scope?: PlanningScope;
     };
 
 export type ManagePlanningTaskResult =
@@ -37,6 +44,12 @@ export type ManagePlanningTaskResult =
   | {
       readonly status: "created" | "updated" | "completed";
       readonly item: PlanningItem;
+      readonly text: string;
+    }
+  | {
+      readonly status: "checklist_items_added";
+      readonly item: PlanningItem;
+      readonly checklistItems: readonly string[];
       readonly text: string;
     }
   | {
@@ -135,6 +148,30 @@ export class ManagePlanningTaskUseCase {
         status: "updated",
         item: result.item,
         text: `Updated ${scope} task: ${result.item.title} (${result.item.id})`
+      };
+    }
+
+    if (input.action === "add_checklist_items") {
+      if (!this.dependencies.planning.addPlanningTaskChecklistItems) {
+        return {
+          status: "not_connected",
+          text: "Planning writes are not connected yet."
+        };
+      }
+
+      const result =
+        await this.dependencies.planning.addPlanningTaskChecklistItems({
+          taskId: input.taskId,
+          ...(input.taskTitle ? { taskTitle: input.taskTitle } : {}),
+          checklistItems: input.checklistItems,
+          scope
+        });
+
+      return {
+        status: "checklist_items_added",
+        item: result.item,
+        checklistItems: result.checklistItems,
+        text: `Added ${result.checklistItems.length} checklist item(s) to ${scope} task: ${result.item.title} (${result.item.id})`
       };
     }
 

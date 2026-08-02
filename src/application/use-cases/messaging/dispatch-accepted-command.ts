@@ -2180,6 +2180,14 @@ export class DispatchAcceptedCommandUseCase {
     intent: Extract<InboundIntent, { readonly kind: "update_last_operation" }>,
     lastOperation?: LastOperationContext
   ): Promise<OutboundReply> {
+    if (intent.operationAction === "append_checklist") {
+      return this.addChecklistItemsToLastPlanningTask(
+        context,
+        intent,
+        lastOperation
+      );
+    }
+
     if (!lastOperation) {
       return {
         chatId: context.chat.id,
@@ -2188,6 +2196,13 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (lastOperation.entityKind === "family_fact") {
+      if (!intent.summary) {
+        return {
+          chatId: context.chat.id,
+          text: "What should I update?"
+        };
+      }
+
       if (!this.dependencies.familyFactUpdater) {
         return {
           chatId: context.chat.id,
@@ -2221,6 +2236,13 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (lastOperation.entityKind === "family_journal_entry") {
+      if (!intent.summary) {
+        return {
+          chatId: context.chat.id,
+          text: "What should I update?"
+        };
+      }
+
       if (!this.dependencies.familyJournalUpdater) {
         return {
           chatId: context.chat.id,
@@ -2254,6 +2276,13 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     if (lastOperation.entityKind === "planning_task") {
+      if (!intent.summary) {
+        return {
+          chatId: context.chat.id,
+          text: "What should I update?"
+        };
+      }
+
       if (!this.dependencies.planningTaskManager) {
         return {
           chatId: context.chat.id,
@@ -2285,6 +2314,54 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: "I cannot update that latest operation yet."
+    };
+  }
+
+  private async addChecklistItemsToLastPlanningTask(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "update_last_operation" }>,
+    lastOperation?: LastOperationContext
+  ): Promise<OutboundReply> {
+    if (!lastOperation || lastOperation.entityKind !== "planning_task") {
+      return {
+        chatId: context.chat.id,
+        text: "I can add checklist items only to the latest planning task."
+      };
+    }
+
+    if (!intent.checklistItems?.length) {
+      return {
+        chatId: context.chat.id,
+        text: "Which checklist items should I add?"
+      };
+    }
+
+    if (!this.dependencies.planningTaskManager) {
+      return {
+        chatId: context.chat.id,
+        text: "Planning writes are not connected yet."
+      };
+    }
+
+    const result = await this.dependencies.planningTaskManager.execute({
+      action: "add_checklist_items",
+      taskId: lastOperation.entityId,
+      ...(lastOperation.entityLabel ? { taskTitle: lastOperation.entityLabel } : {}),
+      checklistItems: intent.checklistItems
+    });
+
+    if (result.status === "checklist_items_added") {
+      await this.saveLastOperationContext(context, {
+        operationKind: "planning_task_created",
+        entityKind: "planning_task",
+        entityId: result.item.id,
+        entityLabel: result.item.title
+      });
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
     };
   }
 

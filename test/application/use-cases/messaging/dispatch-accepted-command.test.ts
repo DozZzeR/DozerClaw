@@ -3013,6 +3013,79 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("adds checklist items to latest planning task from a follow-up intent", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const lastOperations = new FakeLastOperations(lastPlanningTaskOperationContext());
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        operationAction: "append_checklist",
+        checklistItems: ["passports", "tickets"]
+      }),
+      planningTaskManager,
+      lastOperations,
+      now: () => new Date("2026-08-02T09:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "добавь к последней задаче паспорта и билеты"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Added 2 checklist item(s) to family task: Pack bags"
+    });
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "add_checklist_items",
+      taskId: "T-created",
+      taskTitle: "Pack bags",
+      checklistItems: ["passports", "tickets"]
+    });
+    expect(lastOperations.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      operationKind: "planning_task_created",
+      entityKind: "planning_task",
+      entityId: "T-created",
+      entityLabel: "Pack bags",
+      createdAt: new Date("2026-08-02T09:00:00.000Z"),
+      expiresAt: new Date("2026-08-02T09:30:00.000Z")
+    });
+  });
+
+  it("does not add checklist items without a latest planning task", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "update_last_operation",
+        operationAction: "append_checklist",
+        checklistItems: ["tickets"]
+      }),
+      planningTaskManager,
+      lastOperations: new FakeLastOperations(lastFamilyFactOperationContext())
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "добавь билет туда"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "I can add checklist items only to the latest planning task."
+    });
+    expect(planningTaskManager.seenInput).toBeUndefined();
+  });
+
   it("does not refresh latest planning operation when planning update is unavailable", async () => {
     const planningTaskManager = new FakePlanningTaskManager("not_connected");
     const lastOperations = new FakeLastOperations(lastPlanningTaskOperationContext());
@@ -4043,7 +4116,9 @@ class FakeIntentClassifier {
         }
       | {
           readonly kind: "update_last_operation";
-          readonly summary: string;
+          readonly summary?: string;
+          readonly operationAction?: "replace_text" | "append_checklist";
+          readonly checklistItems?: readonly string[];
         }
       | { readonly kind: "archive_fact"; readonly query: string }
       | {
@@ -4321,6 +4396,19 @@ class FakePlanningTaskManager {
           status: "open"
         },
         text: "Updated family task: Pack beach bags"
+      };
+    }
+
+    if (isRecord(input) && input.action === "add_checklist_items") {
+      return {
+        status: "checklist_items_added" as const,
+        item: {
+          id: "T-created",
+          title: "Pack bags",
+          status: "open"
+        },
+        checklistItems: ["passports", "tickets"],
+        text: "Added 2 checklist item(s) to family task: Pack bags"
       };
     }
 

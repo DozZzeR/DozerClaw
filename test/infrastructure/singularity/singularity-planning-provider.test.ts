@@ -209,6 +209,56 @@ describe("SingularityPlanningProvider", () => {
     );
   });
 
+  it("adds checklist items to existing tasks", async () => {
+    const fetcher = new RecordingFetchSequence([
+      { id: "C-1", parent: "T-1", title: "passports", done: false },
+      { id: "C-2", parent: "T-1", title: "tickets", done: false }
+    ]);
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      fetch: fetcher.fetch
+    });
+
+    await expect(
+      provider.addPlanningTaskChecklistItems({
+        taskId: "T-1",
+        scope: "family",
+        taskTitle: "Pack bags",
+        checklistItems: ["passports", "tickets"]
+      })
+    ).resolves.toEqual({
+      item: {
+        id: "T-1",
+        title: "Pack bags",
+        status: "open"
+      },
+      checklistItems: ["passports", "tickets"]
+    });
+    expect(fetcher.requests).toEqual([
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/checklist-item",
+        method: "POST",
+        body: {
+          parent: "T-1",
+          title: "passports",
+          done: false,
+          parentOrder: 1
+        }
+      }),
+      expect.objectContaining({
+        url: "https://api.singularity-app.com/v2/checklist-item",
+        method: "POST",
+        body: {
+          parent: "T-1",
+          title: "tickets",
+          done: false,
+          parentOrder: 2
+        }
+      })
+    ]);
+  });
+
   it("filters inactive, note-only, and locally non-matching tasks", async () => {
     const fetcher = new RecordingFetch({
       tasks: [

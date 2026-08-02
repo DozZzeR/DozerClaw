@@ -64,7 +64,9 @@ export type InboundIntent =
     }
   | {
       readonly kind: "update_last_operation";
-      readonly summary: string;
+      readonly summary?: string;
+      readonly operationAction?: "replace_text" | "append_checklist";
+      readonly checklistItems?: readonly string[];
     }
   | {
       readonly kind: "archive_fact";
@@ -238,8 +240,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `update_last_operation` when the user asks to correct, change, rename, or replace the item referenced by `lastOperation`.",
       "- Only use it when the user clearly refers to the last saved thing with words like last, latest, it, that, `последнее`, `последнюю`, `его`, or `ее`.",
-      "- `summary`: the full replacement text/title to save on the last operation target.",
-      "- `operationAction`: use `replace_text`.",
+      "- For corrections, renames, and replacements, set `operationAction` to `replace_text` and `summary` to the full replacement text/title.",
+      "- For adding checklist rows to the latest planning task, set `operationAction` to `append_checklist` and put row titles in `checklistItems`.",
       "- Do not use this intent when no `lastOperation` is provided; ask a clarification instead."
     ].join("\n"),
     "",
@@ -305,7 +307,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "# last operation follow-up examples",
     [
       '{"kind":"update_last_operation","summary":"Max prefers mint tea before bedtime.","operationAction":"replace_text"}',
-      '{"kind":"update_last_operation","summary":"Pack beach bags","operationAction":"replace_text"}'
+      '{"kind":"update_last_operation","summary":"Pack beach bags","operationAction":"replace_text"}',
+      '{"kind":"update_last_operation","summary":null,"operationAction":"append_checklist","checklistItems":["passports","tickets"]}'
     ].join("\n"),
     "",
     "# query_planning field rules",
@@ -501,13 +504,28 @@ export function parseInboundIntent(text: string): InboundIntent {
 
     if (
       parsed.kind === "update_last_operation" &&
-      typeof parsed.summary === "string"
+      (typeof parsed.summary === "string" ||
+        parsed.operationAction === "append_checklist")
     ) {
-      const summary = parsed.summary.trim();
+      const summary =
+        typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+      const checklistItems = optionalStringArray(
+        "checklistItems",
+        parsed.checklistItems
+      ).checklistItems;
+
+      if (parsed.operationAction === "append_checklist" && checklistItems?.length) {
+        return {
+          kind: "update_last_operation",
+          operationAction: "append_checklist",
+          checklistItems
+        };
+      }
 
       if (summary) {
         return {
           kind: "update_last_operation",
+          operationAction: "replace_text",
           summary
         };
       }
@@ -742,7 +760,7 @@ const inboundIntentSchema = {
     },
     operationAction: {
       type: ["string", "null"],
-      enum: ["replace_text", null]
+      enum: ["replace_text", "append_checklist", null]
     },
     reason: {
       type: ["string", "null"]

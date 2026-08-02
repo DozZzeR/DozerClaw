@@ -2,6 +2,9 @@ export interface PlanningPort {
   queryPlanningState(query: PlanningQuery): Promise<PlanningQueryResult>;
   createPlanningTask?(input: PlanningTaskCreate): Promise<PlanningTaskMutationResult>;
   updatePlanningTask?(input: PlanningTaskUpdate): Promise<PlanningTaskMutationResult>;
+  addPlanningTaskChecklistItems?(
+    input: PlanningTaskChecklistItemsAdd
+  ): Promise<PlanningTaskChecklistItemsAddResult>;
   completePlanningTask?(input: PlanningTaskComplete): Promise<PlanningTaskMutationResult>;
 }
 
@@ -43,6 +46,18 @@ export interface PlanningTaskUpdate {
   readonly title: string;
 }
 
+export interface PlanningTaskChecklistItemsAdd {
+  readonly taskId: string;
+  readonly scope: PlanningScope;
+  readonly taskTitle?: string;
+  readonly checklistItems: readonly string[];
+}
+
 export interface PlanningTaskMutationResult {
   readonly item: PlanningItem;
+}
+
+export interface PlanningTaskChecklistItemsAddResult
+  extends PlanningTaskMutationResult {
+  readonly checklistItems: readonly string[];
 }

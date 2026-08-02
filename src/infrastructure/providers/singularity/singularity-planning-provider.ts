@@ -3,6 +3,8 @@ import type {
   PlanningPort,
   PlanningQuery,
   PlanningQueryResult,
+  PlanningTaskChecklistItemsAdd,
+  PlanningTaskChecklistItemsAddResult,
   PlanningTaskComplete,
   PlanningTaskCreate,
   PlanningTaskMutationResult,
@@ -169,6 +171,23 @@ export class SingularityPlanningProvider implements PlanningPort {
 
     return {
       item: task
+    };
+  }
+
+  async addPlanningTaskChecklistItems(
+    input: PlanningTaskChecklistItemsAdd
+  ): Promise<PlanningTaskChecklistItemsAddResult> {
+    for (const [index, title] of input.checklistItems.entries()) {
+      await this.createChecklistItem(input.taskId, title, index + 1);
+    }
+
+    return {
+      item: {
+        id: input.taskId,
+        title: input.taskTitle ?? input.taskId,
+        status: "open"
+      },
+      checklistItems: input.checklistItems
     };
   }
 

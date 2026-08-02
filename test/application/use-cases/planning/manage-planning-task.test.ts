@@ -5,6 +5,7 @@ import type {
   PlanningItem,
   PlanningPort,
   PlanningQuery,
+  PlanningTaskChecklistItemsAdd,
   PlanningTaskComplete,
   PlanningTaskCreate,
   PlanningTaskUpdate
@@ -157,6 +158,41 @@ describe("ManagePlanningTaskUseCase", () => {
     });
   });
 
+  it("adds checklist items to a planning task by id", async () => {
+    const planning = new RecordingPlanningProvider([
+      {
+        id: "T-1",
+        title: "Pack bags",
+        status: "open"
+      }
+    ]);
+    const useCase = new ManagePlanningTaskUseCase({ planning });
+
+    await expect(
+      useCase.execute({
+        action: "add_checklist_items",
+        taskId: "T-1",
+        taskTitle: "Pack bags",
+        checklistItems: ["passports", "tickets"]
+      })
+    ).resolves.toEqual({
+      status: "checklist_items_added",
+      item: {
+        id: "T-1",
+        title: "Pack bags",
+        status: "open"
+      },
+      checklistItems: ["passports", "tickets"],
+      text: "Added 2 checklist item(s) to family task: Pack bags (T-1)"
+    });
+    expect(planning.addedChecklistItems).toEqual({
+      taskId: "T-1",
+      taskTitle: "Pack bags",
+      checklistItems: ["passports", "tickets"],
+      scope: "family"
+    });
+  });
+
   it("refuses ambiguous task completion", async () => {
     const planning = new RecordingPlanningProvider([
       {
@@ -202,6 +238,7 @@ class RecordingPlanningProvider implements PlanningPort {
   seenQuery: PlanningQuery | undefined;
   created: PlanningTaskCreate | undefined;
   updated: PlanningTaskUpdate | undefined;
+  addedChecklistItems: PlanningTaskChecklistItemsAdd | undefined;
   completed: PlanningTaskComplete | undefined;
 
   constructor(private readonly items: readonly PlanningItem[]) {}
@@ -235,6 +272,15 @@ class RecordingPlanningProvider implements PlanningPort {
 
     return {
       item: this.items[0]!
+    };
+  }
+
+  async addPlanningTaskChecklistItems(input: PlanningTaskChecklistItemsAdd) {
+    this.addedChecklistItems = input;
+
+    return {
+      item: this.items[0]!,
+      checklistItems: input.checklistItems
     };
   }
 }

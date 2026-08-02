@@ -466,7 +466,21 @@ describe("parseInboundIntent", () => {
       )
     ).toEqual({
       kind: "update_last_operation",
+      operationAction: "replace_text",
       summary: "Max prefers mint tea before bedtime."
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "update_last_operation",
+          operationAction: "append_checklist",
+          checklistItems: [" passports ", "", "tickets"]
+        })
+      )
+    ).toEqual({
+      kind: "update_last_operation",
+      operationAction: "append_checklist",
+      checklistItems: ["passports", "tickets"]
     });
   });
 
