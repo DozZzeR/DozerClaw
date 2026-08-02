@@ -293,7 +293,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       : undefined);
   const planningQuery = planningProvider
     ? new QueryPlanningStateUseCase({
-        planning: planningProvider
+        planning: planningProvider,
+        timeZone: config.timeZone
       })
     : undefined;
   const notificationCreator = new CreateNotificationUseCase({
@@ -330,6 +331,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     : undefined;
   const dispatchAcceptedCommand = new DispatchAcceptedCommandUseCase({
     systemHealthHandler,
+    timeZone: config.timeZone,
     eventLog,
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(documentAttachmentStore ? { documentAttachmentStore } : {}),

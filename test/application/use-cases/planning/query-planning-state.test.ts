@@ -70,6 +70,26 @@ describe("QueryPlanningStateUseCase", () => {
     });
   });
 
+  it("uses the configured calendar time zone for today queries", async () => {
+    const planning = new RecordingPlanningProvider([]);
+    const useCase = new QueryPlanningStateUseCase({
+      planning,
+      timeZone: "Europe/Moscow"
+    });
+
+    await useCase.execute({
+      query: "today",
+      now: new Date("2026-07-23T22:30:00.000Z")
+    });
+
+    expect(planning.seenQuery).toEqual({
+      text: "",
+      scope: "family",
+      startDateFrom: "2026-07-24",
+      startDateTo: "2026-07-24"
+    });
+  });
+
   it("keeps meaningful search terms in today queries", async () => {
     const planning = new RecordingPlanningProvider([]);
     const useCase = new QueryPlanningStateUseCase({ planning });

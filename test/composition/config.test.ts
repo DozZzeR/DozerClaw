@@ -4,6 +4,7 @@ import { loadConfig } from "../../src/composition/config.js";
 
 describe("loadConfig", () => {
   it("loads codex model provider config with safe defaults", () => {
+    expect(loadConfig({}).timeZone).toBe("UTC");
     expect(loadConfig({}).codex).toEqual({
       modelRoutingEnabled: false,
       model: "gpt-5.5",
@@ -17,6 +18,15 @@ describe("loadConfig", () => {
       requestTimeoutMs: 30_000,
       maxAttachmentBytes: 20 * 1024 * 1024
     });
+  });
+
+  it("loads and validates the planning calendar time zone", () => {
+    expect(
+      loadConfig({ DOZERCLAW_TIME_ZONE: "Europe/Moscow" }).timeZone
+    ).toBe("Europe/Moscow");
+    expect(() =>
+      loadConfig({ DOZERCLAW_TIME_ZONE: "not/a-time-zone" })
+    ).toThrow("DOZERCLAW_TIME_ZONE must be a valid IANA time zone.");
   });
 
   it("loads codex model provider config from environment", () => {

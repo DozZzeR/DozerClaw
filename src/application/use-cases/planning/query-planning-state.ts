@@ -2,6 +2,7 @@ import type {
   PlanningPort,
   PlanningScope
 } from "../../../ports/planning-port.js";
+import { planningCalendarDate } from "./planning-calendar-date.js";
 
 export interface QueryPlanningStateInput {
   readonly query: string;
@@ -21,7 +22,10 @@ export type QueryPlanningStateResult =
 
 export class QueryPlanningStateUseCase {
   constructor(
-    private readonly dependencies: { readonly planning: PlanningPort }
+    private readonly dependencies: {
+      readonly planning: PlanningPort;
+      readonly timeZone?: string;
+    }
   ) {}
 
   async execute(
@@ -29,7 +33,8 @@ export class QueryPlanningStateUseCase {
   ): Promise<QueryPlanningStateResult> {
     const interpretedQuery = interpretPlanningQuery(
       input.query,
-      input.now ?? new Date()
+      input.now ?? new Date(),
+      this.dependencies.timeZone ?? "UTC"
     );
     let result;
 
@@ -67,7 +72,8 @@ export class QueryPlanningStateUseCase {
 
 function interpretPlanningQuery(
   query: string,
-  now: Date
+  now: Date,
+  timeZone: string
 ): {
   readonly text: string;
   readonly dateRange: {
@@ -82,7 +88,7 @@ function interpretPlanningQuery(
     };
   }
 
-  const day = now.toISOString().slice(0, 10);
+  const day = planningCalendarDate(now, timeZone);
   const text = query
     .replace(/\b(today|today's)\b/giu, " ")
     .replace(/сегодня/giu, " ")

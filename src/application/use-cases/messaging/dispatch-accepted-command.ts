@@ -109,6 +109,7 @@ import type {
   ManagePlanningTaskInput,
   ManagePlanningTaskResult
 } from "../planning/manage-planning-task.js";
+import { nextPlanningCalendarDate } from "../planning/planning-calendar-date.js";
 import type { NotificationRecord } from "../../../ports/notification-repository-port.js";
 
 export interface SystemHealthCommandHandler {
@@ -364,6 +365,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingDocumentDecisions?: PendingDocumentDecisionStore;
   readonly pendingDocumentPlacementDecisions?: PendingDocumentPlacementDecisionStore;
   readonly now?: () => Date;
+  readonly timeZone?: string;
 }
 
 export class DispatchAcceptedCommandUseCase {
@@ -799,7 +801,11 @@ export class DispatchAcceptedCommandUseCase {
                 ? intent.summary
                 : intent.title ?? "",
             actorId: context.actor.id,
-            ...planningDateFromIntent(context, intent),
+            ...planningDateFromIntent(
+              context,
+              intent,
+              this.dependencies.timeZone ?? "UTC"
+            ),
             ...(intent.kind === "manage_planning" && intent.checklistItems
               ? { checklistItems: intent.checklistItems }
               : {})
@@ -3628,7 +3634,8 @@ function planningDateFromIntent(
   intent: Extract<
     InboundIntent,
     { readonly kind: "create_reminder" | "manage_planning" }
-  >
+  >,
+  timeZone: string
 ): { readonly date?: string } {
   if (intent.kind === "manage_planning" && intent.date) {
     return {
@@ -3637,12 +3644,8 @@ function planningDateFromIntent(
   }
 
   if (/\b(tomorrow)\b|завтра/iu.test(context.text)) {
-    const tomorrow = new Date(
-      context.receivedAt.getTime() + 24 * 60 * 60 * 1000
-    );
-
     return {
-      date: tomorrow.toISOString().slice(0, 10)
+      date: nextPlanningCalendarDate(context.receivedAt, timeZone)
     };
   }
 

@@ -2,6 +2,7 @@ export type RuntimeEnvironment = "development" | "test" | "production";
 
 export interface AppConfig {
   readonly environment: RuntimeEnvironment;
+  readonly timeZone: string;
   readonly sqlite: SqliteConfig;
   readonly fileStorage: FileStorageConfig;
   readonly telegram: TelegramConfig;
@@ -87,9 +88,11 @@ export interface MempalaceMemoryConfig {
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const environment = parseEnvironment(env.NODE_ENV);
+  const timeZone = parseTimeZone(env.DOZERCLAW_TIME_ZONE);
 
   return {
     environment,
+    timeZone,
     sqlite: {
       databasePath: env.DOZERCLAW_DB_PATH ?? "data/dozerclaw.sqlite"
     },
@@ -403,6 +406,18 @@ function parseEnvironment(value: string | undefined): RuntimeEnvironment {
   }
 
   return "development";
+}
+
+function parseTimeZone(value: string | undefined): string {
+  const timeZone = value?.trim() || "UTC";
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+  } catch {
+    throw new Error("DOZERCLAW_TIME_ZONE must be a valid IANA time zone.");
+  }
+
+  return timeZone;
 }
 
 function parsePositiveInteger(

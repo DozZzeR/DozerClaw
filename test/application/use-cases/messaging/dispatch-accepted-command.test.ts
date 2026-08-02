@@ -2732,6 +2732,36 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("uses the configured calendar time zone for tomorrow planning", async () => {
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "manage_planning",
+        action: "create",
+        title: "Pack bags"
+      }),
+      planningTaskManager,
+      timeZone: "Europe/Moscow"
+    });
+
+    await useCase.execute({
+      route: route("family_message"),
+      context: {
+        ...acceptedContext,
+        text: "create task for tomorrow: Pack bags",
+        receivedAt: new Date("2026-07-23T22:30:00.000Z")
+      }
+    });
+
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "create",
+      title: "Pack bags",
+      date: "2026-07-25",
+      actorId: "actor-owner"
+    });
+  });
+
   it("completes planning tasks from a model intent", async () => {
     const planningTaskManager = new FakePlanningTaskManager();
     const useCase = new DispatchAcceptedCommandUseCase({
