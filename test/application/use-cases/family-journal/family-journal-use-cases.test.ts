@@ -195,6 +195,38 @@ describe("family journal use cases", () => {
       ].join("\n")
     });
   });
+
+  it("uses semantic matches before unrelated recent journal entries", async () => {
+    const repository = new RecordingFamilyJournalRepository([
+      journalEntry({
+        id: "journal-local",
+        category: "sleep",
+        body: "Max slept through the night."
+      })
+    ]);
+    const semanticMemory = new RecordingSemanticMemory([
+      {
+        entry: {
+          id: "semantic-1",
+          body: "Sofia had an allergy appointment."
+        },
+        score: 0.9
+      }
+    ]);
+    const useCase = new RecallFamilyJournalEntriesUseCase({
+      repository,
+      semanticMemory,
+      recentLimit: 10,
+      resultLimit: 5
+    });
+
+    await expect(useCase.execute({ query: "sofia allergy" })).resolves.toEqual({
+      text: [
+        "Recent family journal entries:",
+        "- Sofia had an allergy appointment."
+      ].join("\n")
+    });
+  });
 });
 
 class RecordingFamilyJournalRepository implements FamilyJournalRepositoryPort {
@@ -214,6 +246,12 @@ class RecordingFamilyJournalRepository implements FamilyJournalRepositoryPort {
 class RecordingSemanticMemory implements MemoryPort {
   stored: MemoryEntryInput | undefined;
 
+  constructor(
+    private readonly searchResults: Awaited<
+      ReturnType<MemoryPort["search"]>
+    > = []
+  ) {}
+
   async store(entry: MemoryEntryInput) {
     this.stored = entry;
 
@@ -224,7 +262,7 @@ class RecordingSemanticMemory implements MemoryPort {
   }
 
   async search(_query: MemorySearchQuery) {
-    return [];
+    return this.searchResults;
   }
 }
 

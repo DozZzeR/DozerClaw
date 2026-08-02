@@ -47,26 +47,10 @@ export class RecallFamilyJournalEntriesUseCase {
     const matchingEntries = rankedEntries
       .filter((entry) => entry.score > 0)
       .map((entry) => entry.entry);
-    const selectedEntries = limit(
-      matchingEntries.length > 0 ? matchingEntries : entries,
-      this.resultLimit()
-    );
+    const selectedEntries = limit(matchingEntries, this.resultLimit());
 
     if (selectedEntries.length > 0) {
-      const synthesized = await this.synthesizeAnswer(
-        input.query,
-        selectedEntries
-      );
-
-      if (synthesized) {
-        return {
-          text: synthesized
-        };
-      }
-
-      return {
-        text: formatJournalEntries(selectedEntries)
-      };
+      return this.answerFromEntries(input.query, selectedEntries);
     }
 
     if (semanticResults.length > 0) {
@@ -75,8 +59,31 @@ export class RecallFamilyJournalEntriesUseCase {
       };
     }
 
+    const recentEntries = limit(entries, this.resultLimit());
+
+    if (recentEntries.length > 0) {
+      return this.answerFromEntries(input.query, recentEntries);
+    }
+
     return {
       text: "No matching family journal entries found."
+    };
+  }
+
+  private async answerFromEntries(
+    query: string,
+    entries: readonly FamilyJournalEntry[]
+  ): Promise<RecallFamilyJournalEntriesResult> {
+    const synthesized = await this.synthesizeAnswer(query, entries);
+
+    if (synthesized) {
+      return {
+        text: synthesized
+      };
+    }
+
+    return {
+      text: formatJournalEntries(entries)
     };
   }
 
