@@ -91,15 +91,15 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ).resolves.toEqual({
       chatId: "chat-owner",
       text: [
-        "DozerClaw commands:",
-        "/shop <item> - save a shopping item",
-        "/shop bought <item> - mark a shopping item bought",
-        "/find <query> - find open shopping items",
-        "/fact <text> - tell the model this is family memory",
-        "/journal <text> - tell the model this is a family journal entry",
-        "/doc <text> - tell the model this is about documents",
-        "/plan <text> - tell the model this is about planning",
-        "/health - system health"
+        "Команды DozerClaw:",
+        "/shop <товар> - сохранить покупку",
+        "/shop bought <товар> - отметить покупку купленной",
+        "/find <запрос> - найти открытые покупки",
+        "/fact <текст> - работать с семейной памятью",
+        "/journal <текст> - работать с семейным дневником",
+        "/doc <текст> - работать с документами",
+        "/plan <текст> - работать с планами",
+        "/health - состояние системы"
       ].join("\n")
     });
   });
@@ -1870,7 +1870,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Saved shopping item: два листа фанеры"
+      text: "Сохранил покупку: два листа фанеры"
     });
     expect(shoppingRecorder.seenInput).toEqual({
       title: "два листа фанеры",
@@ -1904,7 +1904,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Open shopping items:\n- два листа фанеры"
+      text: "Открытые покупки:\n- два листа фанеры"
     });
     expect(shoppingRecall.seenInput).toEqual({
       query: "ремонт урадисам"
@@ -1928,7 +1928,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Saved shopping item: два листа фанеры"
+      text: "Сохранил покупку: два листа фанеры"
     });
     expect(shoppingRecorder.seenInput).toEqual({
       title: "два листа фанеры",
@@ -1957,7 +1957,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Open shopping items:\n- два листа фанеры"
+      text: "Открытые покупки:\n- два листа фанеры"
     });
     expect(shoppingRecall.seenInput).toEqual({
       query: "ремонт урадисам"
@@ -1986,7 +1986,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Marked shopping item as bought: два листа фанеры"
+      text: "Отметил покупку купленной: два листа фанеры"
     });
     expect(shoppingManager.seenInput).toEqual({
       action: "mark_bought",
@@ -2026,7 +2026,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
     ).resolves.toEqual({
       chatId: "chat-owner",
       text: [
-        "More than one open shopping item matched. Please be more specific:",
+        "Нашел несколько подходящих покупок. Выбери номер:",
         "1. шурупы 30 мм",
         "2. шурупы 50 мм"
       ].join("\n")
@@ -2065,7 +2065,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Marked shopping item as bought: шурупы 50 мм"
+      text: "Отметил покупку купленной: шурупы 50 мм"
     });
     expect(shoppingManager.seenInput).toEqual({
       action: "mark_bought",
@@ -2098,7 +2098,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Marked shopping item as bought: шурупы 50 мм"
+      text: "Отметил покупку купленной: шурупы 50 мм"
     });
     expect(pendingChoiceClassifier.seenInput).toEqual({
       prompt: [
@@ -2178,7 +2178,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Marked shopping item as bought: два листа фанеры"
+      text: "Отметил покупку купленной: два листа фанеры"
     });
     expect(shoppingManager.seenInput).toEqual({
       action: "mark_bought",
@@ -2195,7 +2195,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       })
     ).resolves.toEqual({
       chatId: "chat-owner",
-      text: "Archived shopping item: два листа фанеры"
+      text: "Убрал покупку в архив: два листа фанеры"
     });
     expect(shoppingManager.seenInput).toEqual({
       action: "archive",
@@ -4860,7 +4860,7 @@ class FakeShoppingRecall {
     this.seenInput = input;
 
     return {
-      text: "Open shopping items:\n- два листа фанеры"
+      text: "Открытые покупки:\n- два листа фанеры"
     };
   }
 }
@@ -4893,7 +4893,7 @@ class FakeShoppingManager {
         status: "ambiguous" as const,
         items: this.result.items,
         text: [
-          "More than one open shopping item matched. Please be more specific:",
+          "Нашел несколько подходящих покупок. Выбери номер:",
           ...this.result.items.map((item, index) => `${index + 1}. ${item.title}`)
         ].join("\n")
       };
@@ -4902,7 +4902,7 @@ class FakeShoppingManager {
     if (this.result?.status === "not_found") {
       return {
         status: "not_found" as const,
-        text: "No matching open shopping item found."
+        text: "Не нашел подходящую открытую покупку."
       };
     }
 
@@ -4917,8 +4917,8 @@ class FakeShoppingManager {
       }),
       text:
         input.action === "archive"
-          ? `Archived shopping item: ${title}`
-          : `Marked shopping item as bought: ${title}`
+          ? `Убрал покупку в архив: ${title}`
+          : `Отметил покупку купленной: ${title}`
     };
   }
 }

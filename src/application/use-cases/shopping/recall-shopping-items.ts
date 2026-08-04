@@ -26,7 +26,7 @@ export class RecallShoppingItemsUseCase {
 
     if (items.length === 0) {
       return {
-        text: "I do not have any open shopping items yet."
+        text: "Открытых покупок пока нет."
       };
     }
 
@@ -38,7 +38,7 @@ export class RecallShoppingItemsUseCase {
 
     if (matchingItems.length === 0) {
       return {
-        text: "No matching open shopping items found."
+        text: "Не нашел открытых покупок по запросу."
       };
     }
 
@@ -94,16 +94,16 @@ function queryTokens(query: string): readonly string[] {
 
 function formatShoppingItems(items: readonly ShoppingItem[]): string {
   return [
-    "Open shopping items:",
+    "Открытые покупки:",
     ...items.map((item) => `- ${item.title}${formatMetadata(item)}`)
   ].join("\n");
 }
 
 function formatMetadata(item: ShoppingItem): string {
   const metadata = [
-    item.storeHint ? `store: ${item.storeHint}` : undefined,
-    item.projectTag ? `project: ${item.projectTag}` : undefined,
-    item.tags.length > 0 ? `tags: ${item.tags.join(", ")}` : undefined
+    item.storeHint ? `магазин: ${item.storeHint}` : undefined,
+    item.projectTag ? `проект: ${item.projectTag}` : undefined,
+    item.tags.length > 0 ? `теги: ${item.tags.join(", ")}` : undefined
   ].filter((value): value is string => Boolean(value));
 
   return metadata.length > 0 ? ` (${metadata.join(", ")})` : "";

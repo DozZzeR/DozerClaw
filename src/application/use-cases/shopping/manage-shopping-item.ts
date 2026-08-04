@@ -46,7 +46,7 @@ export class ManageShoppingItemUseCase {
     if (matches.length === 0) {
       return {
         status: "not_found",
-        text: "No matching open shopping item found."
+        text: "Не нашел подходящую открытую покупку."
       };
     }
 
@@ -62,7 +62,7 @@ export class ManageShoppingItemUseCase {
     if (!item) {
       return {
         status: "not_found",
-        text: "No matching open shopping item found."
+        text: "Не нашел подходящую открытую покупку."
       };
     }
 
@@ -78,8 +78,8 @@ export class ManageShoppingItemUseCase {
       item: updatedItem,
       text:
         input.action === "archive"
-          ? `Archived shopping item: ${updatedItem.title}`
-          : `Marked shopping item as bought: ${updatedItem.title}`
+          ? `Убрал покупку в архив: ${updatedItem.title}`
+          : `Отметил покупку купленной: ${updatedItem.title}`
     };
   }
 }
@@ -132,7 +132,7 @@ function queryTokens(query: string): readonly string[] {
 
 function formatAmbiguousShoppingItems(items: readonly ShoppingItem[]): string {
   return [
-    "More than one open shopping item matched. Please be more specific:",
+    "Нашел несколько подходящих покупок. Выбери номер:",
     ...items.map((item, index) => `${index + 1}. ${item.title}`)
   ].join("\n");
 }

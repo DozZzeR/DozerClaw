@@ -27,7 +27,7 @@ describe("ManageShoppingItemUseCase", () => {
         status: "bought",
         updatedAt: new Date("2026-08-04T10:00:00.000Z")
       },
-      text: "Marked shopping item as bought: два листа фанеры"
+      text: "Отметил покупку купленной: два листа фанеры"
     });
     expect(repository.saved).toEqual([
       expect.objectContaining({
@@ -60,7 +60,7 @@ describe("ManageShoppingItemUseCase", () => {
         status: "archived",
         updatedAt: new Date("2026-08-04T10:00:00.000Z")
       },
-      text: "Archived shopping item: шурупы"
+      text: "Убрал покупку в архив: шурупы"
     });
   });
 
@@ -86,7 +86,7 @@ describe("ManageShoppingItemUseCase", () => {
         status: "bought",
         updatedAt: new Date("2026-08-04T10:00:00.000Z")
       },
-      text: "Marked shopping item as bought: шурупы"
+      text: "Отметил покупку купленной: шурупы"
     });
   });
 
@@ -113,7 +113,7 @@ describe("ManageShoppingItemUseCase", () => {
         shoppingItem({ id: "shopping-2", title: "шурупы 50 мм" })
       ],
       text: [
-        "More than one open shopping item matched. Please be more specific:",
+        "Нашел несколько подходящих покупок. Выбери номер:",
         "1. шурупы 30 мм",
         "2. шурупы 50 мм"
       ].join("\n")
@@ -145,7 +145,7 @@ describe("ManageShoppingItemUseCase", () => {
         status: "bought",
         updatedAt: new Date("2026-08-04T10:00:00.000Z")
       },
-      text: "Marked shopping item as bought: шурупы 50 мм"
+      text: "Отметил покупку купленной: шурупы 50 мм"
     });
     expect(repository.saved).toEqual([
       expect.objectContaining({

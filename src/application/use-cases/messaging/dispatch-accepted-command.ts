@@ -804,7 +804,7 @@ export class DispatchAcceptedCommandUseCase {
 
     return {
       chatId: context.chat.id,
-      text: `Saved shopping item: ${result.item.title}`
+      text: `Сохранил покупку: ${result.item.title}`
     };
   }
 
@@ -4131,15 +4131,15 @@ function looksLikeShoppingQuery(text: string): boolean {
 
 function commandRailsHelpText(): string {
   return [
-    "DozerClaw commands:",
-    "/shop <item> - save a shopping item",
-    "/shop bought <item> - mark a shopping item bought",
-    "/find <query> - find open shopping items",
-    "/fact <text> - tell the model this is family memory",
-    "/journal <text> - tell the model this is a family journal entry",
-    "/doc <text> - tell the model this is about documents",
-    "/plan <text> - tell the model this is about planning",
-    "/health - system health"
+    "Команды DozerClaw:",
+    "/shop <товар> - сохранить покупку",
+    "/shop bought <товар> - отметить покупку купленной",
+    "/find <запрос> - найти открытые покупки",
+    "/fact <текст> - работать с семейной памятью",
+    "/journal <текст> - работать с семейным дневником",
+    "/doc <текст> - работать с документами",
+    "/plan <текст> - работать с планами",
+    "/health - состояние системы"
   ].join("\n");
 }
 

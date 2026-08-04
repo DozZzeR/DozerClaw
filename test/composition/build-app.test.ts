@@ -309,7 +309,7 @@ describe("buildApp", () => {
         receivedAt: new Date("2026-08-03T10:00:00.000Z"),
         now: new Date("2026-08-03T10:00:00.000Z")
       });
-      expect(savedReply.text).toBe("Saved shopping item: два листа фанеры");
+      expect(savedReply.text).toBe("Сохранил покупку: два листа фанеры");
 
       const recallReply = await app.handleNormalizedInboundMessage({
         messageId: "message-shopping-find",
@@ -323,7 +323,7 @@ describe("buildApp", () => {
         receivedAt: new Date("2026-08-03T10:01:00.000Z"),
         now: new Date("2026-08-03T10:01:00.000Z")
       });
-      expect(recallReply.text).toContain("Open shopping items:");
+      expect(recallReply.text).toContain("Открытые покупки:");
       expect(recallReply.text).toContain("- два листа фанеры");
 
       const database = createSqliteDatabase({ path: databasePath });
@@ -408,7 +408,7 @@ describe("buildApp", () => {
         now: new Date("2026-08-04T10:01:00.000Z")
       });
       expect(boughtReply.text).toBe(
-        "Marked shopping item as bought: два листа фанеры"
+        "Отметил покупку купленной: два листа фанеры"
       );
 
       const recallReply = await app.handleNormalizedInboundMessage({
@@ -423,7 +423,7 @@ describe("buildApp", () => {
         receivedAt: new Date("2026-08-04T10:02:00.000Z"),
         now: new Date("2026-08-04T10:02:00.000Z")
       });
-      expect(recallReply.text).toBe("I do not have any open shopping items yet.");
+      expect(recallReply.text).toBe("Открытых покупок пока нет.");
 
       const database = createSqliteDatabase({ path: databasePath });
       const repository = new SqliteShoppingRepository(database);
@@ -523,7 +523,7 @@ describe("buildApp", () => {
       });
       expect(ambiguousReply.text).toBe(
         [
-          "More than one open shopping item matched. Please be more specific:",
+          "Нашел несколько подходящих покупок. Выбери номер:",
           "1. шурупы 50 мм",
           "2. шурупы 30 мм"
         ].join("\n")
@@ -542,7 +542,7 @@ describe("buildApp", () => {
         now: new Date("2026-08-04T10:03:00.000Z")
       });
       expect(selectedReply.text).toBe(
-        "Marked shopping item as bought: шурупы 50 мм"
+        "Отметил покупку купленной: шурупы 50 мм"
       );
 
       const recallReply = await app.handleNormalizedInboundMessage({

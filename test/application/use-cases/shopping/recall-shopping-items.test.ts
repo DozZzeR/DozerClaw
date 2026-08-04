@@ -37,9 +37,9 @@ describe("RecallShoppingItemsUseCase", () => {
       })
     ).resolves.toEqual({
       text: [
-        "Open shopping items:",
-        "- два листа фанеры (store: uradi_sam, project: ремонт, tags: фанера, ремонт)",
-        "- шурупы (project: ремонт, tags: шурупы, ремонт)"
+        "Открытые покупки:",
+        "- два листа фанеры (магазин: uradi_sam, проект: ремонт, теги: фанера, ремонт)",
+        "- шурупы (проект: ремонт, теги: шурупы, ремонт)"
       ].join("\n")
     });
   });
@@ -64,8 +64,8 @@ describe("RecallShoppingItemsUseCase", () => {
       })
     ).resolves.toEqual({
       text: [
-        "Open shopping items:",
-        "- шурупы (project: ремонт, tags: шурупы)"
+        "Открытые покупки:",
+        "- шурупы (проект: ремонт, теги: шурупы)"
       ].join("\n")
     });
   });
