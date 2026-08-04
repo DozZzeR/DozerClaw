@@ -1,6 +1,6 @@
 import type { ShoppingItem } from "../../../core/domain/shopping/shopping-item.js";
 import type { ShoppingRepositoryPort } from "../../../ports/shopping-repository-port.js";
-import { normalizeShoppingStoreHint } from "./record-shopping-item.js";
+import { shoppingQueryTokens } from "./shopping-query.js";
 
 export interface RecallShoppingItemsDependencies {
   readonly repository: ShoppingRepositoryPort;
@@ -89,42 +89,7 @@ function scoreShoppingItem(tokens: readonly string[], item: ShoppingItem): numbe
 }
 
 function queryTokens(query: string): readonly string[] {
-  const seen = new Set<string>();
-
-  return normalizeQueryText(query)
-    .split(/\s+/u)
-    .map(normalizeToken)
-    .filter((token) => token.length >= 3 && !stopWords.has(token))
-    .filter((token) => {
-      if (seen.has(token)) {
-        return false;
-      }
-
-      seen.add(token);
-      return true;
-    });
-}
-
-function normalizeQueryText(text: string): string {
-  const withStoreAliases = text
-    .toLowerCase()
-    .replace(/ё/gu, "е")
-    .replace(/уради\s*сам|uradi\s*sam|uradisam/giu, " uradi_sam ");
-  const maybeStore = normalizeShoppingStoreHint(withStoreAliases.trim());
-
-  if (maybeStore === "uradi_sam") {
-    return maybeStore;
-  }
-
-  return withStoreAliases.replace(/[^a-z0-9а-я_]+/giu, " ").trim();
-}
-
-function normalizeToken(token: string): string {
-  if (/^[а-я]+$/iu.test(token) && token.length > 4 && token.endsWith("у")) {
-    return token.slice(0, -1);
-  }
-
-  return token;
+  return shoppingQueryTokens(query, stopWords);
 }
 
 function formatShoppingItems(items: readonly ShoppingItem[]): string {

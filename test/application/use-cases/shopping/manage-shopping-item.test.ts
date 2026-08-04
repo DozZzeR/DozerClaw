@@ -64,6 +64,32 @@ describe("ManageShoppingItemUseCase", () => {
     });
   });
 
+  it("matches Russian genitive item forms", async () => {
+    const repository = new FakeShoppingRepository([
+      shoppingItem({ id: "shopping-1", title: "шурупы" })
+    ]);
+    const useCase = new ManageShoppingItemUseCase({
+      repository,
+      recentLimit: 20,
+      now: () => new Date("2026-08-04T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        action: "mark_bought",
+        query: "купил шурупов"
+      })
+    ).resolves.toEqual({
+      status: "updated",
+      item: {
+        ...shoppingItem({ id: "shopping-1", title: "шурупы" }),
+        status: "bought",
+        updatedAt: new Date("2026-08-04T10:00:00.000Z")
+      },
+      text: "Marked shopping item as bought: шурупы"
+    });
+  });
+
   it("does not mutate ambiguous matches", async () => {
     const repository = new FakeShoppingRepository([
       shoppingItem({ id: "shopping-1", title: "шурупы 30 мм" }),

@@ -43,6 +43,32 @@ describe("RecallShoppingItemsUseCase", () => {
       ].join("\n")
     });
   });
+
+  it("matches Russian genitive item forms in recall queries", async () => {
+    const useCase = new RecallShoppingItemsUseCase({
+      repository: new FakeShoppingRepository([
+        shoppingItem({
+          id: "shopping-1",
+          title: "шурупы",
+          projectTag: "ремонт",
+          tags: ["шурупы"]
+        })
+      ]),
+      recentLimit: 20,
+      resultLimit: 10
+    });
+
+    await expect(
+      useCase.execute({
+        query: "что есть по шурупов для ремонта"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Open shopping items:",
+        "- шурупы (project: ремонт, tags: шурупы)"
+      ].join("\n")
+    });
+  });
 });
 
 class FakeShoppingRepository {

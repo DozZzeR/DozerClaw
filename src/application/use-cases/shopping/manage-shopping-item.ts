@@ -1,5 +1,6 @@
 import type { ShoppingItem } from "../../../core/domain/shopping/shopping-item.js";
 import type { ShoppingRepositoryPort } from "../../../ports/shopping-repository-port.js";
+import { shoppingQueryTokens } from "./shopping-query.js";
 
 export type ManageShoppingItemAction = "mark_bought" | "archive";
 
@@ -126,33 +127,7 @@ function scoreShoppingItem(tokens: readonly string[], item: ShoppingItem): numbe
 }
 
 function queryTokens(query: string): readonly string[] {
-  const seen = new Set<string>();
-
-  return query
-    .toLowerCase()
-    .replace(/ё/gu, "е")
-    .replace(/уради\s*сам|uradi\s*sam|uradisam/giu, " uradi_sam ")
-    .replace(/[^a-z0-9а-я_]+/giu, " ")
-    .trim()
-    .split(/\s+/u)
-    .map(normalizeToken)
-    .filter((token) => token.length >= 3 && !stopWords.has(token))
-    .filter((token) => {
-      if (seen.has(token)) {
-        return false;
-      }
-
-      seen.add(token);
-      return true;
-    });
-}
-
-function normalizeToken(token: string): string {
-  if (/^[а-я]+$/iu.test(token) && token.length > 4 && /[ауыеи]$/iu.test(token)) {
-    return token.slice(0, -1);
-  }
-
-  return token;
+  return shoppingQueryTokens(query, stopWords);
 }
 
 function formatAmbiguousShoppingItems(items: readonly ShoppingItem[]): string {
