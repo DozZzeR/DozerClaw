@@ -172,6 +172,13 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "# Task",
     "Classify the inbound family message into one intent.",
     "",
+    "# Ambiguous domain rule",
+    [
+      "- If the message could reasonably be a shopping item, family fact, journal entry, document request, or planning task and the domain is unclear, return `ask_clarification`.",
+      "- Ask the user which domain they mean instead of guessing.",
+      "- Prefer a short question naming the likely domains."
+    ].join("\n"),
+    "",
     "# Command scope rails",
     [
       "- The user text may start with `Command scope: <scope>` followed by `User text: ...`.",

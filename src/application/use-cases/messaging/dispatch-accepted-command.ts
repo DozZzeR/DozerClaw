@@ -1774,6 +1774,26 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    if (intent.kind === "unsupported" && input.allowFileOrClarification) {
+      const now = this.dependencies.now?.() ?? new Date();
+      const question = domainClarificationQuestion();
+      await this.dependencies.pendingClarifications?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        originalText: input.pendingClarification?.originalText ?? context.text,
+        originalAttachments:
+          input.pendingClarification?.originalAttachments ?? context.attachments,
+        question,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+
+      return {
+        chatId: context.chat.id,
+        text: question
+      };
+    }
+
     if (intent.kind === "store_file") {
       if (!input.allowFileOrClarification) {
         return {
@@ -4044,6 +4064,14 @@ function commandRailsHelpText(): string {
     "/doc <text> - tell the model this is about documents",
     "/plan <text> - tell the model this is about planning",
     "/health - system health"
+  ].join("\n");
+}
+
+function domainClarificationQuestion(): string {
+  return [
+    "Я не понял, в какой области это обработать.",
+    "Ответь: покупка, семейная память, дневник, документы или планы.",
+    "Можно также использовать /shop, /fact, /journal, /doc или /plan."
   ].join("\n");
 }
 

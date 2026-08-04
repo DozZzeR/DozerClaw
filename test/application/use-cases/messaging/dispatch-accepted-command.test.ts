@@ -1384,6 +1384,46 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("asks for a domain clarification when the model cannot classify the message", async () => {
+    const pendingClarifications = new FakePendingClarifications();
+    const question = [
+      "Я не понял, в какой области это обработать.",
+      "Ответь: покупка, семейная память, дневник, документы или планы.",
+      "Можно также использовать /shop, /fact, /journal, /doc или /plan."
+    ].join("\n");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "unsupported",
+        reason: "unclear domain"
+      }),
+      pendingClarifications,
+      now: () => new Date("2026-08-04T11:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "надо это сделать"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: question
+    });
+    expect(pendingClarifications.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      originalText: "надо это сделать",
+      originalAttachments: [],
+      question,
+      createdAt: new Date("2026-08-04T11:00:00.000Z"),
+      expiresAt: new Date("2026-08-04T11:30:00.000Z")
+    });
+  });
+
   it("uses a clarification answer to classify and store the original attachment", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const intentClassifier = new RecordingIntentClassifier({
@@ -4600,6 +4640,7 @@ class FakeIntentClassifier {
       | { readonly kind: "list_subject_aliases" }
       | { readonly kind: "delete_subject_alias"; readonly aliasSubjectId: string }
       | { readonly kind: "diagnose_subject_aliases" }
+      | { readonly kind: "unsupported"; readonly reason: string }
   ) {}
 
   async execute(_input: ClassifyInboundIntentInput) {
