@@ -10,6 +10,7 @@ import { buildApp } from "../../src/composition/build-app.js";
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteDocumentRepository } from "../../src/infrastructure/providers/sqlite/sqlite-document-repository.js";
 import { SqliteFamilyMemoryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
+import { SqliteShoppingRepository } from "../../src/infrastructure/providers/sqlite/sqlite-shopping-repository.js";
 import { SqliteServiceRegistryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import type {
   DocumentStoragePort,
@@ -257,6 +258,307 @@ describe("buildApp", () => {
         })
       ]);
       database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stores and recalls shopping items through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider: {
+          async runTextRequest() {
+            return {
+              text: JSON.stringify({
+                kind: "record_shopping_item",
+                question: null,
+                title: "два листа фанеры",
+                storeHint: "уради сам",
+                projectTag: "ремонт",
+                tags: ["фанера", "ремонт"],
+                query: null,
+                reason: null
+              })
+            };
+          }
+        }
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      const savedReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "купить в уради сам два листа фанеры",
+        attachments: [],
+        receivedAt: new Date("2026-08-03T10:00:00.000Z"),
+        now: new Date("2026-08-03T10:00:00.000Z")
+      });
+      expect(savedReply.text).toBe("Saved shopping item: два листа фанеры");
+
+      const recallReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-find",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "/find ремонт урадисам",
+        attachments: [],
+        receivedAt: new Date("2026-08-03T10:01:00.000Z"),
+        now: new Date("2026-08-03T10:01:00.000Z")
+      });
+      expect(recallReply.text).toContain("Open shopping items:");
+      expect(recallReply.text).toContain("- два листа фанеры");
+
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteShoppingRepository(database);
+      await expect(repository.listRecentOpenShoppingItems(10)).resolves.toEqual([
+        expect.objectContaining({
+          title: "два листа фанеры",
+          storeHint: "uradi_sam",
+          projectTag: "ремонт",
+          tags: ["фанера", "ремонт"],
+          sourceMessageText: "купить в уради сам два листа фанеры",
+          status: "open"
+        })
+      ]);
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("marks shopping items bought through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "record_shopping_item",
+        question: null,
+        title: "два листа фанеры",
+        storeHint: "уради сам",
+        projectTag: "ремонт",
+        tags: ["фанера", "ремонт"],
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "manage_shopping_item",
+        question: null,
+        action: "mark_bought",
+        query: "фанера",
+        reason: null
+      })
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "купить в уради сам два листа фанеры",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:00:00.000Z"),
+        now: new Date("2026-08-04T10:00:00.000Z")
+      });
+
+      const boughtReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-bought",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "купил фанеру",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:01:00.000Z"),
+        now: new Date("2026-08-04T10:01:00.000Z")
+      });
+      expect(boughtReply.text).toBe(
+        "Marked shopping item as bought: два листа фанеры"
+      );
+
+      const recallReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-find",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "/find ремонт урадисам",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:02:00.000Z"),
+        now: new Date("2026-08-04T10:02:00.000Z")
+      });
+      expect(recallReply.text).toBe("I do not have any open shopping items yet.");
+
+      const database = createSqliteDatabase({ path: databasePath });
+      const repository = new SqliteShoppingRepository(database);
+      await expect(repository.listRecentOpenShoppingItems(10)).resolves.toEqual(
+        []
+      );
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves ambiguous shopping lifecycle choices through composition", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "dozerclaw-test-"));
+    const databasePath = join(directory, "dozerclaw.sqlite");
+    const modelProvider = new QueueModelProvider([
+      JSON.stringify({
+        kind: "record_shopping_item",
+        question: null,
+        title: "шурупы 30 мм",
+        storeHint: null,
+        projectTag: "ремонт",
+        tags: ["шурупы"],
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "record_shopping_item",
+        question: null,
+        title: "шурупы 50 мм",
+        storeHint: null,
+        projectTag: "ремонт",
+        tags: ["шурупы"],
+        query: null,
+        reason: null
+      }),
+      JSON.stringify({
+        kind: "manage_shopping_item",
+        question: null,
+        action: "mark_bought",
+        query: "шурупы",
+        reason: null
+      })
+    ]);
+
+    try {
+      const app = buildApp({
+        env: {
+          DOZERCLAW_DB_PATH: databasePath,
+          NODE_ENV: "test"
+        },
+        modelProvider
+      });
+      await app.bootstrapOwnerIdentity({
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        displayName: "Owner"
+      });
+
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-1",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "ремонт, купить шурупы 30 мм",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:00:00.000Z"),
+        now: new Date("2026-08-04T10:00:00.000Z")
+      });
+      await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-2",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "ремонт, купить шурупы 50 мм",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:01:00.000Z"),
+        now: new Date("2026-08-04T10:01:00.000Z")
+      });
+
+      const ambiguousReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-bought",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "купил шурупы",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:02:00.000Z"),
+        now: new Date("2026-08-04T10:02:00.000Z")
+      });
+      expect(ambiguousReply.text).toBe(
+        [
+          "More than one open shopping item matched. Please be more specific:",
+          "1. шурупы 50 мм",
+          "2. шурупы 30 мм"
+        ].join("\n")
+      );
+
+      const selectedReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-selected",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "1",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:03:00.000Z"),
+        now: new Date("2026-08-04T10:03:00.000Z")
+      });
+      expect(selectedReply.text).toBe(
+        "Marked shopping item as bought: шурупы 50 мм"
+      );
+
+      const recallReply = await app.handleNormalizedInboundMessage({
+        messageId: "message-shopping-find",
+        provider: "telegram",
+        providerUserId: "tg-owner",
+        providerChatId: "tg-owner",
+        chatKind: "owner_private",
+        displayName: "Owner",
+        text: "/find ремонт",
+        attachments: [],
+        receivedAt: new Date("2026-08-04T10:04:00.000Z"),
+        now: new Date("2026-08-04T10:04:00.000Z")
+      });
+      expect(recallReply.text).toContain("- шурупы 30 мм");
+      expect(recallReply.text).not.toContain("- шурупы 50 мм");
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

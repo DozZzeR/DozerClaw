@@ -70,6 +70,9 @@ describe("ModelInboundIntentClassifier", () => {
           "query",
           "action",
           "title",
+          "storeHint",
+          "projectTag",
+          "tags",
           "date",
           "checklistItems",
           "operationAction",
@@ -88,6 +91,9 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("update_last_operation");
     expect(model.request?.input).toContain("record_journal_entry");
     expect(model.request?.input).toContain("recall_journal_entries");
+    expect(model.request?.input).toContain("record_shopping_item");
+    expect(model.request?.input).toContain("recall_shopping_items");
+    expect(model.request?.input).toContain("manage_shopping_item");
     expect(JSON.stringify(model.request?.outputSchema)).not.toContain(
       "create_reminder"
     );
@@ -162,6 +168,63 @@ describe("parseInboundIntent", () => {
     ).toEqual({
       kind: "recall_journal_entries",
       query: "health diary sofia"
+    });
+  });
+
+  it("parses shopping intents", () => {
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "record_shopping_item",
+          title: " два листа фанеры ",
+          storeHint: " уради сам ",
+          projectTag: " ремонт ",
+          tags: [" фанера ", "", "ремонт"]
+        })
+      )
+    ).toEqual({
+      kind: "record_shopping_item",
+      title: "два листа фанеры",
+      storeHint: "уради сам",
+      projectTag: "ремонт",
+      tags: ["фанера", "ремонт"]
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "recall_shopping_items",
+          query: " ремонт урадисам "
+        })
+      )
+    ).toEqual({
+      kind: "recall_shopping_items",
+      query: "ремонт урадисам"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "manage_shopping_item",
+          action: "mark_bought",
+          query: " фанера "
+        })
+      )
+    ).toEqual({
+      kind: "manage_shopping_item",
+      action: "mark_bought",
+      query: "фанера"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "manage_shopping_item",
+          action: "archive",
+          query: " шурупы "
+        })
+      )
+    ).toEqual({
+      kind: "manage_shopping_item",
+      action: "archive",
+      query: "шурупы"
     });
   });
 

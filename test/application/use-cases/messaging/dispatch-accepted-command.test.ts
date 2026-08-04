@@ -15,6 +15,7 @@ import type {
   FamilyJournalEntry,
   FamilyJournalCategory
 } from "../../../../src/core/domain/family-journal/family-journal-entry.js";
+import type { ShoppingItem } from "../../../../src/core/domain/shopping/shopping-item.js";
 import type { AcceptedMessageContext } from "../../../../src/application/use-cases/messaging/process-inbound-message.js";
 import type { CommandRoute } from "../../../../src/application/use-cases/messaging/route-command.js";
 import type { ClassifyInboundIntentInput } from "../../../../src/application/use-cases/messaging/classify-inbound-intent.js";
@@ -26,7 +27,8 @@ import type {
   PendingDocumentPlacementDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
-  PendingFileDestinationDecision
+  PendingFileDestinationDecision,
+  PendingShoppingItemDecision
 } from "../../../../src/ports/state-repository-port.js";
 
 describe("DispatchAcceptedCommandUseCase", () => {
@@ -1741,6 +1743,304 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
     expect(journalRecall.seenInput).toEqual({
       query: "health diary sofia"
+    });
+  });
+
+  it("records a shopping item from model intent", async () => {
+    const shoppingRecorder = new FakeShoppingRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "record_shopping_item",
+        title: "два листа фанеры",
+        storeHint: "уради сам",
+        projectTag: "ремонт",
+        tags: ["фанера", "ремонт"]
+      }),
+      shoppingRecorder
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "купить в уради сам два листа фанеры"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved shopping item: два листа фанеры"
+    });
+    expect(shoppingRecorder.seenInput).toEqual({
+      title: "два листа фанеры",
+      storeHint: "уради сам",
+      projectTag: "ремонт",
+      tags: ["фанера", "ремонт"],
+      sourceActorId: "actor-owner",
+      sourceChatId: "chat-owner",
+      sourceMessageText: "купить в уради сам два листа фанеры"
+    });
+  });
+
+  it("recalls shopping items from model intent", async () => {
+    const shoppingRecall = new FakeShoppingRecall();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "recall_shopping_items",
+        query: "ремонт урадисам"
+      }),
+      shoppingRecall
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "что у нас есть по ремонту или урадисам?"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Open shopping items:\n- два листа фанеры"
+    });
+    expect(shoppingRecall.seenInput).toEqual({
+      query: "ремонт урадисам"
+    });
+  });
+
+  it("uses /shop as a deterministic shopping write rail without model routing", async () => {
+    const shoppingRecorder = new FakeShoppingRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      shoppingRecorder
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message", "/shop купить в уради сам два листа фанеры"),
+        context: {
+          ...acceptedContext,
+          text: "/shop купить в уради сам два листа фанеры"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved shopping item: два листа фанеры"
+    });
+    expect(shoppingRecorder.seenInput).toEqual({
+      title: "два листа фанеры",
+      storeHint: "uradi_sam",
+      tags: [],
+      sourceActorId: "actor-owner",
+      sourceChatId: "chat-owner",
+      sourceMessageText: "/shop купить в уради сам два листа фанеры"
+    });
+  });
+
+  it("uses /find as a deterministic shopping recall rail", async () => {
+    const shoppingRecall = new FakeShoppingRecall();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      shoppingRecall
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message", "/find ремонт урадисам"),
+        context: {
+          ...acceptedContext,
+          text: "/find ремонт урадисам"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Open shopping items:\n- два листа фанеры"
+    });
+    expect(shoppingRecall.seenInput).toEqual({
+      query: "ремонт урадисам"
+    });
+  });
+
+  it("manages a shopping item from model intent", async () => {
+    const shoppingManager = new FakeShoppingManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "manage_shopping_item",
+        action: "mark_bought",
+        query: "фанера"
+      }),
+      shoppingManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "купил фанеру"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Marked shopping item as bought: два листа фанеры"
+    });
+    expect(shoppingManager.seenInput).toEqual({
+      action: "mark_bought",
+      query: "фанера"
+    });
+  });
+
+  it("stores a pending shopping selection when lifecycle matching is ambiguous", async () => {
+    const pendingShoppingItemDecisions = new FakePendingShoppingItemDecisions();
+    const shoppingManager = new FakeShoppingManager({
+      status: "ambiguous",
+      items: [
+        shoppingItem({ id: "shopping-1", title: "шурупы 30 мм" }),
+        shoppingItem({ id: "shopping-2", title: "шурупы 50 мм" })
+      ]
+    });
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier: new FakeIntentClassifier({
+        kind: "manage_shopping_item",
+        action: "mark_bought",
+        query: "шурупы"
+      }),
+      shoppingManager,
+      pendingShoppingItemDecisions,
+      now: () => new Date("2026-08-04T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "купил шурупы"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "More than one open shopping item matched. Please be more specific:",
+        "1. шурупы 30 мм",
+        "2. шурупы 50 мм"
+      ].join("\n")
+    });
+    expect(pendingShoppingItemDecisions.saved).toEqual({
+      chatId: "chat-owner",
+      actorId: "actor-owner",
+      action: "mark_bought",
+      candidates: [
+        shoppingItem({ id: "shopping-1", title: "шурупы 30 мм" }),
+        shoppingItem({ id: "shopping-2", title: "шурупы 50 мм" })
+      ],
+      createdAt: new Date("2026-08-04T10:00:00.000Z"),
+      expiresAt: new Date("2026-08-04T10:30:00.000Z")
+    });
+  });
+
+  it("applies a pending shopping lifecycle choice by number", async () => {
+    const pendingShoppingItemDecisions = new FakePendingShoppingItemDecisions();
+    pendingShoppingItemDecisions.pending = pendingShoppingItemDecision();
+    const shoppingManager = new FakeShoppingManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      shoppingManager,
+      pendingShoppingItemDecisions,
+      now: () => new Date("2026-08-04T10:10:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "2"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Marked shopping item as bought: шурупы 50 мм"
+    });
+    expect(shoppingManager.seenInput).toEqual({
+      action: "mark_bought",
+      query: "шурупы 50 мм",
+      shoppingItemId: "shopping-2"
+    });
+    expect(pendingShoppingItemDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("cancels a pending shopping lifecycle choice", async () => {
+    const pendingShoppingItemDecisions = new FakePendingShoppingItemDecisions();
+    pendingShoppingItemDecisions.pending = pendingShoppingItemDecision();
+    const shoppingManager = new FakeShoppingManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      shoppingManager,
+      pendingShoppingItemDecisions,
+      now: () => new Date("2026-08-04T10:10:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "отмена"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Ок, не меняю покупку."
+    });
+    expect(shoppingManager.seenInput).toBeUndefined();
+    expect(pendingShoppingItemDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
+  it("uses /shop bought and archive lifecycle rails without model routing", async () => {
+    const shoppingManager = new FakeShoppingManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      shoppingManager
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message", "/shop bought фанера"),
+        context: {
+          ...acceptedContext,
+          text: "/shop bought фанера"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Marked shopping item as bought: два листа фанеры"
+    });
+    expect(shoppingManager.seenInput).toEqual({
+      action: "mark_bought",
+      query: "фанера"
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message", "/shop archive шурупы"),
+        context: {
+          ...acceptedContext,
+          text: "/shop archive шурупы"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Archived shopping item: два листа фанеры"
+    });
+    expect(shoppingManager.seenInput).toEqual({
+      action: "archive",
+      query: "шурупы"
     });
   });
 
@@ -4178,6 +4478,19 @@ class FakeIntentClassifier {
           readonly subjectId?: string;
         }
       | { readonly kind: "recall_journal_entries"; readonly query: string }
+      | {
+          readonly kind: "record_shopping_item";
+          readonly title: string;
+          readonly storeHint?: string;
+          readonly projectTag?: string;
+          readonly tags?: readonly string[];
+        }
+      | { readonly kind: "recall_shopping_items"; readonly query: string }
+      | {
+          readonly kind: "manage_shopping_item";
+          readonly action: "mark_bought" | "archive";
+          readonly query: string;
+        }
       | { readonly kind: "create_reminder"; readonly summary: string }
       | { readonly kind: "query_planning"; readonly query: string }
       | {
@@ -4344,6 +4657,108 @@ class FakeFamilyJournalRecall {
 
     return {
       text: "Recent family journal entries:\n- [health] Sofia coughed at night."
+    };
+  }
+}
+
+class FakeShoppingRecorder {
+  seenInput:
+    | {
+        title: string;
+        storeHint?: string;
+        projectTag?: string;
+        tags?: readonly string[];
+        sourceActorId: string;
+        sourceChatId: string;
+        sourceMessageText: string;
+      }
+    | undefined;
+
+  async execute(input: NonNullable<FakeShoppingRecorder["seenInput"]>) {
+    this.seenInput = input;
+
+    return {
+      status: "created" as const,
+      item: shoppingItem({
+        id: "shopping-1",
+        title: input.title,
+        ...(input.storeHint ? { storeHint: input.storeHint } : {}),
+        ...(input.projectTag ? { projectTag: input.projectTag } : {}),
+        tags: input.tags ?? [],
+        sourceActorId: input.sourceActorId,
+        sourceChatId: input.sourceChatId,
+        sourceMessageText: input.sourceMessageText
+      })
+    };
+  }
+}
+
+class FakeShoppingRecall {
+  seenInput: { query: string } | undefined;
+
+  async execute(input: { query: string }) {
+    this.seenInput = input;
+
+    return {
+      text: "Open shopping items:\n- два листа фанеры"
+    };
+  }
+}
+
+class FakeShoppingManager {
+  seenInput:
+    | {
+        action: "mark_bought" | "archive";
+        query: string;
+        shoppingItemId?: string;
+      }
+    | undefined;
+
+  constructor(
+    private readonly result?:
+      | {
+          readonly status: "ambiguous";
+          readonly items: readonly ShoppingItem[];
+        }
+      | {
+          readonly status: "not_found";
+        }
+  ) {}
+
+  async execute(input: NonNullable<FakeShoppingManager["seenInput"]>) {
+    this.seenInput = input;
+
+    if (this.result?.status === "ambiguous") {
+      return {
+        status: "ambiguous" as const,
+        items: this.result.items,
+        text: [
+          "More than one open shopping item matched. Please be more specific:",
+          ...this.result.items.map((item, index) => `${index + 1}. ${item.title}`)
+        ].join("\n")
+      };
+    }
+
+    if (this.result?.status === "not_found") {
+      return {
+        status: "not_found" as const,
+        text: "No matching open shopping item found."
+      };
+    }
+
+    const title = input.shoppingItemId ? input.query : "два листа фанеры";
+
+    return {
+      status: "updated" as const,
+      item: shoppingItem({
+        id: input.shoppingItemId ?? "shopping-1",
+        title,
+        status: input.action === "archive" ? "archived" : "bought"
+      }),
+      text:
+        input.action === "archive"
+          ? `Archived shopping item: ${title}`
+          : `Marked shopping item as bought: ${title}`
     };
   }
 }
@@ -4804,6 +5219,22 @@ function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
   };
 }
 
+function shoppingItem(input: Partial<ShoppingItem>): ShoppingItem {
+  return {
+    id: input.id ?? "shopping-1",
+    title: input.title ?? "shopping item",
+    ...(input.storeHint ? { storeHint: input.storeHint } : {}),
+    ...(input.projectTag ? { projectTag: input.projectTag } : {}),
+    tags: input.tags ?? [],
+    sourceActorId: input.sourceActorId ?? "actor-owner",
+    sourceChatId: input.sourceChatId ?? "chat-owner",
+    sourceMessageText: input.sourceMessageText ?? input.title ?? "shopping item",
+    status: input.status ?? "open",
+    createdAt: input.createdAt ?? new Date("2026-08-03T10:00:00.000Z"),
+    updatedAt: input.updatedAt ?? new Date("2026-08-03T10:00:00.000Z")
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -4847,6 +5278,20 @@ function pendingFamilyFactArchiveDecision(): PendingFamilyFactArchiveDecision {
     ],
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     expiresAt: new Date("2026-07-14T07:30:00.000Z")
+  };
+}
+
+function pendingShoppingItemDecision(): PendingShoppingItemDecision {
+  return {
+    chatId: "chat-owner",
+    actorId: "actor-owner",
+    action: "mark_bought",
+    candidates: [
+      shoppingItem({ id: "shopping-1", title: "шурупы 30 мм" }),
+      shoppingItem({ id: "shopping-2", title: "шурупы 50 мм" })
+    ],
+    createdAt: new Date("2026-08-04T10:00:00.000Z"),
+    expiresAt: new Date("2026-08-04T10:30:00.000Z")
   };
 }
 
@@ -5044,6 +5489,33 @@ class FakePendingDocumentDecisions {
   }
 
   async save(input: PendingDocumentDecision): Promise<void> {
+    this.saved = input;
+    this.pending = input;
+  }
+
+  async clearByChatId(chatId: string): Promise<void> {
+    this.deletedChatIds.push(chatId);
+    this.pending = undefined;
+  }
+}
+
+class FakePendingShoppingItemDecisions {
+  pending: PendingShoppingItemDecision | undefined;
+  saved: PendingShoppingItemDecision | undefined;
+  readonly deletedChatIds: string[] = [];
+
+  async findActiveByChatId(chatId: string, now: Date) {
+    if (
+      this.pending?.chatId === chatId &&
+      this.pending.expiresAt.getTime() > now.getTime()
+    ) {
+      return this.pending;
+    }
+
+    return undefined;
+  }
+
+  async save(input: PendingShoppingItemDecision): Promise<void> {
     this.saved = input;
     this.pending = input;
   }

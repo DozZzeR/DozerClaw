@@ -39,11 +39,27 @@ export type InboundIntent =
       readonly subjectId?: string;
     }
   | {
+      readonly kind: "record_shopping_item";
+      readonly title: string;
+      readonly storeHint?: string;
+      readonly projectTag?: string;
+      readonly tags?: readonly string[];
+    }
+  | {
       readonly kind: "create_reminder";
       readonly summary: string;
     }
   | {
       readonly kind: "recall_journal_entries";
+      readonly query: string;
+    }
+  | {
+      readonly kind: "recall_shopping_items";
+      readonly query: string;
+    }
+  | {
+      readonly kind: "manage_shopping_item";
+      readonly action: "mark_bought" | "archive";
       readonly query: string;
     }
   | {
@@ -185,6 +201,33 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Do not use journal intents for durable preferences, addresses, or reference links; use family memory fact intents for those."
     ].join("\n"),
     "",
+    "# shopping field rules",
+    [
+      "- Use `record_shopping_item` for open purchase intentions, store lists, errands to buy materials, groceries, repair supplies, or household goods.",
+      "- Use shopping for messages like `/shop ...`, `купить в Уради Сам два листа фанеры`, `ремонт, купить шурупов`, or `buy screws for repair`.",
+      "- `title`: the item to buy, without command words and without store/project prefixes.",
+      "- `storeHint`: store name when present, for example `uradi_sam`; use `null` when absent.",
+      "- `projectTag`: project/context when present, for example `ремонт`, `home_repair`, or `kitchen`; use `null` when absent.",
+      "- `tags`: concise useful search tags from item, store, and project; use an empty array when none.",
+      "- Do not use shopping for explicit reminders, dates, or task-management wording; use `manage_planning` for those.",
+      "- If the user asks whether to save as a purchase, task, note, or fact and the contour is unclear, use `ask_clarification`."
+    ].join("\n"),
+    "",
+    "# recall_shopping_items field rules",
+    [
+      "- Use `recall_shopping_items` when the user asks what to buy, what is open at a store, or what is needed for a project/context.",
+      "- `query`: the shortest useful store/project/item search phrase.",
+      "- Do not use planning queries for shopping lists unless the user explicitly asks about tasks or reminders."
+    ].join("\n"),
+    "",
+    "# manage_shopping_item field rules",
+    [
+      "- Use `manage_shopping_item` when the user says an existing shopping item was bought/done or should be archived/removed from the open shopping list.",
+      "- `action`: use `mark_bought` for bought, done, got it, `купил`, `купила`, `куплено`, or `готово`; use `archive` for archive, remove, hide, cancel, `убери`, or `в архив`.",
+      "- `query`: the shortest phrase identifying the existing open shopping item.",
+      "- Do not use this for completing planning tasks; use `manage_planning` when the user refers to tasks, reminders, or checklist items."
+    ].join("\n"),
+    "",
     "# store_file field rules",
     [
       "- Use `store_file` for uploaded attachments.",
@@ -275,6 +318,16 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       '{"kind":"record_journal_entry","summary":"Sofia coughed at night but had no fever.","journalCategory":"health","subjectId":"sofia"}',
       '{"kind":"record_journal_entry","summary":"Max slept through the night.","journalCategory":"sleep","subjectId":"max"}',
       '{"kind":"recall_journal_entries","query":"health diary sofia cough"}'
+    ].join("\n"),
+    "",
+    "# shopping examples",
+    [
+      '{"kind":"record_shopping_item","title":"два листа фанеры","storeHint":"uradi_sam","projectTag":"ремонт","tags":["фанера","ремонт","uradi_sam"]}',
+      '{"kind":"record_shopping_item","title":"шурупы","storeHint":null,"projectTag":"ремонт","tags":["шурупы","ремонт"]}',
+      '{"kind":"recall_shopping_items","query":"ремонт uradi_sam"}',
+      '{"kind":"manage_shopping_item","action":"mark_bought","query":"фанера"}',
+      '{"kind":"manage_shopping_item","action":"archive","query":"шурупы"}',
+      '{"kind":"ask_clarification","question":"Это сохранить как покупку, задачу или заметку?"}'
     ].join("\n"),
     "",
     "# archive_fact examples",
@@ -422,6 +475,23 @@ export function parseInboundIntent(text: string): InboundIntent {
     }
 
     if (
+      parsed.kind === "record_shopping_item" &&
+      typeof parsed.title === "string"
+    ) {
+      const title = parsed.title.trim();
+
+      if (title) {
+        return {
+          kind: "record_shopping_item",
+          title,
+          ...optionalShoppingText("storeHint", parsed.storeHint),
+          ...optionalShoppingText("projectTag", parsed.projectTag),
+          ...optionalTags(parsed.tags)
+        };
+      }
+    }
+
+    if (
       parsed.kind === "create_reminder" &&
       typeof parsed.summary === "string"
     ) {
@@ -452,6 +522,36 @@ export function parseInboundIntent(text: string): InboundIntent {
         kind: "recall_journal_entries",
         query: parsed.query.trim()
       };
+    }
+
+    if (
+      parsed.kind === "recall_shopping_items" &&
+      typeof parsed.query === "string"
+    ) {
+      const query = parsed.query.trim();
+
+      if (query) {
+        return {
+          kind: "recall_shopping_items",
+          query
+        };
+      }
+    }
+
+    if (
+      parsed.kind === "manage_shopping_item" &&
+      (parsed.action === "mark_bought" || parsed.action === "archive") &&
+      typeof parsed.query === "string"
+    ) {
+      const query = parsed.query.trim();
+
+      if (query) {
+        return {
+          kind: "manage_shopping_item",
+          action: parsed.action,
+          query
+        };
+      }
     }
 
     if (parsed.kind === "query_planning" && typeof parsed.query === "string") {
@@ -667,8 +767,11 @@ const inboundIntentSchema = {
         "store_file",
         "record_fact",
         "record_journal_entry",
+        "record_shopping_item",
         "answer_from_memory",
         "recall_journal_entries",
+        "recall_shopping_items",
+        "manage_shopping_item",
         "query_planning",
         "manage_planning",
         "update_last_operation",
@@ -744,10 +847,22 @@ const inboundIntentSchema = {
     },
     action: {
       type: ["string", "null"],
-      enum: ["create", "complete", null]
+      enum: ["create", "complete", "mark_bought", "archive", null]
     },
     title: {
       type: ["string", "null"]
+    },
+    storeHint: {
+      type: ["string", "null"]
+    },
+    projectTag: {
+      type: ["string", "null"]
+    },
+    tags: {
+      type: ["array", "null"],
+      items: {
+        type: "string"
+      }
     },
     date: {
       type: ["string", "null"]
@@ -812,6 +927,9 @@ const inboundIntentSchema = {
     "query",
     "action",
     "title",
+    "storeHint",
+    "projectTag",
+    "tags",
     "date",
     "checklistItems",
     "operationAction",
@@ -893,6 +1011,32 @@ function optionalStringArray(
     .filter(Boolean);
 
   return items.length > 0 ? { [key]: items } : {};
+}
+
+function optionalTags(value: unknown): { readonly tags?: readonly string[] } {
+  if (!Array.isArray(value)) {
+    return {};
+  }
+
+  const tags = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return tags.length > 0 ? { tags } : {};
+}
+
+function optionalShoppingText(
+  key: "storeHint" | "projectTag",
+  value: unknown
+): { readonly storeHint?: string; readonly projectTag?: string } {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+
+  return {
+    [key]: value.trim()
+  };
 }
 
 function optionalDocumentSubjectId(

@@ -2,6 +2,7 @@ import type { MessageAttachment } from "../core/domain/messaging/message.js";
 import type { DocumentRecord } from "../core/domain/documents/document-record.js";
 import type { DocumentType } from "../core/domain/documents/document-record.js";
 import type { FamilyFact } from "../core/domain/family-memory/family-fact.js";
+import type { ShoppingItem } from "../core/domain/shopping/shopping-item.js";
 import type { DocumentUploadFolderOption } from "./document-folder-policy-port.js";
 
 export interface StateRepositoryPort {
@@ -51,6 +52,14 @@ export interface StateRepositoryPort {
     input: PendingFamilyFactArchiveDecision
   ): Promise<void>;
   clearPendingFamilyFactArchiveDecisionByChatId(chatId: string): Promise<void>;
+  findActivePendingShoppingItemDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingShoppingItemDecision | undefined>;
+  savePendingShoppingItemDecision(
+    input: PendingShoppingItemDecision
+  ): Promise<void>;
+  clearPendingShoppingItemDecisionByChatId(chatId: string): Promise<void>;
   findActivePendingDocumentDecisionByChatId(
     chatId: string,
     now: Date
@@ -145,6 +154,17 @@ export interface PendingFamilyFactArchiveDecision {
   readonly chatId: string;
   readonly actorId: string;
   readonly candidates: readonly FamilyFact[];
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+export type PendingShoppingItemDecisionAction = "mark_bought" | "archive";
+
+export interface PendingShoppingItemDecision {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly action: PendingShoppingItemDecisionAction;
+  readonly candidates: readonly ShoppingItem[];
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }

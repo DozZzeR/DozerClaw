@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DocumentRecord } from "../../../src/core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../src/core/domain/family-memory/family-fact.js";
+import type { ShoppingItem } from "../../../src/core/domain/shopping/shopping-item.js";
 import { createSqliteDatabase } from "../../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteStateRepository } from "../../../src/infrastructure/providers/sqlite/sqlite-state-repository.js";
 
@@ -521,6 +522,57 @@ describe("SqliteStateRepository", () => {
     database.close();
   });
 
+  it("stores and clears active pending shopping item decisions by chat", async () => {
+    const database = createSqliteDatabase({ path: ":memory:" });
+    const repository = new SqliteStateRepository(database);
+
+    await repository.savePendingShoppingItemDecision({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      action: "mark_bought",
+      candidates: [
+        shoppingItem({ id: "shopping-1", title: "шурупы 30 мм" }),
+        shoppingItem({ id: "shopping-2", title: "шурупы 50 мм" })
+      ],
+      createdAt: new Date("2026-08-04T10:00:00.000Z"),
+      expiresAt: new Date("2026-08-04T10:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingShoppingItemDecisionByChatId(
+        "chat-1",
+        new Date("2026-08-04T10:10:00.000Z")
+      )
+    ).resolves.toEqual({
+      chatId: "chat-1",
+      actorId: "actor-1",
+      action: "mark_bought",
+      candidates: [
+        shoppingItem({ id: "shopping-1", title: "шурупы 30 мм" }),
+        shoppingItem({ id: "shopping-2", title: "шурупы 50 мм" })
+      ],
+      createdAt: new Date("2026-08-04T10:00:00.000Z"),
+      expiresAt: new Date("2026-08-04T10:30:00.000Z")
+    });
+
+    await expect(
+      repository.findActivePendingShoppingItemDecisionByChatId(
+        "chat-1",
+        new Date("2026-08-04T10:31:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    await repository.clearPendingShoppingItemDecisionByChatId("chat-1");
+    await expect(
+      repository.findActivePendingShoppingItemDecisionByChatId(
+        "chat-1",
+        new Date("2026-08-04T10:10:00.000Z")
+      )
+    ).resolves.toBeUndefined();
+
+    database.close();
+  });
+
   it("stores and clears active pending document placement decisions by chat", async () => {
     const database = createSqliteDatabase({ path: ":memory:" });
     const repository = new SqliteStateRepository(database);
@@ -601,5 +653,19 @@ function familyFact(input: Pick<FamilyFact, "id" | "body">): FamilyFact {
     status: "active",
     createdAt: new Date("2026-07-14T07:00:00.000Z"),
     updatedAt: new Date("2026-07-14T07:00:00.000Z")
+  };
+}
+
+function shoppingItem(input: Pick<ShoppingItem, "id" | "title">): ShoppingItem {
+  return {
+    id: input.id,
+    title: input.title,
+    tags: ["ремонт"],
+    sourceActorId: "actor-1",
+    sourceChatId: "chat-1",
+    sourceMessageText: input.title,
+    status: "open",
+    createdAt: new Date("2026-08-04T09:00:00.000Z"),
+    updatedAt: new Date("2026-08-04T09:00:00.000Z")
   };
 }

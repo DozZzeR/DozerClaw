@@ -35,6 +35,9 @@ import { ResolveFamilyFactDecisionUseCase } from "../application/use-cases/famil
 import { RecordFamilyJournalEntryUseCase } from "../application/use-cases/family-journal/record-family-journal-entry.js";
 import { UpdateFamilyJournalEntryUseCase } from "../application/use-cases/family-journal/update-family-journal-entry.js";
 import { RecallFamilyJournalEntriesUseCase } from "../application/use-cases/family-journal/recall-family-journal-entries.js";
+import { RecordShoppingItemUseCase } from "../application/use-cases/shopping/record-shopping-item.js";
+import { RecallShoppingItemsUseCase } from "../application/use-cases/shopping/recall-shopping-items.js";
+import { ManageShoppingItemUseCase } from "../application/use-cases/shopping/manage-shopping-item.js";
 import { ResolveIdentityContextUseCase } from "../application/use-cases/identity/resolve-identity-context.js";
 import { GetHostHealthUseCase } from "../application/use-cases/health/get-host-health.js";
 import { GetServiceHealthUseCase } from "../application/use-cases/health/get-service-health.js";
@@ -60,6 +63,7 @@ import { SqliteFileInboxRepository } from "../infrastructure/providers/sqlite/sq
 import { SqliteIdentityAccessRepository } from "../infrastructure/providers/sqlite/sqlite-identity-access-repository.js";
 import { SqliteNotificationRepository } from "../infrastructure/providers/sqlite/sqlite-notification-repository.js";
 import { SqliteMessageReceiptRepository } from "../infrastructure/providers/sqlite/sqlite-message-receipt-repository.js";
+import { SqliteShoppingRepository } from "../infrastructure/providers/sqlite/sqlite-shopping-repository.js";
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
 import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
@@ -92,6 +96,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const fileInboxRepository = new SqliteFileInboxRepository(database);
   const familyMemoryRepository = new SqliteFamilyMemoryRepository(database);
   const familyJournalRepository = new SqliteFamilyJournalRepository(database);
+  const shoppingRepository = new SqliteShoppingRepository(database);
   const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
   const notificationRepository = new SqliteNotificationRepository(database);
   const messageReceiptRepository = new SqliteMessageReceiptRepository(database);
@@ -148,6 +153,12 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     repository: familyJournalRepository,
     ...(semanticMemory ? { semanticMemory } : {}),
     subjectAliases: subjectAliasRepository,
+    generateId,
+    now: () => new Date()
+  });
+  const shoppingRecorder = new RecordShoppingItemUseCase({
+    repository: shoppingRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     generateId,
     now: () => new Date()
   });
@@ -278,6 +289,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     semanticLimit: config.memory?.mempalace?.searchLimit ?? 5,
     ...(modelProvider ? { model: modelProvider } : {})
   });
+  const shoppingRecall = new RecallShoppingItemsUseCase({
+    repository: shoppingRepository,
+    recentLimit: 50,
+    resultLimit: 10
+  });
+  const shoppingManager = new ManageShoppingItemUseCase({
+    repository: shoppingRepository,
+    recentLimit: 50,
+    now: () => new Date()
+  });
   const familyFactArchiver = new ArchiveFamilyFactUseCase({
     repository: familyMemoryRepository,
     now: () => new Date(),
@@ -346,6 +367,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     familyJournalRecorder,
     familyJournalUpdater,
     familyJournalRecall,
+    shoppingRecorder,
+    shoppingRecall,
+    shoppingManager,
     ...(planningQuery ? { planningQuery } : {}),
     ...(planningTaskManager ? { planningTaskManager } : {}),
     notifications: {
@@ -416,6 +440,16 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         stateRepository.savePendingFamilyFactArchiveDecision(input),
       clearByChatId: (chatId) =>
         stateRepository.clearPendingFamilyFactArchiveDecisionByChatId(chatId)
+    },
+    pendingShoppingItemDecisions: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingShoppingItemDecisionByChatId(
+          chatId,
+          now
+        ),
+      save: (input) => stateRepository.savePendingShoppingItemDecision(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingShoppingItemDecisionByChatId(chatId)
     },
     pendingDocumentDecisions: {
       findActiveByChatId: (chatId, now) =>

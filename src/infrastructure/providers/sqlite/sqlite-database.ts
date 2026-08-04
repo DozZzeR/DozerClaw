@@ -93,6 +93,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensureDocumentsTable(database);
   ensureFamilyFactsTable(database);
   ensureFamilyJournalEntriesTable(database);
+  ensureShoppingItemsTable(database);
   ensureFamilySubjectAliasesTable(database);
   ensureLastOperationContextsTable(database);
   ensurePendingClarificationsTable(database);
@@ -100,6 +101,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingFileDestinationDecisionsTable(database);
   ensurePendingFamilyFactDecisionsTable(database);
   ensurePendingFamilyFactArchiveDecisionsTable(database);
+  ensurePendingShoppingItemDecisionsTable(database);
   ensurePendingDocumentDecisionsTable(database);
   ensurePendingDocumentPlacementDecisionsTable(database);
   ensureNotificationsTables(database);
@@ -330,6 +332,25 @@ function ensureFamilyJournalEntriesTable(database: SqliteDatabase): void {
   `);
 }
 
+function ensureShoppingItemsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists shopping_items (
+      id text primary key,
+      title text not null,
+      store_hint text,
+      project_tag text,
+      tags_json text not null,
+      semantic_memory_entry_id text,
+      source_actor_id text not null,
+      source_chat_id text not null,
+      source_message_text text not null,
+      status text not null check (status in ('open', 'bought', 'archived')),
+      created_at text not null,
+      updated_at text not null
+    );
+  `);
+}
+
 function ensureFamilySubjectAliasesTable(database: SqliteDatabase): void {
   database.exec(`
     create table if not exists family_subject_aliases (
@@ -444,6 +465,19 @@ function ensurePendingFamilyFactArchiveDecisionsTable(
     create table if not exists pending_family_fact_archive_decisions (
       chat_id text primary key,
       actor_id text not null,
+      candidates_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+  `);
+}
+
+function ensurePendingShoppingItemDecisionsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists pending_shopping_item_decisions (
+      chat_id text primary key,
+      actor_id text not null,
+      action text not null check (action in ('mark_bought', 'archive')),
       candidates_json text not null,
       created_at text not null,
       expires_at text not null

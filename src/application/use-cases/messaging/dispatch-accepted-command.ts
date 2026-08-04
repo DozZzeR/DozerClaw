@@ -38,6 +38,7 @@ import type { PendingFamilyFactArchiveDecision } from "../../../ports/state-repo
 import type { PendingFamilyFactDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDestinationDecision } from "../../../ports/state-repository-port.js";
 import type { PendingFileDuplicateDecision } from "../../../ports/state-repository-port.js";
+import type { PendingShoppingItemDecision } from "../../../ports/state-repository-port.js";
 import type { DocumentUploadFolderOption } from "../../../ports/document-folder-policy-port.js";
 import type { StoreInboundFileResult } from "../file-inbox/store-inbound-file.js";
 import type { RecallFamilyJournalEntriesInput } from "../family-journal/recall-family-journal-entries.js";
@@ -71,6 +72,18 @@ import type {
   UpdateFamilyJournalEntryInput,
   UpdateFamilyJournalEntryResult
 } from "../family-journal/update-family-journal-entry.js";
+import type {
+  RecallShoppingItemsInput,
+  RecallShoppingItemsResult
+} from "../shopping/recall-shopping-items.js";
+import type {
+  ManageShoppingItemInput,
+  ManageShoppingItemResult
+} from "../shopping/manage-shopping-item.js";
+import type {
+  RecordShoppingItemInput,
+  RecordShoppingItemResult
+} from "../shopping/record-shopping-item.js";
 import type {
   FileDuplicateMutationDecision,
   ResolveFileDuplicateDecisionInput,
@@ -171,6 +184,18 @@ export interface FamilyJournalRecall {
   execute(
     input: RecallFamilyJournalEntriesInput
   ): Promise<{ readonly text: string }>;
+}
+
+export interface ShoppingRecorder {
+  execute(input: RecordShoppingItemInput): Promise<RecordShoppingItemResult>;
+}
+
+export interface ShoppingRecall {
+  execute(input: RecallShoppingItemsInput): Promise<RecallShoppingItemsResult>;
+}
+
+export interface ShoppingManager {
+  execute(input: ManageShoppingItemInput): Promise<ManageShoppingItemResult>;
 }
 
 export interface PlanningStateQuery {
@@ -294,6 +319,15 @@ export interface PendingFamilyFactArchiveDecisionStore {
   clearByChatId(chatId: string): Promise<void>;
 }
 
+export interface PendingShoppingItemDecisionStore {
+  findActiveByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingShoppingItemDecision | undefined>;
+  save(input: PendingShoppingItemDecision): Promise<void>;
+  clearByChatId(chatId: string): Promise<void>;
+}
+
 export interface PendingDocumentDecisionStore {
   findActiveByChatId(
     chatId: string,
@@ -340,6 +374,9 @@ export interface DispatchAcceptedCommandDependencies {
   readonly familyJournalRecorder?: FamilyJournalRecorder;
   readonly familyJournalUpdater?: FamilyJournalUpdater;
   readonly familyJournalRecall?: FamilyJournalRecall;
+  readonly shoppingRecorder?: ShoppingRecorder;
+  readonly shoppingRecall?: ShoppingRecall;
+  readonly shoppingManager?: ShoppingManager;
   readonly planningQuery?: PlanningStateQuery;
   readonly planningTaskManager?: PlanningTaskManager;
   readonly familyFactArchiver?: FamilyFactArchiver;
@@ -362,6 +399,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingFileDestinationDecisions?: PendingFileDestinationDecisionStore;
   readonly pendingFamilyFactDecisions?: PendingFamilyFactDecisionStore;
   readonly pendingFamilyFactArchiveDecisions?: PendingFamilyFactArchiveDecisionStore;
+  readonly pendingShoppingItemDecisions?: PendingShoppingItemDecisionStore;
   readonly pendingDocumentDecisions?: PendingDocumentDecisionStore;
   readonly pendingDocumentPlacementDecisions?: PendingDocumentPlacementDecisionStore;
   readonly now?: () => Date;
@@ -440,6 +478,11 @@ export class DispatchAcceptedCommandUseCase {
       return pendingReply;
     }
 
+    const commandRailReply = await this.dispatchCommandRail(context);
+    if (commandRailReply) {
+      return commandRailReply;
+    }
+
     const pending =
       await this.dependencies.pendingClarifications?.findActiveByChatId(
         context.chat.id,
@@ -504,6 +547,11 @@ export class DispatchAcceptedCommandUseCase {
 
     if (pendingReply) {
       return pendingReply;
+    }
+
+    const commandRailReply = await this.dispatchCommandRail(context);
+    if (commandRailReply) {
+      return commandRailReply;
     }
 
     if (
@@ -593,6 +641,19 @@ export class DispatchAcceptedCommandUseCase {
       );
     }
 
+    const pendingShoppingItem =
+      await this.dependencies.pendingShoppingItemDecisions?.findActiveByChatId(
+        context.chat.id,
+        now
+      );
+
+    if (pendingShoppingItem && context.attachments.length === 0) {
+      return this.dispatchPendingShoppingItemDecision(
+        context,
+        pendingShoppingItem
+      );
+    }
+
     const pendingDocument =
       await this.dependencies.pendingDocumentDecisions?.findActiveByChatId(
         context.chat.id,
@@ -630,6 +691,37 @@ export class DispatchAcceptedCommandUseCase {
       chatId: context.chat.id,
       text: "Model routing is temporarily unavailable. Please try again in a moment."
     };
+  }
+
+  private async dispatchCommandRail(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply | undefined> {
+    const shoppingLifecycle = parseShoppingLifecycleCommandRail(context.text);
+    if (shoppingLifecycle) {
+      const deniedReply = this.operationDeniedReply(context, "family_write");
+      if (deniedReply) {
+        return deniedReply;
+      }
+
+      return this.manageShoppingItem(context, shoppingLifecycle);
+    }
+
+    const shoppingWrite = parseShoppingCommandRail(context.text);
+    if (shoppingWrite) {
+      const deniedReply = this.operationDeniedReply(context, "family_write");
+      if (deniedReply) {
+        return deniedReply;
+      }
+
+      return this.recordShoppingItem(context, shoppingWrite);
+    }
+
+    const shoppingQuery = parseFindShoppingCommandRail(context.text);
+    if (shoppingQuery) {
+      return this.recallShoppingItems(context, shoppingQuery);
+    }
+
+    return undefined;
   }
 
   private async recordFamilyFact(
@@ -679,6 +771,88 @@ export class DispatchAcceptedCommandUseCase {
     return {
       chatId: context.chat.id,
       text: `Saved family fact: ${result.fact.body}`
+    };
+  }
+
+  private async recordShoppingItem(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "record_shopping_item" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.shoppingRecorder) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.shoppingRecorder.execute({
+      title: intent.title,
+      ...(intent.storeHint ? { storeHint: intent.storeHint } : {}),
+      ...(intent.projectTag ? { projectTag: intent.projectTag } : {}),
+      tags: intent.tags ?? [],
+      sourceActorId: context.actor.id,
+      sourceChatId: context.chat.id,
+      sourceMessageText: context.text
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: `Saved shopping item: ${result.item.title}`
+    };
+  }
+
+  private async recallShoppingItems(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "recall_shopping_items" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.shoppingRecall) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.shoppingRecall.execute({
+      query: intent.query
+    });
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
+  private async manageShoppingItem(
+    context: AcceptedMessageContext,
+    intent: Extract<InboundIntent, { readonly kind: "manage_shopping_item" }>
+  ): Promise<OutboundReply> {
+    if (!this.dependencies.shoppingManager) {
+      return {
+        chatId: context.chat.id,
+        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
+      };
+    }
+
+    const result = await this.dependencies.shoppingManager.execute({
+      action: intent.action,
+      query: intent.query
+    });
+
+    if (result.status === "ambiguous") {
+      const now = this.dependencies.now?.() ?? new Date();
+      await this.dependencies.pendingShoppingItemDecisions?.save({
+        chatId: context.chat.id,
+        actorId: context.actor.id,
+        action: intent.action,
+        candidates: result.items,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+      });
+    }
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
     };
   }
 
@@ -1633,6 +1807,18 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "recall_journal_entries") {
       return this.recallFamilyJournalEntries(context, intent);
+    }
+
+    if (intent.kind === "record_shopping_item") {
+      return this.recordShoppingItem(context, intent);
+    }
+
+    if (intent.kind === "recall_shopping_items") {
+      return this.recallShoppingItems(context, intent);
+    }
+
+    if (intent.kind === "manage_shopping_item") {
+      return this.manageShoppingItem(context, intent);
     }
 
     if (intent.kind === "query_planning") {
@@ -2785,6 +2971,69 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
+  private async dispatchPendingShoppingItemDecision(
+    context: AcceptedMessageContext,
+    pending: PendingShoppingItemDecision
+  ): Promise<OutboundReply> {
+    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    if (deniedReply) {
+      return deniedReply;
+    }
+
+    const decision = parseShoppingItemDecision(context.text);
+
+    if (decision === undefined) {
+      return {
+        chatId: context.chat.id,
+        text: [
+          "Я жду выбор покупки.",
+          "Можно написать номер позиции или \"отмена\"."
+        ].join("\n")
+      };
+    }
+
+    if (decision === "cancel") {
+      await this.dependencies.pendingShoppingItemDecisions?.clearByChatId(
+        context.chat.id
+      );
+
+      return {
+        chatId: context.chat.id,
+        text: "Ок, не меняю покупку."
+      };
+    }
+
+    if (!this.dependencies.shoppingManager) {
+      return {
+        chatId: context.chat.id,
+        text: "Shopping item manager is not configured."
+      };
+    }
+
+    const candidate = pending.candidates[decision];
+
+    if (!candidate) {
+      return {
+        chatId: context.chat.id,
+        text: "I could not find that shopping item candidate anymore."
+      };
+    }
+
+    const result = await this.dependencies.shoppingManager.execute({
+      action: pending.action,
+      query: candidate.title,
+      shoppingItemId: candidate.id
+    });
+    await this.dependencies.pendingShoppingItemDecisions?.clearByChatId(
+      context.chat.id
+    );
+
+    return {
+      chatId: context.chat.id,
+      text: result.text
+    };
+  }
+
   private async resolveDuplicateMutation(
     decision: FileDuplicateMutationDecision,
     pending: PendingFileDuplicateDecision
@@ -3522,6 +3771,19 @@ function parseFamilyFactArchiveDecision(
   return parseCandidateIndex(normalized);
 }
 
+function parseShoppingItemDecision(text: string): number | "cancel" | undefined {
+  const normalized = text.trim().toLowerCase();
+
+  if (
+    /\b(cancel|skip|nothing)\b/.test(normalized) ||
+    /отмен|ничего|не надо|забей/.test(normalized)
+  ) {
+    return "cancel";
+  }
+
+  return parseCandidateIndex(normalized);
+}
+
 function parseCandidateIndex(normalizedText: string): number | undefined {
   const numeric = normalizedText.match(/\b([1-9]\d*)\b/);
 
@@ -3582,6 +3844,134 @@ function toSubjectAliasAction(
   };
 }
 
+function parseShoppingCommandRail(
+  text: string
+): Extract<InboundIntent, { readonly kind: "record_shopping_item" }> | undefined {
+  const commandText = stripCommandRail(text, ["shop", "buy"]);
+
+  if (!commandText) {
+    return undefined;
+  }
+
+  const tags = parseHashTags(commandText);
+  const storeHint = shoppingStoreHint(commandText);
+  const projectTag = /(^|[\s,])ремонт([\s,]|$)|\bremont\b|\brepair\b/iu.test(
+    commandText
+  )
+    ? "ремонт"
+    : undefined;
+  const title = cleanupShoppingTitle(commandText);
+
+  if (!title) {
+    return undefined;
+  }
+
+  return {
+    kind: "record_shopping_item",
+    title,
+    ...(storeHint ? { storeHint } : {}),
+    ...(projectTag ? { projectTag } : {}),
+    tags
+  };
+}
+
+function parseShoppingLifecycleCommandRail(
+  text: string
+): Extract<InboundIntent, { readonly kind: "manage_shopping_item" }> | undefined {
+  const commandText = stripCommandRail(text, ["shop"]);
+
+  if (!commandText) {
+    return undefined;
+  }
+
+  const boughtMatch = commandText.match(
+    /^(?:bought|done|got|купил|купила|купили|куплено|готово)\s+(.+)$/iu
+  );
+  if (boughtMatch?.[1]?.trim()) {
+    return {
+      kind: "manage_shopping_item",
+      action: "mark_bought",
+      query: boughtMatch[1].trim()
+    };
+  }
+
+  const archiveMatch = commandText.match(
+    /^(?:archive|remove|hide|cancel|убери|удали|архив|в\s+архив)\s+(.+)$/iu
+  );
+  if (archiveMatch?.[1]?.trim()) {
+    return {
+      kind: "manage_shopping_item",
+      action: "archive",
+      query: archiveMatch[1].trim()
+    };
+  }
+
+  return undefined;
+}
+
+function parseFindShoppingCommandRail(
+  text: string
+): Extract<InboundIntent, { readonly kind: "recall_shopping_items" }> | undefined {
+  const query = stripCommandRail(text, ["find", "search"]);
+
+  if (!query || !looksLikeShoppingQuery(query)) {
+    return undefined;
+  }
+
+  return {
+    kind: "recall_shopping_items",
+    query
+  };
+}
+
+function stripCommandRail(
+  text: string,
+  commands: readonly string[]
+): string | undefined {
+  const trimmed = text.trim();
+  const commandPattern = commands.join("|");
+  const match = trimmed.match(new RegExp(`^/?(?:${commandPattern})\\b`, "iu"));
+
+  if (!match) {
+    return undefined;
+  }
+
+  return trimmed.slice(match[0].length).trim();
+}
+
+function parseHashTags(text: string): readonly string[] {
+  return [...text.matchAll(/#([\p{L}\p{N}_-]+)/giu)]
+    .map((match) => match[1])
+    .filter((tag): tag is string => typeof tag === "string");
+}
+
+function shoppingStoreHint(text: string): string | undefined {
+  if (/уради\s*сам|uradi\s*sam|uradisam/iu.test(text)) {
+    return "uradi_sam";
+  }
+
+  return undefined;
+}
+
+function cleanupShoppingTitle(text: string): string {
+  return text
+    .replace(/#[\p{L}\p{N}_-]+/giu, " ")
+    .replace(/\b(buy|get)\b/giu, " ")
+    .replace(/\b(in|at|from)\s+(uradi\s*sam|uradisam)\b/giu, " ")
+    .replace(/купить|возьми|взять|приобрести/giu, " ")
+    .replace(/(^|\s)в\s+(уради\s*сам|uradisam)(?=\s|$)/giu, " ")
+    .replace(/(^|[\s,])ремонт([\s,]|$)/giu, " ")
+    .replace(/\s+/gu, " ")
+    .replace(/^[,.:;\s]+|[,.:;\s]+$/gu, "")
+    .trim();
+}
+
+function looksLikeShoppingQuery(text: string): boolean {
+  return /купить|покуп|магазин|уради\s*сам|uradisam|uradi\s*sam|ремонт|repair|shop|buy/iu.test(
+    text
+  );
+}
+
 function requiredAccessActionForIntent(
   intent: InboundIntent
 ): AccessAction | undefined {
@@ -3589,6 +3979,8 @@ function requiredAccessActionForIntent(
     intent.kind === "store_file" ||
     intent.kind === "record_fact" ||
     intent.kind === "record_journal_entry" ||
+    intent.kind === "record_shopping_item" ||
+    intent.kind === "manage_shopping_item" ||
     intent.kind === "archive_fact" ||
     intent.kind === "register_document" ||
     intent.kind === "update_document" ||

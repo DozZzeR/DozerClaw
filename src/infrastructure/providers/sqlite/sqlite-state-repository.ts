@@ -1,6 +1,7 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { DocumentRecord } from "../../../core/domain/documents/document-record.js";
 import type { FamilyFact } from "../../../core/domain/family-memory/family-fact.js";
+import type { ShoppingItem } from "../../../core/domain/shopping/shopping-item.js";
 import type {
   LastOperationContext,
   PendingClarification,
@@ -10,6 +11,7 @@ import type {
   PendingFamilyFactDecision,
   PendingFileDestinationDecision,
   PendingFileDuplicateDecision,
+  PendingShoppingItemDecision,
   StateRepositoryPort
 } from "../../../ports/state-repository-port.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
@@ -538,6 +540,83 @@ export class SqliteStateRepository implements StateRepositoryPort {
       .run(chatId);
   }
 
+  async findActivePendingShoppingItemDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingShoppingItemDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            action,
+            candidates_json as candidatesJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_shopping_item_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as
+      | PendingShoppingItemDecisionRow
+      | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      action: row.action,
+      candidates: parseShoppingItems(row.candidatesJson),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingShoppingItemDecision(
+    input: PendingShoppingItemDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_shopping_item_decisions (
+            chat_id,
+            actor_id,
+            action,
+            candidates_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            action = excluded.action,
+            candidates_json = excluded.candidates_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        input.action,
+        JSON.stringify(input.candidates.map(shoppingItemToJson)),
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingShoppingItemDecisionByChatId(
+    chatId: string
+  ): Promise<void> {
+    this.database
+      .prepare("delete from pending_shopping_item_decisions where chat_id = ?")
+      .run(chatId);
+  }
+
   async findActivePendingDocumentDecisionByChatId(
     chatId: string,
     now: Date
@@ -764,6 +843,15 @@ interface PendingFamilyFactArchiveDecisionRow {
   readonly expiresAt: string;
 }
 
+interface PendingShoppingItemDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly action: PendingShoppingItemDecision["action"];
+  readonly candidatesJson: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}
+
 interface PendingDocumentDecisionRow {
   readonly chatId: string;
   readonly actorId: string;
@@ -927,6 +1015,62 @@ function documentRecordToJson(document: DocumentRecord): Record<string, unknown>
     ...document,
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString()
+  };
+}
+
+function parseShoppingItems(json: string): readonly ShoppingItem[] {
+  const parsed = JSON.parse(json) as unknown;
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed.flatMap((value) => {
+    if (
+      !isRecord(value) ||
+      typeof value.id !== "string" ||
+      typeof value.title !== "string" ||
+      !Array.isArray(value.tags) ||
+      typeof value.sourceActorId !== "string" ||
+      typeof value.sourceChatId !== "string" ||
+      typeof value.sourceMessageText !== "string" ||
+      typeof value.status !== "string" ||
+      typeof value.createdAt !== "string" ||
+      typeof value.updatedAt !== "string"
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: value.id,
+        title: value.title,
+        ...(typeof value.storeHint === "string"
+          ? { storeHint: value.storeHint }
+          : {}),
+        ...(typeof value.projectTag === "string"
+          ? { projectTag: value.projectTag }
+          : {}),
+        tags: value.tags.filter((tag): tag is string => typeof tag === "string"),
+        ...(typeof value.semanticMemoryEntryId === "string"
+          ? { semanticMemoryEntryId: value.semanticMemoryEntryId }
+          : {}),
+        sourceActorId: value.sourceActorId,
+        sourceChatId: value.sourceChatId,
+        sourceMessageText: value.sourceMessageText,
+        status: value.status as ShoppingItem["status"],
+        createdAt: new Date(value.createdAt),
+        updatedAt: new Date(value.updatedAt)
+      }
+    ];
+  });
+}
+
+function shoppingItemToJson(item: ShoppingItem): Record<string, unknown> {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString()
   };
 }
 
