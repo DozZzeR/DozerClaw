@@ -2,6 +2,7 @@ export interface TelegramApi {
   getUpdates(input?: TelegramGetUpdatesInput): Promise<readonly TelegramUpdate[]>;
   sendMessage(chatId: string, text: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
+  setMyCommands?(commands: readonly TelegramBotCommand[]): Promise<void>;
 }
 
 export interface TelegramFileApi {
@@ -62,6 +63,11 @@ export interface TelegramPhotoSize {
   readonly file_size?: number;
   readonly width: number;
   readonly height: number;
+}
+
+export interface TelegramBotCommand {
+  readonly command: string;
+  readonly description: string;
 }
 
 export interface TelegramFile {
@@ -151,6 +157,12 @@ export class TelegramBotApiClient implements TelegramApi, TelegramFileApi {
     await this.callTelegram("deleteMessage", {
       chat_id: chatId,
       message_id: messageId
+    });
+  }
+
+  async setMyCommands(commands: readonly TelegramBotCommand[]): Promise<void> {
+    await this.callTelegram("setMyCommands", {
+      commands
     });
   }
 

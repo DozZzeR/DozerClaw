@@ -74,6 +74,50 @@ describe("TelegramBotApiClient", () => {
     ]);
   });
 
+  it("registers Telegram bot commands", async () => {
+    const requests: { readonly url: string; readonly body: unknown }[] = [];
+    const client = new TelegramBotApiClient({
+      token: "bot-token",
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)) as unknown
+        });
+
+        return new Response(JSON.stringify({ ok: true, result: true }));
+      }
+    });
+
+    await client.setMyCommands([
+      {
+        command: "shop",
+        description: "Покупки"
+      },
+      {
+        command: "doc",
+        description: "Документы"
+      }
+    ]);
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.telegram.org/botbot-token/setMyCommands",
+        body: {
+          commands: [
+            {
+              command: "shop",
+              description: "Покупки"
+            },
+            {
+              command: "doc",
+              description: "Документы"
+            }
+          ]
+        }
+      }
+    ]);
+  });
+
   it("keeps getUpdates request timeout above the long polling timeout", async () => {
     vi.useFakeTimers();
     let requestSignal: AbortSignal | undefined;

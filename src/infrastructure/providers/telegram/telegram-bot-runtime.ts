@@ -4,12 +4,44 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import { TelegramApiError } from "./telegram-api.js";
 import type {
   TelegramApi,
+  TelegramBotCommand,
   TelegramDocument,
   TelegramMessage,
   TelegramPhotoSize,
   TelegramUpdate,
   TelegramUser
 } from "./telegram-api.js";
+
+export const telegramBotCommandMenu: readonly TelegramBotCommand[] = [
+  {
+    command: "help",
+    description: "Команды и режимы"
+  },
+  {
+    command: "health",
+    description: "Состояние системы"
+  },
+  {
+    command: "shop",
+    description: "Покупки: добавить, найти, отметить"
+  },
+  {
+    command: "fact",
+    description: "Семейная память"
+  },
+  {
+    command: "journal",
+    description: "Семейный дневник"
+  },
+  {
+    command: "doc",
+    description: "Документы"
+  },
+  {
+    command: "plan",
+    description: "Планы и задачи"
+  }
+] as const;
 
 export interface TelegramBotRuntimeOptions {
   readonly app: DozerClawApp;
@@ -37,6 +69,8 @@ export class TelegramBotRuntime {
   }
 
   async start(): Promise<void> {
+    await this.configureCommandMenu();
+
     while (!this.stopped) {
       try {
         await this.pollOnce();
@@ -117,6 +151,14 @@ export class TelegramBotRuntime {
     });
 
     await this.options.telegram.sendMessage(providerChatId, reply.text);
+  }
+
+  private async configureCommandMenu(): Promise<void> {
+    try {
+      await this.options.telegram.setMyCommands?.(telegramBotCommandMenu);
+    } catch (error) {
+      this.options.onError?.(error);
+    }
   }
 }
 

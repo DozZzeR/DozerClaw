@@ -1,13 +1,41 @@
 import { describe, expect, it } from "vitest";
 
-import { TelegramBotRuntime } from "../../../src/infrastructure/providers/telegram/telegram-bot-runtime.js";
+import {
+  TelegramBotRuntime,
+  telegramBotCommandMenu
+} from "../../../src/infrastructure/providers/telegram/telegram-bot-runtime.js";
 import { TelegramApiError } from "../../../src/infrastructure/providers/telegram/telegram-api.js";
-import type { TelegramUpdate } from "../../../src/infrastructure/providers/telegram/telegram-api.js";
+import type {
+  TelegramBotCommand,
+  TelegramUpdate
+} from "../../../src/infrastructure/providers/telegram/telegram-api.js";
 import type { DozerClawApp } from "../../../src/composition/app.js";
 import type { OutboundReply } from "../../../src/core/domain/messaging/reply.js";
 import { HandleNormalizedInboundMessageUseCase } from "../../../src/application/use-cases/messaging/handle-normalized-inbound-message.js";
 
 describe("TelegramBotRuntime", () => {
+  it("registers the Telegram command menu before polling", async () => {
+    const calls: string[] = [];
+    const telegram = new FakeTelegramApi([]);
+    telegram.onSetMyCommands = () => calls.push("setMyCommands");
+    telegram.onGetUpdates = () => {
+      calls.push("getUpdates");
+      runtime.stop();
+    };
+    const runtime = new TelegramBotRuntime({
+      app: new FakeApp({
+        chatId: "internal-chat",
+        text: "ok"
+      }),
+      telegram
+    });
+
+    await runtime.start();
+
+    expect(calls).toEqual(["setMyCommands", "getUpdates"]);
+    expect(telegram.commandMenus).toEqual([telegramBotCommandMenu]);
+  });
+
   it("normalizes a private owner text update and sends the app reply", async () => {
     const app = new FakeApp({
       chatId: "internal-owner-chat",
@@ -402,6 +430,9 @@ class FakeTelegramApi {
   readonly sentMessages: { chatId: string; text: string }[] = [];
   readonly deletedMessages: { chatId: string; messageId: number }[] = [];
   readonly getUpdatesInputs: unknown[] = [];
+  readonly commandMenus: Array<readonly TelegramBotCommand[]> = [];
+  onSetMyCommands?: () => void;
+  onGetUpdates?: () => void;
 
   constructor(
     private readonly updates: readonly TelegramUpdate[],
@@ -410,8 +441,14 @@ class FakeTelegramApi {
   ) {}
 
   async getUpdates(input?: unknown) {
+    this.onGetUpdates?.();
     this.getUpdatesInputs.push(input);
     return this.updates;
+  }
+
+  async setMyCommands(commands: readonly TelegramBotCommand[]) {
+    this.onSetMyCommands?.();
+    this.commandMenus.push(commands);
   }
 
   async sendMessage(chatId: string, text: string) {
