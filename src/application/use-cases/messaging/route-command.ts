@@ -5,6 +5,7 @@ export type CommandKind =
   | "admin_mode_activate"
   | "admin_write"
   | "start"
+  | "help"
   | "pending_access_requests"
   | "list_notifications"
   | "mark_notification_read"
@@ -46,6 +47,14 @@ export function routeCommand(text: string): CommandRoute {
   if (comparable === "/start" || comparable === "start") {
     return {
       kind: "start",
+      action: "family_read",
+      normalizedText
+    };
+  }
+
+  if (comparable === "/help" || comparable === "help") {
+    return {
+      kind: "help",
       action: "family_read",
       normalizedText
     };

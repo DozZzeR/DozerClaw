@@ -35,6 +35,14 @@ describe("routeCommand", () => {
     });
   });
 
+  it.each(["/help", "help"])("routes %s to help family read", (text) => {
+    expect(routeCommand(text)).toEqual({
+      kind: "help",
+      action: "family_read",
+      normalizedText: text
+    });
+  });
+
   it("routes pending access list to owner read", () => {
     expect(routeCommand("/pending")).toEqual({
       kind: "pending_access_requests",

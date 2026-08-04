@@ -78,6 +78,66 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("returns command rails help", async () => {
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("help", "/help"),
+        context: acceptedContext
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "DozerClaw commands:",
+        "/shop <item> - save a shopping item",
+        "/shop bought <item> - mark a shopping item bought",
+        "/find <query> - find open shopping items",
+        "/fact <text> - tell the model this is family memory",
+        "/journal <text> - tell the model this is a family journal entry",
+        "/doc <text> - tell the model this is about documents",
+        "/plan <text> - tell the model this is about planning",
+        "/health - system health"
+      ].join("\n")
+    });
+  });
+
+  it("adds an explicit model scope for scoped command rails", async () => {
+    const intentClassifier = new RecordingIntentClassifier({
+      kind: "record_fact",
+      summary: "Max prefers jasmine tea."
+    });
+    const factRecorder = new FakeFamilyFactRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      intentClassifier,
+      familyFactRecorder: factRecorder,
+      now: () => new Date("2026-07-07T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message", "/fact Max prefers jasmine tea"),
+        context: {
+          ...acceptedContext,
+          text: "/fact Max prefers jasmine tea"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Saved family fact: Max prefers jasmine tea."
+    });
+    expect(intentClassifier.seenInput).toEqual({
+      text: [
+        "Command scope: family_fact",
+        "User text: Max prefers jasmine tea"
+      ].join("\n"),
+      attachments: []
+    });
+  });
+
   it("stores family message attachments when an attachment store is configured", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const lastOperations = new FakeLastOperations(undefined);

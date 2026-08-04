@@ -172,6 +172,16 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     "# Task",
     "Classify the inbound family message into one intent.",
     "",
+    "# Command scope rails",
+    [
+      "- The user text may start with `Command scope: <scope>` followed by `User text: ...`.",
+      "- Treat command scope as a strong routing hint, not as content to store.",
+      "- `family_fact` strongly prefers family fact memory intents.",
+      "- `family_journal` strongly prefers journal record/recall intents.",
+      "- `document` strongly prefers document registration, lookup, update, archive, or file storage intents.",
+      "- `planning` strongly prefers planning query/write intents."
+    ].join("\n"),
+    "",
     "# record_fact field rules",
     [
       "- Use `record_fact` only for durable family memory.",

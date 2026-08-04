@@ -425,6 +425,13 @@ export class DispatchAcceptedCommandUseCase {
       });
     }
 
+    if (input.route.kind === "help") {
+      return Promise.resolve({
+        chatId: input.context.chat.id,
+        text: commandRailsHelpText()
+      });
+    }
+
     if (input.route.kind === "pending_access_requests") {
       return this.listPendingAccessRequests(input.context.chat.id);
     }
@@ -503,7 +510,7 @@ export class DispatchAcceptedCommandUseCase {
           )
         }
       : {
-          text: context.text,
+          text: scopedClassifierText(context.text),
           attachments: context.attachments
         };
     const lastOperation = pending
@@ -3924,6 +3931,60 @@ function parseFindShoppingCommandRail(
   };
 }
 
+function scopedClassifierText(text: string): string {
+  const scoped = parseModelScopeCommandRail(text);
+
+  if (!scoped) {
+    return text;
+  }
+
+  return [
+    `Command scope: ${scoped.scope}`,
+    `User text: ${scoped.text}`
+  ].join("\n");
+}
+
+function parseModelScopeCommandRail(
+  text: string
+): { readonly scope: string; readonly text: string } | undefined {
+  const trimmed = text.trim();
+  const match = trimmed.match(
+    /^\/?(fact|journal|doc|document|plan|planning)\b\s*(.*)$/iu
+  );
+
+  if (!match) {
+    return undefined;
+  }
+
+  const command = match[1]?.toLowerCase();
+  const railText = match[2]?.trim();
+
+  if (!command || !railText) {
+    return undefined;
+  }
+
+  return {
+    scope: modelScopeForCommand(command),
+    text: railText
+  };
+}
+
+function modelScopeForCommand(command: string): string {
+  if (command === "fact") {
+    return "family_fact";
+  }
+
+  if (command === "journal") {
+    return "family_journal";
+  }
+
+  if (command === "doc" || command === "document") {
+    return "document";
+  }
+
+  return "planning";
+}
+
 function stripCommandRail(
   text: string,
   commands: readonly string[]
@@ -3970,6 +4031,20 @@ function looksLikeShoppingQuery(text: string): boolean {
   return /купить|покуп|магазин|уради\s*сам|uradisam|uradi\s*sam|ремонт|repair|shop|buy/iu.test(
     text
   );
+}
+
+function commandRailsHelpText(): string {
+  return [
+    "DozerClaw commands:",
+    "/shop <item> - save a shopping item",
+    "/shop bought <item> - mark a shopping item bought",
+    "/find <query> - find open shopping items",
+    "/fact <text> - tell the model this is family memory",
+    "/journal <text> - tell the model this is a family journal entry",
+    "/doc <text> - tell the model this is about documents",
+    "/plan <text> - tell the model this is about planning",
+    "/health - system health"
+  ].join("\n");
 }
 
 function requiredAccessActionForIntent(
