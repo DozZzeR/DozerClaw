@@ -3007,7 +3007,17 @@ export class DispatchAcceptedCommandUseCase {
       return deniedReply;
     }
 
-    const decision = parseShoppingItemDecision(context.text);
+    const decision = await resolvePendingDecision<ShoppingItemDecision>({
+      policy: "choice_only",
+      prompt: shoppingItemDecisionPrompt(pending),
+      userReply: context.text,
+      options: shoppingItemDecisionOptions(pending),
+      parseDeterministicChoice: (text) =>
+        parseShoppingItemDecision(text, pending),
+      classifier: this.dependencies.pendingChoiceClassifier as
+        | PendingChoiceClassifier<ShoppingItemDecision>
+        | undefined
+    });
 
     if (decision === undefined) {
       return {
@@ -3037,7 +3047,7 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    const candidate = pending.candidates[decision];
+    const candidate = shoppingItemCandidateForDecision(pending, decision);
 
     if (!candidate) {
       return {
@@ -3223,7 +3233,12 @@ function suggestCopyName(fileName: string): string {
 
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
 type FileUploadDestination = "local_inbox" | "google_drive";
-type PendingDecisionChoice = DuplicateDecision | FamilyFactDecision | PlacementDecision;
+type ShoppingItemDecision = `item_${number}` | "cancel";
+type PendingDecisionChoice =
+  | DuplicateDecision
+  | FamilyFactDecision
+  | PlacementDecision
+  | ShoppingItemDecision;
 type PendingRoutingEventAttributes = {
   readonly pendingKind:
     | "file_destination"
@@ -3798,7 +3813,37 @@ function parseFamilyFactArchiveDecision(
   return parseCandidateIndex(normalized);
 }
 
-function parseShoppingItemDecision(text: string): number | "cancel" | undefined {
+function shoppingItemDecisionPrompt(
+  pending: PendingShoppingItemDecision
+): string {
+  return [
+    "Я жду выбор покупки.",
+    ...pending.candidates.map((item, index) => `${index + 1}. ${item.title}`),
+    "Можно ответить номером позиции или отмена."
+  ].join("\n");
+}
+
+function shoppingItemDecisionOptions(
+  pending: PendingShoppingItemDecision
+): readonly PendingChoiceOption<ShoppingItemDecision>[] {
+  return [
+    ...pending.candidates.map((item, index) => ({
+      value: shoppingItemDecisionValue(index),
+      label: `${index + 1}. ${item.title}`,
+      description: "Select this shopping item."
+    })),
+    {
+      value: "cancel" as const,
+      label: "отмена",
+      description: "Do not change any shopping item."
+    }
+  ];
+}
+
+function parseShoppingItemDecision(
+  text: string,
+  pending: PendingShoppingItemDecision
+): ShoppingItemDecision | undefined {
   const normalized = text.trim().toLowerCase();
 
   if (
@@ -3808,7 +3853,38 @@ function parseShoppingItemDecision(text: string): number | "cancel" | undefined 
     return "cancel";
   }
 
-  return parseCandidateIndex(normalized);
+  const candidateIndex = parseCandidateIndex(normalized);
+
+  if (
+    candidateIndex === undefined ||
+    candidateIndex < 0 ||
+    candidateIndex >= pending.candidates.length
+  ) {
+    return undefined;
+  }
+
+  return shoppingItemDecisionValue(candidateIndex);
+}
+
+function shoppingItemCandidateForDecision(
+  pending: PendingShoppingItemDecision,
+  decision: ShoppingItemDecision
+): PendingShoppingItemDecision["candidates"][number] | undefined {
+  if (decision === "cancel") {
+    return undefined;
+  }
+
+  const index = Number(decision.replace("item_", "")) - 1;
+
+  if (!Number.isInteger(index)) {
+    return undefined;
+  }
+
+  return pending.candidates[index];
+}
+
+function shoppingItemDecisionValue(index: number): ShoppingItemDecision {
+  return `item_${index + 1}`;
 }
 
 function parseCandidateIndex(normalizedText: string): number | undefined {

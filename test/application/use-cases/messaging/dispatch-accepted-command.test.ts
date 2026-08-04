@@ -2075,6 +2075,65 @@ describe("DispatchAcceptedCommandUseCase", () => {
     expect(pendingShoppingItemDecisions.deletedChatIds).toEqual(["chat-owner"]);
   });
 
+  it("uses model choice classification for unclear pending shopping choices", async () => {
+    const pendingShoppingItemDecisions = new FakePendingShoppingItemDecisions();
+    pendingShoppingItemDecisions.pending = pendingShoppingItemDecision();
+    const shoppingManager = new FakeShoppingManager();
+    const pendingChoiceClassifier = new FakePendingChoiceClassifier("item_2");
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      shoppingManager,
+      pendingShoppingItemDecisions,
+      pendingChoiceClassifier,
+      now: () => new Date("2026-08-04T10:10:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "те что 50 мм"
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: "Marked shopping item as bought: шурупы 50 мм"
+    });
+    expect(pendingChoiceClassifier.seenInput).toEqual({
+      prompt: [
+        "Я жду выбор покупки.",
+        "1. шурупы 30 мм",
+        "2. шурупы 50 мм",
+        "Можно ответить номером позиции или отмена."
+      ].join("\n"),
+      userReply: "те что 50 мм",
+      options: [
+        {
+          value: "item_1",
+          label: "1. шурупы 30 мм",
+          description: "Select this shopping item."
+        },
+        {
+          value: "item_2",
+          label: "2. шурупы 50 мм",
+          description: "Select this shopping item."
+        },
+        {
+          value: "cancel",
+          label: "отмена",
+          description: "Do not change any shopping item."
+        }
+      ]
+    });
+    expect(shoppingManager.seenInput).toEqual({
+      action: "mark_bought",
+      query: "шурупы 50 мм",
+      shoppingItemId: "shopping-2"
+    });
+    expect(pendingShoppingItemDecisions.deletedChatIds).toEqual(["chat-owner"]);
+  });
+
   it("cancels a pending shopping lifecycle choice", async () => {
     const pendingShoppingItemDecisions = new FakePendingShoppingItemDecisions();
     pendingShoppingItemDecisions.pending = pendingShoppingItemDecision();
@@ -5841,6 +5900,8 @@ class FakePendingChoiceClassifier {
       | "create"
       | "cancel"
       | "accept"
+      | "item_1"
+      | "item_2"
       | undefined
   ) {}
 
