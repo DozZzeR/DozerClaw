@@ -73,17 +73,16 @@ import type {
   UpdateFamilyJournalEntryResult
 } from "../family-journal/update-family-journal-entry.js";
 import type {
-  RecallShoppingItemsInput,
-  RecallShoppingItemsResult
-} from "../shopping/recall-shopping-items.js";
-import type {
-  ManageShoppingItemInput,
-  ManageShoppingItemResult
-} from "../shopping/manage-shopping-item.js";
-import type {
-  RecordShoppingItemInput,
-  RecordShoppingItemResult
-} from "../shopping/record-shopping-item.js";
+  ShoppingRecorder,
+  ShoppingRecall,
+  ShoppingManager,
+  ShoppingItemDecision
+} from "../shopping/dispatch-shopping-request.js";
+import {
+  DispatchShoppingRequestUseCase,
+  isShoppingIntent,
+  parseShoppingCommandRail
+} from "../shopping/dispatch-shopping-request.js";
 import type {
   FileDuplicateMutationDecision,
   ResolveFileDuplicateDecisionInput,
@@ -184,18 +183,6 @@ export interface FamilyJournalRecall {
   execute(
     input: RecallFamilyJournalEntriesInput
   ): Promise<{ readonly text: string }>;
-}
-
-export interface ShoppingRecorder {
-  execute(input: RecordShoppingItemInput): Promise<RecordShoppingItemResult>;
-}
-
-export interface ShoppingRecall {
-  execute(input: RecallShoppingItemsInput): Promise<RecallShoppingItemsResult>;
-}
-
-export interface ShoppingManager {
-  execute(input: ManageShoppingItemInput): Promise<ManageShoppingItemResult>;
 }
 
 export interface PlanningStateQuery {
@@ -703,29 +690,14 @@ export class DispatchAcceptedCommandUseCase {
   private async dispatchCommandRail(
     context: AcceptedMessageContext
   ): Promise<OutboundReply | undefined> {
-    const shoppingLifecycle = parseShoppingLifecycleCommandRail(context.text);
-    if (shoppingLifecycle) {
-      const deniedReply = this.operationDeniedReply(context, "family_write");
+    const shoppingRail = parseShoppingCommandRail(context.text);
+    if (shoppingRail) {
+      const deniedReply = this.operationDeniedReply(context, shoppingRail.action);
       if (deniedReply) {
         return deniedReply;
       }
 
-      return this.manageShoppingItem(context, shoppingLifecycle);
-    }
-
-    const shoppingWrite = parseShoppingCommandRail(context.text);
-    if (shoppingWrite) {
-      const deniedReply = this.operationDeniedReply(context, "family_write");
-      if (deniedReply) {
-        return deniedReply;
-      }
-
-      return this.recordShoppingItem(context, shoppingWrite);
-    }
-
-    const shoppingQuery = parseFindShoppingCommandRail(context.text);
-    if (shoppingQuery) {
-      return this.recallShoppingItems(context, shoppingQuery);
+      return this.dispatchShoppingIntent(context, shoppingRail.intent);
     }
 
     return undefined;
@@ -781,86 +753,38 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async recordShoppingItem(
+  private dispatchShoppingIntent(
     context: AcceptedMessageContext,
-    intent: Extract<InboundIntent, { readonly kind: "record_shopping_item" }>
+    intent: Parameters<DispatchShoppingRequestUseCase["dispatchIntent"]>[1]
   ): Promise<OutboundReply> {
-    if (!this.dependencies.shoppingRecorder) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.shoppingRecorder.execute({
-      title: intent.title,
-      ...(intent.storeHint ? { storeHint: intent.storeHint } : {}),
-      ...(intent.projectTag ? { projectTag: intent.projectTag } : {}),
-      tags: intent.tags ?? [],
-      sourceActorId: context.actor.id,
-      sourceChatId: context.chat.id,
-      sourceMessageText: context.text
-    });
-
-    return {
-      chatId: context.chat.id,
-      text: `Сохранил покупку: ${result.item.title}`
-    };
+    return this.shoppingRequests().dispatchIntent(context, intent);
   }
 
-  private async recallShoppingItems(
-    context: AcceptedMessageContext,
-    intent: Extract<InboundIntent, { readonly kind: "recall_shopping_items" }>
-  ): Promise<OutboundReply> {
-    if (!this.dependencies.shoppingRecall) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.shoppingRecall.execute({
-      query: intent.query
+  private shoppingRequests(): DispatchShoppingRequestUseCase {
+    return new DispatchShoppingRequestUseCase({
+      ...(this.dependencies.shoppingRecorder
+        ? { shoppingRecorder: this.dependencies.shoppingRecorder }
+        : {}),
+      ...(this.dependencies.shoppingRecall
+        ? { shoppingRecall: this.dependencies.shoppingRecall }
+        : {}),
+      ...(this.dependencies.shoppingManager
+        ? { shoppingManager: this.dependencies.shoppingManager }
+        : {}),
+      ...(this.dependencies.pendingShoppingItemDecisions
+        ? {
+            pendingShoppingItemDecisions:
+              this.dependencies.pendingShoppingItemDecisions
+          }
+        : {}),
+      ...(this.dependencies.pendingChoiceClassifier
+        ? {
+            pendingChoiceClassifier: this.dependencies
+              .pendingChoiceClassifier as PendingChoiceClassifier<ShoppingItemDecision>
+          }
+        : {}),
+      ...(this.dependencies.now ? { now: this.dependencies.now } : {})
     });
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
-  }
-
-  private async manageShoppingItem(
-    context: AcceptedMessageContext,
-    intent: Extract<InboundIntent, { readonly kind: "manage_shopping_item" }>
-  ): Promise<OutboundReply> {
-    if (!this.dependencies.shoppingManager) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.shoppingManager.execute({
-      action: intent.action,
-      query: intent.query
-    });
-
-    if (result.status === "ambiguous") {
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingShoppingItemDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        action: intent.action,
-        candidates: result.items,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
   }
 
   private async recallFamilyFacts(
@@ -1836,16 +1760,8 @@ export class DispatchAcceptedCommandUseCase {
       return this.recallFamilyJournalEntries(context, intent);
     }
 
-    if (intent.kind === "record_shopping_item") {
-      return this.recordShoppingItem(context, intent);
-    }
-
-    if (intent.kind === "recall_shopping_items") {
-      return this.recallShoppingItems(context, intent);
-    }
-
-    if (intent.kind === "manage_shopping_item") {
-      return this.manageShoppingItem(context, intent);
+    if (isShoppingIntent(intent)) {
+      return this.dispatchShoppingIntent(context, intent);
     }
 
     if (intent.kind === "query_planning") {
@@ -3007,68 +2923,7 @@ export class DispatchAcceptedCommandUseCase {
       return deniedReply;
     }
 
-    const decision = await resolvePendingDecision<ShoppingItemDecision>({
-      policy: "choice_only",
-      prompt: shoppingItemDecisionPrompt(pending),
-      userReply: context.text,
-      options: shoppingItemDecisionOptions(pending),
-      parseDeterministicChoice: (text) =>
-        parseShoppingItemDecision(text, pending),
-      classifier: this.dependencies.pendingChoiceClassifier as
-        | PendingChoiceClassifier<ShoppingItemDecision>
-        | undefined
-    });
-
-    if (decision === undefined) {
-      return {
-        chatId: context.chat.id,
-        text: [
-          "Я жду выбор покупки.",
-          "Можно написать номер позиции или \"отмена\"."
-        ].join("\n")
-      };
-    }
-
-    if (decision === "cancel") {
-      await this.dependencies.pendingShoppingItemDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: "Ок, не меняю покупку."
-      };
-    }
-
-    if (!this.dependencies.shoppingManager) {
-      return {
-        chatId: context.chat.id,
-        text: "Shopping item manager is not configured."
-      };
-    }
-
-    const candidate = shoppingItemCandidateForDecision(pending, decision);
-
-    if (!candidate) {
-      return {
-        chatId: context.chat.id,
-        text: "I could not find that shopping item candidate anymore."
-      };
-    }
-
-    const result = await this.dependencies.shoppingManager.execute({
-      action: pending.action,
-      query: candidate.title,
-      shoppingItemId: candidate.id
-    });
-    await this.dependencies.pendingShoppingItemDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
+    return this.shoppingRequests().dispatchPendingDecision(context, pending);
   }
 
   private async resolveDuplicateMutation(
@@ -3233,7 +3088,6 @@ function suggestCopyName(fileName: string): string {
 
 export type DuplicateDecision = "copy" | "overwrite" | "skip";
 type FileUploadDestination = "local_inbox" | "google_drive";
-type ShoppingItemDecision = `item_${number}` | "cancel";
 type PendingDecisionChoice =
   | DuplicateDecision
   | FamilyFactDecision
@@ -3813,80 +3667,6 @@ function parseFamilyFactArchiveDecision(
   return parseCandidateIndex(normalized);
 }
 
-function shoppingItemDecisionPrompt(
-  pending: PendingShoppingItemDecision
-): string {
-  return [
-    "Я жду выбор покупки.",
-    ...pending.candidates.map((item, index) => `${index + 1}. ${item.title}`),
-    "Можно ответить номером позиции или отмена."
-  ].join("\n");
-}
-
-function shoppingItemDecisionOptions(
-  pending: PendingShoppingItemDecision
-): readonly PendingChoiceOption<ShoppingItemDecision>[] {
-  return [
-    ...pending.candidates.map((item, index) => ({
-      value: shoppingItemDecisionValue(index),
-      label: `${index + 1}. ${item.title}`,
-      description: "Select this shopping item."
-    })),
-    {
-      value: "cancel" as const,
-      label: "отмена",
-      description: "Do not change any shopping item."
-    }
-  ];
-}
-
-function parseShoppingItemDecision(
-  text: string,
-  pending: PendingShoppingItemDecision
-): ShoppingItemDecision | undefined {
-  const normalized = text.trim().toLowerCase();
-
-  if (
-    /\b(cancel|skip|nothing)\b/.test(normalized) ||
-    /отмен|ничего|не надо|забей/.test(normalized)
-  ) {
-    return "cancel";
-  }
-
-  const candidateIndex = parseCandidateIndex(normalized);
-
-  if (
-    candidateIndex === undefined ||
-    candidateIndex < 0 ||
-    candidateIndex >= pending.candidates.length
-  ) {
-    return undefined;
-  }
-
-  return shoppingItemDecisionValue(candidateIndex);
-}
-
-function shoppingItemCandidateForDecision(
-  pending: PendingShoppingItemDecision,
-  decision: ShoppingItemDecision
-): PendingShoppingItemDecision["candidates"][number] | undefined {
-  if (decision === "cancel") {
-    return undefined;
-  }
-
-  const index = Number(decision.replace("item_", "")) - 1;
-
-  if (!Number.isInteger(index)) {
-    return undefined;
-  }
-
-  return pending.candidates[index];
-}
-
-function shoppingItemDecisionValue(index: number): ShoppingItemDecision {
-  return `item_${index + 1}`;
-}
-
 function parseCandidateIndex(normalizedText: string): number | undefined {
   const numeric = normalizedText.match(/\b([1-9]\d*)\b/);
 
@@ -3947,86 +3727,6 @@ function toSubjectAliasAction(
   };
 }
 
-function parseShoppingCommandRail(
-  text: string
-): Extract<InboundIntent, { readonly kind: "record_shopping_item" }> | undefined {
-  const commandText = stripCommandRail(text, ["shop", "buy"]);
-
-  if (!commandText) {
-    return undefined;
-  }
-
-  const tags = parseHashTags(commandText);
-  const storeHint = shoppingStoreHint(commandText);
-  const projectTag = /(^|[\s,])ремонт([\s,]|$)|\bremont\b|\brepair\b/iu.test(
-    commandText
-  )
-    ? "ремонт"
-    : undefined;
-  const title = cleanupShoppingTitle(commandText);
-
-  if (!title) {
-    return undefined;
-  }
-
-  return {
-    kind: "record_shopping_item",
-    title,
-    ...(storeHint ? { storeHint } : {}),
-    ...(projectTag ? { projectTag } : {}),
-    tags
-  };
-}
-
-function parseShoppingLifecycleCommandRail(
-  text: string
-): Extract<InboundIntent, { readonly kind: "manage_shopping_item" }> | undefined {
-  const commandText = stripCommandRail(text, ["shop"]);
-
-  if (!commandText) {
-    return undefined;
-  }
-
-  const boughtMatch = commandText.match(
-    /^(?:bought|done|got|купил|купила|купили|куплено|готово)\s+(.+)$/iu
-  );
-  if (boughtMatch?.[1]?.trim()) {
-    return {
-      kind: "manage_shopping_item",
-      action: "mark_bought",
-      query: boughtMatch[1].trim()
-    };
-  }
-
-  const archiveMatch = commandText.match(
-    /^(?:archive|remove|hide|cancel|убери|удали|архив|в\s+архив)\s+(.+)$/iu
-  );
-  if (archiveMatch?.[1]?.trim()) {
-    return {
-      kind: "manage_shopping_item",
-      action: "archive",
-      query: archiveMatch[1].trim()
-    };
-  }
-
-  return undefined;
-}
-
-function parseFindShoppingCommandRail(
-  text: string
-): Extract<InboundIntent, { readonly kind: "recall_shopping_items" }> | undefined {
-  const query = stripCommandRail(text, ["find", "search"]);
-
-  if (!query || !looksLikeShoppingQuery(query)) {
-    return undefined;
-  }
-
-  return {
-    kind: "recall_shopping_items",
-    query
-  };
-}
-
 function scopedClassifierText(text: string): string {
   const scoped = parseModelScopeCommandRail(text);
 
@@ -4079,54 +3779,6 @@ function modelScopeForCommand(command: string): string {
   }
 
   return "planning";
-}
-
-function stripCommandRail(
-  text: string,
-  commands: readonly string[]
-): string | undefined {
-  const trimmed = text.trim();
-  const commandPattern = commands.join("|");
-  const match = trimmed.match(new RegExp(`^/?(?:${commandPattern})\\b`, "iu"));
-
-  if (!match) {
-    return undefined;
-  }
-
-  return trimmed.slice(match[0].length).trim();
-}
-
-function parseHashTags(text: string): readonly string[] {
-  return [...text.matchAll(/#([\p{L}\p{N}_-]+)/giu)]
-    .map((match) => match[1])
-    .filter((tag): tag is string => typeof tag === "string");
-}
-
-function shoppingStoreHint(text: string): string | undefined {
-  if (/уради\s*сам|uradi\s*sam|uradisam/iu.test(text)) {
-    return "uradi_sam";
-  }
-
-  return undefined;
-}
-
-function cleanupShoppingTitle(text: string): string {
-  return text
-    .replace(/#[\p{L}\p{N}_-]+/giu, " ")
-    .replace(/\b(buy|get)\b/giu, " ")
-    .replace(/\b(in|at|from)\s+(uradi\s*sam|uradisam)\b/giu, " ")
-    .replace(/купить|возьми|взять|приобрести/giu, " ")
-    .replace(/(^|\s)в\s+(уради\s*сам|uradisam)(?=\s|$)/giu, " ")
-    .replace(/(^|[\s,])ремонт([\s,]|$)/giu, " ")
-    .replace(/\s+/gu, " ")
-    .replace(/^[,.:;\s]+|[,.:;\s]+$/gu, "")
-    .trim();
-}
-
-function looksLikeShoppingQuery(text: string): boolean {
-  return /купить|покуп|магазин|уради\s*сам|uradisam|uradi\s*sam|ремонт|repair|shop|buy/iu.test(
-    text
-  );
 }
 
 function commandRailsHelpText(): string {
