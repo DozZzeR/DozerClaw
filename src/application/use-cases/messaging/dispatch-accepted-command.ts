@@ -28,6 +28,10 @@ import type {
   RecordDocumentSearchDescriptionResult
 } from "../documents/record-document-search-description.js";
 import type {
+  ProcessReceiptWarrantyUploadInput,
+  ProcessReceiptWarrantyUploadResult
+} from "../documents/process-receipt-warranty-upload.js";
+import type {
   UploadFileInboxDocumentInput,
   UploadFileInboxDocumentResult
 } from "../documents/upload-file-inbox-document.js";
@@ -156,6 +160,12 @@ export interface DocumentSearchDescriptionRecorder {
   execute(
     input: RecordDocumentSearchDescriptionInput
   ): Promise<RecordDocumentSearchDescriptionResult>;
+}
+
+export interface ReceiptWarrantyUploadProcessor {
+  execute(
+    input: ProcessReceiptWarrantyUploadInput
+  ): Promise<ProcessReceiptWarrantyUploadResult>;
 }
 
 export interface FamilyFactRecorder {
@@ -358,6 +368,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly documentAttachmentStore?: MessageDocumentAttachmentStore;
   readonly fileInboxDocumentUploader?: FileInboxDocumentUploader;
   readonly documentSearchDescriptionRecorder?: DocumentSearchDescriptionRecorder;
+  readonly receiptWarrantyUploadProcessor?: ReceiptWarrantyUploadProcessor;
   readonly familyFactRecorder?: FamilyFactRecorder;
   readonly familyFactUpdater?: FamilyFactUpdater;
   readonly familyFactRecall?: FamilyFactRecall;
@@ -1511,18 +1522,23 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
-    const describedDocuments =
-      await this.recordReceiptWarrantySearchDescriptions(
-        context,
-        uploadedDocuments,
-        metadata.documentType
-      );
-    const warrantyReminderLines =
-      await this.createReceiptWarrantyReminder(
-        context,
-        describedDocuments,
-        metadata.documentType
-      );
+    const receiptWarrantyProcessing =
+      this.dependencies.receiptWarrantyUploadProcessor
+        ? await this.dependencies.receiptWarrantyUploadProcessor.execute({
+            documents: uploadedDocuments,
+            ...(metadata.documentType
+              ? { documentType: metadata.documentType }
+              : {}),
+            description: context.text,
+            receivedAt: context.receivedAt,
+            actorId: context.actor.id
+          })
+        : {
+            documents: uploadedDocuments,
+            replyLines: []
+          };
+    const describedDocuments = receiptWarrantyProcessing.documents;
+    const warrantyReminderLines = receiptWarrantyProcessing.replyLines;
 
     if (
       !metadata.documentType &&
@@ -1600,82 +1616,6 @@ export class DispatchAcceptedCommandUseCase {
         ...warrantyReminderLines
       ].join("\n")
     };
-  }
-
-  private async recordReceiptWarrantySearchDescriptions(
-    context: AcceptedMessageContext,
-    documents: readonly DocumentRecord[],
-    documentType: DocumentType | undefined
-  ): Promise<readonly DocumentRecord[]> {
-    if (
-      !this.dependencies.documentSearchDescriptionRecorder ||
-      (documentType !== "receipt" && documentType !== "warranty")
-    ) {
-      return documents;
-    }
-
-    const description = context.text.trim();
-
-    if (!description) {
-      return documents;
-    }
-
-    const describedDocuments: DocumentRecord[] = [];
-
-    for (const document of documents) {
-      try {
-        const result =
-          await this.dependencies.documentSearchDescriptionRecorder.execute({
-            document,
-            description
-          });
-
-        describedDocuments.push(result.document);
-      } catch {
-        describedDocuments.push(document);
-      }
-    }
-
-    return describedDocuments;
-  }
-
-  private async createReceiptWarrantyReminder(
-    context: AcceptedMessageContext,
-    documents: readonly DocumentRecord[],
-    documentType: DocumentType | undefined
-  ): Promise<readonly string[]> {
-    if (
-      !this.dependencies.planningTaskManager ||
-      (documentType !== "receipt" && documentType !== "warranty")
-    ) {
-      return [];
-    }
-
-    const document = documents[0];
-    const reminder = parseWarrantyReminder(
-      context.text,
-      context.receivedAt,
-      document
-    );
-
-    if (!reminder) {
-      return [];
-    }
-
-    try {
-      const result = await this.dependencies.planningTaskManager.execute({
-        action: "create",
-        title: reminder.title,
-        date: reminder.date,
-        actorId: context.actor.id
-      });
-
-      return result.status === "created"
-        ? [`Создал напоминание по гарантии на ${reminder.date}.`]
-        : [];
-    } catch {
-      return [];
-    }
   }
 
   private async dispatchPendingFileDestinationDecision(
@@ -3470,79 +3410,6 @@ function parseDocumentSubject(tokens: readonly string[]): string | undefined {
       !ignored.has(token) &&
       /^[a-zа-яё][a-zа-яё0-9_-]{1,31}$/u.test(token)
   );
-}
-
-interface WarrantyReminder {
-  readonly title: string;
-  readonly date: string;
-}
-
-function parseWarrantyReminder(
-  text: string,
-  receivedAt: Date,
-  document: DocumentRecord | undefined
-): WarrantyReminder | undefined {
-  const term = parseWarrantyTerm(text);
-
-  if (!term) {
-    return undefined;
-  }
-
-  const dueDate = addWarrantyTerm(receivedAt, term);
-  const documentName = document?.name ? ` (${document.name})` : "";
-
-  return {
-    title: `Проверить гарантию: ${text.trim()}${documentName}`,
-    date: formatCalendarDate(dueDate)
-  };
-}
-
-function parseWarrantyTerm(
-  text: string
-): { readonly years?: number; readonly months?: number } | undefined {
-  const normalized = text.toLowerCase();
-  const yearMatch = normalized.match(
-    /(?:гаранти\p{L}*|warranty|guarantee)[^\d]{0,24}(\d{1,2})\s*(?:г(?:од|ода|одов)?|лет|year|years|yr|yrs)(?:\s|$|[.,;:!?])/u
-  );
-
-  if (yearMatch?.[1]) {
-    return {
-      years: Number(yearMatch[1])
-    };
-  }
-
-  const monthMatch = normalized.match(
-    /(?:гаранти\p{L}*|warranty|guarantee)[^\d]{0,24}(\d{1,2})\s*(?:мес(?:яц|яца|яцев)?|month|months|mo)(?:\s|$|[.,;:!?])/u
-  );
-
-  if (monthMatch?.[1]) {
-    return {
-      months: Number(monthMatch[1])
-    };
-  }
-
-  return undefined;
-}
-
-function addWarrantyTerm(
-  date: Date,
-  term: { readonly years?: number; readonly months?: number }
-): Date {
-  const dueDate = new Date(date.getTime());
-
-  if (term.years) {
-    dueDate.setUTCFullYear(dueDate.getUTCFullYear() + term.years);
-  }
-
-  if (term.months) {
-    dueDate.setUTCMonth(dueDate.getUTCMonth() + term.months);
-  }
-
-  return dueDate;
-}
-
-function formatCalendarDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 function parseSkipDocumentMetadata(text: string): boolean {

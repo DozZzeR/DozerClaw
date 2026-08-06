@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DispatchAcceptedCommandUseCase } from "../../../../src/application/use-cases/messaging/dispatch-accepted-command.js";
+import { ProcessReceiptWarrantyUploadUseCase } from "../../../../src/application/use-cases/documents/process-receipt-warranty-upload.js";
 import type { StoreMessageAttachmentsInput } from "../../../../src/application/use-cases/file-inbox/store-message-attachments.js";
 import type {
   StoreMessageDocumentAttachmentResult,
@@ -1589,10 +1590,14 @@ describe("DispatchAcceptedCommandUseCase", () => {
       new FakePendingDocumentPlacementDecisions();
     const documentSearchDescriptionRecorder =
       new FakeDocumentSearchDescriptionRecorder();
+    const receiptWarrantyUploadProcessor =
+      new ProcessReceiptWarrantyUploadUseCase({
+        documentSearchDescriptionRecorder
+      });
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       documentAttachmentStore,
-      documentSearchDescriptionRecorder,
+      receiptWarrantyUploadProcessor,
       pendingDocumentPlacementDecisions,
       now: () => new Date("2026-07-02T20:05:00.000Z")
     });
@@ -1653,12 +1658,16 @@ describe("DispatchAcceptedCommandUseCase", () => {
     const pendingDocumentPlacementDecisions =
       new FakePendingDocumentPlacementDecisions();
     const planningTaskManager = new FakePlanningTaskManager();
+    const receiptWarrantyUploadProcessor =
+      new ProcessReceiptWarrantyUploadUseCase({
+        documentSearchDescriptionRecorder,
+        planningTaskManager
+      });
     const useCase = new DispatchAcceptedCommandUseCase({
       systemHealthHandler: unusedHealthHandler,
       documentAttachmentStore,
-      documentSearchDescriptionRecorder,
       pendingDocumentPlacementDecisions,
-      planningTaskManager,
+      receiptWarrantyUploadProcessor,
       now: () => new Date("2026-07-02T20:05:00.000Z")
     });
 

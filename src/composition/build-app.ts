@@ -17,6 +17,7 @@ import { RegisterDocumentUseCase } from "../application/use-cases/documents/regi
 import { FindDocumentsUseCase } from "../application/use-cases/documents/find-documents.js";
 import { ManageDocumentRecordUseCase } from "../application/use-cases/documents/manage-document-record.js";
 import { RecordDocumentSearchDescriptionUseCase } from "../application/use-cases/documents/record-document-search-description.js";
+import { ProcessReceiptWarrantyUploadUseCase } from "../application/use-cases/documents/process-receipt-warranty-upload.js";
 import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases/documents/store-message-document-attachments.js";
 import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
 import { QueryPlanningStateUseCase } from "../application/use-cases/planning/query-planning-state.js";
@@ -344,6 +345,15 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
         notifications: notificationCreator
       })
     : undefined;
+  const receiptWarrantyUploadProcessor =
+    documentSearchDescriptionRecorder || planningTaskManager
+      ? new ProcessReceiptWarrantyUploadUseCase({
+          ...(documentSearchDescriptionRecorder
+            ? { documentSearchDescriptionRecorder }
+            : {}),
+          ...(planningTaskManager ? { planningTaskManager } : {})
+        })
+      : undefined;
   const intentClassifier = modelProvider
     ? new ModelInboundIntentClassifier({
         model: modelProvider
@@ -363,6 +373,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     ...(fileInboxDocumentUploader ? { fileInboxDocumentUploader } : {}),
     ...(documentSearchDescriptionRecorder
       ? { documentSearchDescriptionRecorder }
+      : {}),
+    ...(receiptWarrantyUploadProcessor
+      ? { receiptWarrantyUploadProcessor }
       : {}),
     ...(duplicateDecisionResolver ? { duplicateDecisionResolver } : {}),
     familyFactRecorder,
