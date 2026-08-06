@@ -1,4 +1,5 @@
 import type { ShoppingItem } from "../../../core/domain/shopping/shopping-item.js";
+import type { MemoryPort } from "../../../ports/memory-port.js";
 import type { ShoppingRepositoryPort } from "../../../ports/shopping-repository-port.js";
 import { shoppingQueryTokens } from "./shopping-query.js";
 
@@ -6,7 +7,9 @@ export type ManageShoppingItemAction = "mark_bought" | "archive";
 
 export interface ManageShoppingItemDependencies {
   readonly repository: ShoppingRepositoryPort;
+  readonly semanticMemory?: MemoryPort;
   readonly recentLimit: number;
+  readonly semanticLimit?: number;
   readonly now: () => Date;
 }
 
@@ -41,7 +44,7 @@ export class ManageShoppingItemUseCase {
     );
     const matches = input.shoppingItemId
       ? items.filter((item) => item.id === input.shoppingItemId)
-      : matchingShoppingItems(input.query, items);
+      : await this.matchShoppingItems(input.query, items);
 
     if (matches.length === 0) {
       return {
@@ -81,6 +84,62 @@ export class ManageShoppingItemUseCase {
           ? `Убрал покупку в архив: ${updatedItem.title}`
           : `Отметил покупку купленной: ${updatedItem.title}`
     };
+  }
+
+  private async matchShoppingItems(
+    query: string,
+    items: readonly ShoppingItem[]
+  ): Promise<readonly ShoppingItem[]> {
+    const lexicalMatches = matchingShoppingItems(query, items);
+
+    if (lexicalMatches.length === 1) {
+      return lexicalMatches;
+    }
+
+    const semanticMatches = await this.searchSemanticShoppingItems(query, items);
+
+    if (semanticMatches.length === 0) {
+      return lexicalMatches;
+    }
+
+    if (lexicalMatches.length === 0) {
+      return semanticMatches;
+    }
+
+    const lexicalIds = new Set(lexicalMatches.map((item) => item.id));
+    const narrowedMatches = semanticMatches.filter((item) =>
+      lexicalIds.has(item.id)
+    );
+
+    return narrowedMatches.length > 0 ? narrowedMatches : lexicalMatches;
+  }
+
+  private async searchSemanticShoppingItems(
+    query: string,
+    openItems: readonly ShoppingItem[]
+  ): Promise<readonly ShoppingItem[]> {
+    const text = query.trim();
+
+    if (!text || !this.dependencies.semanticMemory) {
+      return [];
+    }
+
+    try {
+      const results = await this.dependencies.semanticMemory.search({
+        text,
+        limit: this.dependencies.semanticLimit ?? 5
+      });
+      const openItemsById = new Map(openItems.map((item) => [item.id, item]));
+      const ids = unique(results.flatMap((result) =>
+        extractShoppingItemReferenceIds(result.entry.body)
+      ));
+
+      return ids
+        .map((id) => openItemsById.get(id))
+        .filter((item): item is ShoppingItem => Boolean(item));
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -137,6 +196,17 @@ function formatAmbiguousShoppingItems(items: readonly ShoppingItem[]): string {
   ].join("\n");
 }
 
+function extractShoppingItemReferenceIds(text: string): readonly string[] {
+  return Array.from(
+    text.matchAll(/\bshopping_item:([a-zA-Z0-9._:-]+)/g),
+    (match) => match[1] ?? ""
+  ).filter((value) => value.length > 0);
+}
+
+function unique(values: readonly string[]): readonly string[] {
+  return Array.from(new Set(values));
+}
+
 const stopWords = new Set([
   "купил",
   "купила",
@@ -146,5 +216,8 @@ const stopWords = new Set([
   "bought",
   "archive",
   "архив",
-  "убери"
+  "убери",
+  "для",
+  "на",
+  "по"
 ]);

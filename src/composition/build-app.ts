@@ -298,7 +298,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   });
   const shoppingManager = new ManageShoppingItemUseCase({
     repository: shoppingRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     recentLimit: 50,
+    semanticLimit: config.memory?.mempalace?.searchLimit ?? 5,
     now: () => new Date()
   });
   const familyFactArchiver = new ArchiveFamilyFactUseCase({

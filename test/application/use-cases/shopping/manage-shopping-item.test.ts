@@ -154,6 +154,64 @@ describe("ManageShoppingItemUseCase", () => {
       })
     ]);
   });
+
+  it("uses semantic shopping references when lifecycle query tokens miss", async () => {
+    const semanticMemory = new FakeMemory([
+      {
+        entry: {
+          id: "drawer-shopping-1",
+          body: [
+            "Shopping item for home repair: impact driver bits",
+            "",
+            "References:",
+            "- shopping_item:shopping-1"
+          ].join("\n")
+        },
+        score: 0.9
+      }
+    ]);
+    const repository = new FakeShoppingRepository([
+      shoppingItem({
+        id: "shopping-1",
+        title: "биты для шуруповерта",
+        projectTag: "ремонт",
+        tags: ["инструменты"]
+      })
+    ]);
+    const useCase = new ManageShoppingItemUseCase({
+      repository,
+      semanticMemory,
+      recentLimit: 20,
+      semanticLimit: 5,
+      now: () => new Date("2026-08-04T10:00:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        action: "mark_bought",
+        query: "купил насадки для дрели"
+      })
+    ).resolves.toEqual({
+      status: "updated",
+      item: {
+        ...shoppingItem({
+          id: "shopping-1",
+          title: "биты для шуруповерта",
+          projectTag: "ремонт",
+          tags: ["инструменты"]
+        }),
+        status: "bought",
+        updatedAt: new Date("2026-08-04T10:00:00.000Z")
+      },
+      text: "Отметил покупку купленной: биты для шуруповерта"
+    });
+    expect(semanticMemory.searches).toEqual([
+      {
+        text: "купил насадки для дрели",
+        limit: 5
+      }
+    ]);
+  });
 });
 
 class FakeShoppingRepository {
@@ -167,6 +225,30 @@ class FakeShoppingRepository {
 
   async listRecentOpenShoppingItems() {
     return this.items;
+  }
+}
+
+class FakeMemory {
+  readonly searches: { readonly text: string; readonly limit: number }[] = [];
+
+  constructor(
+    private readonly results: readonly {
+      readonly entry: { readonly id: string; readonly body: string };
+      readonly score?: number;
+    }[]
+  ) {}
+
+  async store() {
+    return {
+      id: "drawer-unused",
+      body: "unused"
+    };
+  }
+
+  async search(input: { readonly text: string; readonly limit: number }) {
+    this.searches.push(input);
+
+    return this.results;
   }
 }
 
