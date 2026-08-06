@@ -10,6 +10,8 @@ export type DocumentType =
   | "education"
   | "travel"
   | "home"
+  | "receipt"
+  | "warranty"
   | "reference"
   | "other";
 

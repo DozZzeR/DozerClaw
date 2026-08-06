@@ -249,7 +249,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `store_file` for uploaded attachments.",
       "- `destination`: use `google_drive` when the user asks for Google Drive, Drive, cloud document storage, or equivalent; use `local_inbox` when they ask to save locally; use `null` when unclear.",
-      "- `documentType`: for document-like uploads choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when unclear.",
+      "- `documentType`: for document-like uploads choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `receipt`, `warranty`, `reference`, or `other`; use `null` when unclear.",
+      "- Use `receipt` for purchase receipts/checks and `warranty` for warranty cards or warranty terms; this is a document workflow, not a shopping-list item.",
       "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
       "- The model only classifies. It must not claim the file was saved."
     ].join("\n"),
@@ -265,7 +266,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `register_document` when the user asks to register, save, catalog, or remember an existing Drive document link or file id as a document record.",
       "- `externalIdOrUrl`: the Google Drive URL or external file id from the message.",
-      "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
+      "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `receipt`, `warranty`, `reference`, or `other`; use `null` when uncertain.",
       "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
       "- Do not use `register_document` for generic Telegram attachments without a Drive link; use `store_file` for uploaded files."
     ].join("\n"),
@@ -274,7 +275,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       "- Use `find_document` when the user asks to show, find, retrieve, list, or look up registered documents.",
       "- `query`: the shortest useful search text, or `null` when the type and subject are enough.",
-      "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when uncertain.",
+      "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `receipt`, `warranty`, `reference`, or `other`; use `null` when uncertain.",
       "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
       "- For Russian names, map `алексей`, `алексея`, `алёша`, `алеша` to `alexey`; map `вика`, `вики`, `виктория`, `vika`, `viki` to `victoria`; map `софия`, `софьи`, `sofia`, `sophia` to `sofia`.",
       "- Family surname aliases: `Горяйнов`, `Goryainov`, and `Goryaynov` without a feminine ending refer to `alexey`; with initials `A`, `А`, `AV`, `АВ`, `A.V`, or `А.В` also use `alexey`.",
@@ -289,7 +290,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use `update_document` when the user asks to correct, change, set, or update metadata for a registered document.",
       "- `update_document.query`: the shortest phrase identifying the existing registered document.",
       "- If the user clearly refers to the provided `lastOperation` document with words like it, this file, that document, or `его`, set `update_document.query` to `null`.",
-      "- `update_document.documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `reference`, or `other`; use `null` when not changing type.",
+      "- `update_document.documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `receipt`, `warranty`, `reference`, or `other`; use `null` when not changing type.",
       "- `update_document.subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, or `family`; use `null` when not changing subject.",
       "- Use `archive_document` when the user asks to archive, remove, hide, or stop showing a registered document record.",
       "- `archive_document.query`: the shortest phrase identifying the registered document to archive.",
@@ -351,6 +352,12 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       '{"kind":"archive_fact","query":"Max chamomile tea"}',
       '{"kind":"archive_fact","query":"Sofia blue backpack"}'
+    ].join("\n"),
+    "",
+    "# store_file examples",
+    [
+      '{"kind":"store_file","summary":"Bosch drill receipt, 2 year warranty","destination":"google_drive","documentType":"receipt","subjectId":"family"}',
+      '{"kind":"store_file","summary":"washing machine warranty card","destination":"google_drive","documentType":"warranty","subjectId":"family"}'
     ].join("\n"),
     "",
     "# register_document examples",
@@ -850,6 +857,8 @@ const inboundIntentSchema = {
         "education",
         "travel",
         "home",
+        "receipt",
+        "warranty",
         "reference",
         "other",
         null
@@ -916,6 +925,8 @@ const inboundIntentSchema = {
               "education",
               "travel",
               "home",
+              "receipt",
+              "warranty",
               "reference",
               "other",
               null
@@ -1241,6 +1252,8 @@ function isDocumentType(value: string): value is DocumentType {
     value === "education" ||
     value === "travel" ||
     value === "home" ||
+    value === "receipt" ||
+    value === "warranty" ||
     value === "reference" ||
     value === "other"
   );

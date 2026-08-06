@@ -1583,6 +1583,69 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("stores receipt attachments as Drive documents with the message comment", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    const documentSearchDescriptionRecorder =
+      new FakeDocumentSearchDescriptionRecorder();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      documentSearchDescriptionRecorder,
+      pendingDocumentPlacementDecisions,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "чек на дрель Bosch, гарантия 2 года",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "receipt.jpg",
+              mimeType: "image/jpeg"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf (receipt)",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Предлагаю папку: Family Documents/family/receipt",
+        "Переместить файл туда? Ответь yes или skip."
+      ].join("\n")
+    });
+    expect(documentAttachmentStore.seenInput).toEqual({
+      provider: "telegram",
+      receivedAt: new Date("2026-07-02T20:00:00.000Z"),
+      userText: "чек на дрель Bosch, гарантия 2 года",
+      attachments: [
+        {
+          id: "attachment-1",
+          providerFileId: "telegram-file-1",
+          fileName: "receipt.jpg",
+          mimeType: "image/jpeg"
+        }
+      ],
+      documentType: "receipt"
+    });
+    expect(documentSearchDescriptionRecorder.seenInput).toEqual({
+      document: {
+        ...uploadedDocumentRecord(),
+        documentType: "receipt"
+      },
+      description: "чек на дрель Bosch, гарантия 2 года"
+    });
+  });
+
   it("keeps deterministic local destination over model Drive destination", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const documentAttachmentStore = new FakeDocumentAttachmentStore();

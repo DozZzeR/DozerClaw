@@ -109,17 +109,17 @@ describe("parseInboundIntent", () => {
       parseInboundIntent(
         JSON.stringify({
           kind: "store_file",
-          summary: "passport scan",
+          summary: "receipt for drill purchase",
           destination: "google_drive",
-          documentType: "identity",
+          documentType: "receipt",
           subjectId: "max"
         })
       )
     ).toEqual({
       kind: "store_file",
-      summary: "passport scan",
+      summary: "receipt for drill purchase",
       destination: "google_drive",
-      documentType: "identity",
+      documentType: "receipt",
       subjectId: "max"
     });
   });
@@ -368,14 +368,14 @@ describe("parseInboundIntent", () => {
         JSON.stringify({
           kind: "register_document",
           externalIdOrUrl: " https://drive.google.com/file/d/abc ",
-          documentType: "identity",
+          documentType: "warranty",
           subjectId: " max "
         })
       )
     ).toEqual({
       kind: "register_document",
       externalIdOrUrl: "https://drive.google.com/file/d/abc",
-      documentType: "identity",
+      documentType: "warranty",
       subjectId: "max"
     });
   });

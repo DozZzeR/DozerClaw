@@ -1,7 +1,10 @@
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { AccessAction } from "../../../core/domain/identity/access-policy.js";
 import { evaluateAccess } from "../../../core/domain/identity/access-policy.js";
-import type { DocumentType } from "../../../core/domain/documents/document-record.js";
+import type {
+  DocumentRecord,
+  DocumentType
+} from "../../../core/domain/documents/document-record.js";
 import type {
   RegisterDocumentInput,
   RegisterDocumentResult
@@ -1508,6 +1511,13 @@ export class DispatchAcceptedCommandUseCase {
       };
     }
 
+    const describedDocuments =
+      await this.recordReceiptWarrantySearchDescriptions(
+        context,
+        uploadedDocuments,
+        metadata.documentType
+      );
+
     if (
       !metadata.documentType &&
       !metadata.subjectId &&
@@ -1515,7 +1525,7 @@ export class DispatchAcceptedCommandUseCase {
     ) {
       await this.saveLastDocumentOperationContext(
         context,
-        uploadedDocuments,
+        describedDocuments,
         "document_uploaded"
       );
       const now = this.dependencies.now?.() ?? new Date();
@@ -1523,7 +1533,7 @@ export class DispatchAcceptedCommandUseCase {
         chatId: context.chat.id,
         actorId: context.actor.id,
         action: { kind: "describe_for_search" },
-        candidates: uploadedDocuments,
+        candidates: describedDocuments,
         createdAt: now,
         expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
       });
@@ -1541,7 +1551,7 @@ export class DispatchAcceptedCommandUseCase {
     if (!metadata.documentType && !metadata.subjectId) {
       await this.saveLastDocumentOperationContext(
         context,
-        uploadedDocuments,
+        describedDocuments,
         "document_uploaded"
       );
       const now = this.dependencies.now?.() ?? new Date();
@@ -1549,7 +1559,7 @@ export class DispatchAcceptedCommandUseCase {
         chatId: context.chat.id,
         actorId: context.actor.id,
         action: { kind: "update_metadata" },
-        candidates: uploadedDocuments,
+        candidates: describedDocuments,
         createdAt: now,
         expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
       });
@@ -1566,23 +1576,60 @@ export class DispatchAcceptedCommandUseCase {
 
     const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
       context,
-      uploadedDocuments
+      describedDocuments
     );
     await this.saveLastDocumentOperationContext(
       context,
-      uploadedDocuments,
+      describedDocuments,
       "document_uploaded"
     );
 
     return {
       chatId: context.chat.id,
       text: [
-        formatUploadedDocumentsReply(uploadedDocuments),
-        ...(placementSuggested
-          ? formatPlacementSuggestionLines(uploadedDocuments[0])
+        formatUploadedDocumentsReply(describedDocuments),
+        ...(placementSuggested && describedDocuments[0]
+          ? formatPlacementSuggestionLines(describedDocuments[0])
           : [])
       ].join("\n")
     };
+  }
+
+  private async recordReceiptWarrantySearchDescriptions(
+    context: AcceptedMessageContext,
+    documents: readonly DocumentRecord[],
+    documentType: DocumentType | undefined
+  ): Promise<readonly DocumentRecord[]> {
+    if (
+      !this.dependencies.documentSearchDescriptionRecorder ||
+      (documentType !== "receipt" && documentType !== "warranty")
+    ) {
+      return documents;
+    }
+
+    const description = context.text.trim();
+
+    if (!description) {
+      return documents;
+    }
+
+    const describedDocuments: DocumentRecord[] = [];
+
+    for (const document of documents) {
+      try {
+        const result =
+          await this.dependencies.documentSearchDescriptionRecorder.execute({
+            document,
+            description
+          });
+
+        describedDocuments.push(result.document);
+      } catch {
+        describedDocuments.push(document);
+      }
+    }
+
+    return describedDocuments;
   }
 
   private async dispatchPendingFileDestinationDecision(
@@ -3234,6 +3281,8 @@ const documentTypes = [
   "education",
   "travel",
   "home",
+  "receipt",
+  "warranty",
   "reference",
   "other"
 ] as const satisfies readonly DocumentType[];
@@ -3247,7 +3296,10 @@ function parseDocumentMetadata(text: string): {
     .split(/[^a-zа-яё0-9_-]+/u)
     .filter((token) => token.length > 0);
   const documentType = parseDocumentType(tokens);
-  const subjectId = parseDocumentSubject(tokens);
+  const subjectId =
+    documentType === "receipt" || documentType === "warranty"
+      ? undefined
+      : parseDocumentSubject(tokens);
 
   return {
     ...(documentType ? { documentType } : {}),
@@ -3301,6 +3353,20 @@ function parseDocumentType(tokens: readonly string[]): DocumentType | undefined 
     if (token === "visa" || token === "ticket") {
       return "travel";
     }
+
+    if (token === "receipt" || token === "чек" || token === "чека") {
+      return "receipt";
+    }
+
+    if (
+      token === "warranty" ||
+      token === "guarantee" ||
+      token === "гарантия" ||
+      token === "гарантии" ||
+      token === "гарантийный"
+    ) {
+      return "warranty";
+    }
   }
 
   return undefined;
@@ -3333,6 +3399,14 @@ function parseDocumentSubject(tokens: readonly string[]): string | undefined {
     "удостоверение",
     "visa",
     "ticket",
+    "receipt",
+    "чек",
+    "чека",
+    "warranty",
+    "guarantee",
+    "гарантия",
+    "гарантии",
+    "гарантийный",
     "гугл",
     "диск",
     "файл",
