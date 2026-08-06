@@ -334,6 +334,68 @@ describe("FindDocumentsUseCase", () => {
     expect(repository.seenIds).toEqual(["document-semantic"]);
   });
 
+  it("uses semantic document references for receipt and warranty lookup", async () => {
+    const receipt = documentRecord({
+      id: "document-receipt",
+      name: "IMG_4201.jpg",
+      url: "https://drive.google.com/file/d/receipt",
+      documentType: "receipt",
+      subjectId: "family"
+    });
+    const warranty = documentRecord({
+      id: "document-warranty",
+      name: "warranty.pdf",
+      url: "https://drive.google.com/file/d/warranty",
+      documentType: "warranty",
+      subjectId: "family"
+    });
+    const repository = new RecordingDocumentRepository([], [receipt, warranty]);
+    const semanticMemory = new StubSemanticMemory([
+      {
+        entry: {
+          id: "drawer-receipt",
+          body: [
+            "Document: IMG_4201.jpg",
+            "User search description: чек на дрель Bosch из Уради Сам",
+            "Reference: document:document-receipt"
+          ].join("\n")
+        }
+      },
+      {
+        entry: {
+          id: "drawer-warranty",
+          body: [
+            "Document: warranty.pdf",
+            "User search description: гарантия на стиральную машину",
+            "Reference: document:document-warranty"
+          ].join("\n")
+        }
+      }
+    ]);
+    const useCase = new FindDocumentsUseCase({
+      repository,
+      semanticMemory,
+      limit: 5
+    });
+
+    await expect(
+      useCase.execute({
+        query: "где чек на дрель из урадисам",
+        documentType: "receipt"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Registered documents:",
+        "- IMG_4201.jpg (receipt, subject: family)",
+        "  https://drive.google.com/open?id=receipt"
+      ].join("\n")
+    });
+    expect(repository.seenIds).toEqual([
+      "document-receipt",
+      "document-warranty"
+    ]);
+  });
+
   it("falls back to SQL results when semantic search fails", async () => {
     const repository = new RecordingDocumentRepository([
       documentRecord({

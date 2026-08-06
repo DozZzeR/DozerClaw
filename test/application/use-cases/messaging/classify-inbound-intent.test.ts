@@ -94,6 +94,9 @@ describe("ModelInboundIntentClassifier", () => {
     expect(model.request?.input).toContain("record_shopping_item");
     expect(model.request?.input).toContain("recall_shopping_items");
     expect(model.request?.input).toContain("manage_shopping_item");
+    expect(model.request?.input).toContain("For receipt/check lookup use `receipt`");
+    expect(model.request?.input).toContain("дрель Bosch Уради Сам");
+    expect(model.request?.input).toContain("стиральная машина");
     expect(JSON.stringify(model.request?.outputSchema)).not.toContain(
       "create_reminder"
     );
@@ -395,6 +398,21 @@ describe("parseInboundIntent", () => {
       query: "passport",
       documentType: "identity",
       subjectId: "max"
+    });
+    expect(
+      parseInboundIntent(
+        JSON.stringify({
+          kind: "find_document",
+          query: " чек на дрель Bosch ",
+          documentType: "receipt",
+          subjectId: " family "
+        })
+      )
+    ).toEqual({
+      kind: "find_document",
+      query: "чек на дрель Bosch",
+      documentType: "receipt",
+      subjectId: "family"
     });
   });
 

@@ -276,6 +276,7 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       "- Use `find_document` when the user asks to show, find, retrieve, list, or look up registered documents.",
       "- `query`: the shortest useful search text, or `null` when the type and subject are enough.",
       "- `documentType`: choose one of `identity`, `legal`, `health`, `finance`, `education`, `travel`, `home`, `receipt`, `warranty`, `reference`, or `other`; use `null` when uncertain.",
+      "- For receipt/check lookup use `receipt`; for warranty/guarantee lookup use `warranty`. Keep product, store, and purchase context in `query`.",
       "- `subjectId`: a short stable lowercase subject key such as `max`, `sofia`, `alexey`, `victoria`, or `family`; use `null` when uncertain.",
       "- For Russian names, map `алексей`, `алексея`, `алёша`, `алеша` to `alexey`; map `вика`, `вики`, `виктория`, `vika`, `viki` to `victoria`; map `софия`, `софьи`, `sofia`, `sophia` to `sofia`.",
       "- Family surname aliases: `Горяйнов`, `Goryainov`, and `Goryaynov` without a feminine ending refer to `alexey`; with initials `A`, `А`, `AV`, `АВ`, `A.V`, or `А.В` also use `alexey`.",
@@ -370,6 +371,8 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
     [
       '{"kind":"find_document","query":"passport","documentType":"identity","subjectId":"max"}',
       '{"kind":"find_document","query":"train ticket","documentType":"travel","subjectId":"family"}',
+      '{"kind":"find_document","query":"дрель Bosch Уради Сам","documentType":"receipt","subjectId":"family"}',
+      '{"kind":"find_document","query":"стиральная машина","documentType":"warranty","subjectId":"family"}',
       '{"kind":"find_document","query":"паспорт алексея и личная карта вики","documentType":"identity","subjectId":null,"requests":[{"query":"паспорт","documentType":"identity","subjectId":"alexey"},{"query":"личная карта","documentType":"identity","subjectId":"victoria"}]}',
       '{"kind":"find_document","query":"личная карта Goryainova SA","documentType":"identity","subjectId":"sofia"}'
     ].join("\n"),
