@@ -1517,6 +1517,12 @@ export class DispatchAcceptedCommandUseCase {
         uploadedDocuments,
         metadata.documentType
       );
+    const warrantyReminderLines =
+      await this.createReceiptWarrantyReminder(
+        context,
+        describedDocuments,
+        metadata.documentType
+      );
 
     if (
       !metadata.documentType &&
@@ -1590,7 +1596,8 @@ export class DispatchAcceptedCommandUseCase {
         formatUploadedDocumentsReply(describedDocuments),
         ...(placementSuggested && describedDocuments[0]
           ? formatPlacementSuggestionLines(describedDocuments[0])
-          : [])
+          : []),
+        ...warrantyReminderLines
       ].join("\n")
     };
   }
@@ -1630,6 +1637,45 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     return describedDocuments;
+  }
+
+  private async createReceiptWarrantyReminder(
+    context: AcceptedMessageContext,
+    documents: readonly DocumentRecord[],
+    documentType: DocumentType | undefined
+  ): Promise<readonly string[]> {
+    if (
+      !this.dependencies.planningTaskManager ||
+      (documentType !== "receipt" && documentType !== "warranty")
+    ) {
+      return [];
+    }
+
+    const document = documents[0];
+    const reminder = parseWarrantyReminder(
+      context.text,
+      context.receivedAt,
+      document
+    );
+
+    if (!reminder) {
+      return [];
+    }
+
+    try {
+      const result = await this.dependencies.planningTaskManager.execute({
+        action: "create",
+        title: reminder.title,
+        date: reminder.date,
+        actorId: context.actor.id
+      });
+
+      return result.status === "created"
+        ? [`Создал напоминание по гарантии на ${reminder.date}.`]
+        : [];
+    } catch {
+      return [];
+    }
   }
 
   private async dispatchPendingFileDestinationDecision(
@@ -3424,6 +3470,79 @@ function parseDocumentSubject(tokens: readonly string[]): string | undefined {
       !ignored.has(token) &&
       /^[a-zа-яё][a-zа-яё0-9_-]{1,31}$/u.test(token)
   );
+}
+
+interface WarrantyReminder {
+  readonly title: string;
+  readonly date: string;
+}
+
+function parseWarrantyReminder(
+  text: string,
+  receivedAt: Date,
+  document: DocumentRecord | undefined
+): WarrantyReminder | undefined {
+  const term = parseWarrantyTerm(text);
+
+  if (!term) {
+    return undefined;
+  }
+
+  const dueDate = addWarrantyTerm(receivedAt, term);
+  const documentName = document?.name ? ` (${document.name})` : "";
+
+  return {
+    title: `Проверить гарантию: ${text.trim()}${documentName}`,
+    date: formatCalendarDate(dueDate)
+  };
+}
+
+function parseWarrantyTerm(
+  text: string
+): { readonly years?: number; readonly months?: number } | undefined {
+  const normalized = text.toLowerCase();
+  const yearMatch = normalized.match(
+    /(?:гаранти\p{L}*|warranty|guarantee)[^\d]{0,24}(\d{1,2})\s*(?:г(?:од|ода|одов)?|лет|year|years|yr|yrs)(?:\s|$|[.,;:!?])/u
+  );
+
+  if (yearMatch?.[1]) {
+    return {
+      years: Number(yearMatch[1])
+    };
+  }
+
+  const monthMatch = normalized.match(
+    /(?:гаранти\p{L}*|warranty|guarantee)[^\d]{0,24}(\d{1,2})\s*(?:мес(?:яц|яца|яцев)?|month|months|mo)(?:\s|$|[.,;:!?])/u
+  );
+
+  if (monthMatch?.[1]) {
+    return {
+      months: Number(monthMatch[1])
+    };
+  }
+
+  return undefined;
+}
+
+function addWarrantyTerm(
+  date: Date,
+  term: { readonly years?: number; readonly months?: number }
+): Date {
+  const dueDate = new Date(date.getTime());
+
+  if (term.years) {
+    dueDate.setUTCFullYear(dueDate.getUTCFullYear() + term.years);
+  }
+
+  if (term.months) {
+    dueDate.setUTCMonth(dueDate.getUTCMonth() + term.months);
+  }
+
+  return dueDate;
+}
+
+function formatCalendarDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 function parseSkipDocumentMetadata(text: string): boolean {

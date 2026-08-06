@@ -1646,6 +1646,57 @@ describe("DispatchAcceptedCommandUseCase", () => {
     });
   });
 
+  it("creates a family planning reminder from an uploaded receipt warranty term", async () => {
+    const documentAttachmentStore = new FakeDocumentAttachmentStore();
+    const documentSearchDescriptionRecorder =
+      new FakeDocumentSearchDescriptionRecorder();
+    const pendingDocumentPlacementDecisions =
+      new FakePendingDocumentPlacementDecisions();
+    const planningTaskManager = new FakePlanningTaskManager();
+    const useCase = new DispatchAcceptedCommandUseCase({
+      systemHealthHandler: unusedHealthHandler,
+      documentAttachmentStore,
+      documentSearchDescriptionRecorder,
+      pendingDocumentPlacementDecisions,
+      planningTaskManager,
+      now: () => new Date("2026-07-02T20:05:00.000Z")
+    });
+
+    await expect(
+      useCase.execute({
+        route: route("family_message"),
+        context: {
+          ...acceptedContext,
+          text: "чек на дрель Bosch, гарантия 2 года",
+          attachments: [
+            {
+              id: "attachment-1",
+              providerFileId: "telegram-file-1",
+              fileName: "receipt.jpg",
+              mimeType: "image/jpeg"
+            }
+          ]
+        }
+      })
+    ).resolves.toEqual({
+      chatId: "chat-owner",
+      text: [
+        "Uploaded 1 document(s) to Google Drive:",
+        "- passport.pdf (receipt)",
+        "  https://drive.google.com/file/d/drive-passport",
+        "Предлагаю папку: Family Documents/family/receipt",
+        "Переместить файл туда? Ответь yes или skip.",
+        "Создал напоминание по гарантии на 2028-07-02."
+      ].join("\n")
+    });
+    expect(planningTaskManager.seenInput).toEqual({
+      action: "create",
+      title: "Проверить гарантию: чек на дрель Bosch, гарантия 2 года (passport.pdf)",
+      date: "2028-07-02",
+      actorId: "actor-owner"
+    });
+  });
+
   it("keeps deterministic local destination over model Drive destination", async () => {
     const attachmentStore = new FakeAttachmentStore(1);
     const documentAttachmentStore = new FakeDocumentAttachmentStore();
