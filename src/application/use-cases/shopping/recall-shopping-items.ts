@@ -1,11 +1,14 @@
 import type { ShoppingItem } from "../../../core/domain/shopping/shopping-item.js";
+import type { MemoryPort } from "../../../ports/memory-port.js";
 import type { ShoppingRepositoryPort } from "../../../ports/shopping-repository-port.js";
 import { shoppingQueryTokens } from "./shopping-query.js";
 
 export interface RecallShoppingItemsDependencies {
   readonly repository: ShoppingRepositoryPort;
+  readonly semanticMemory?: MemoryPort;
   readonly recentLimit: number;
   readonly resultLimit?: number;
+  readonly semanticLimit?: number;
 }
 
 export interface RecallShoppingItemsInput {
@@ -31,10 +34,15 @@ export class RecallShoppingItemsUseCase {
     }
 
     const rankedItems = rankShoppingItems(queryTokens(input.query), items);
-    const matchingItems = rankedItems
+    const lexicalItems = rankedItems
       .filter((item) => item.score > 0)
       .map((item) => item.item)
-      .slice(0, this.dependencies.resultLimit ?? 10);
+      .slice(0, this.resultLimit());
+    const semanticItems = await this.searchSemanticItems(input.query, items);
+    const matchingItems = deduplicateShoppingItems([
+      ...semanticItems,
+      ...lexicalItems
+    ]).slice(0, this.resultLimit());
 
     if (matchingItems.length === 0) {
       return {
@@ -45,6 +53,38 @@ export class RecallShoppingItemsUseCase {
     return {
       text: formatShoppingItems(matchingItems)
     };
+  }
+
+  private async searchSemanticItems(
+    query: string,
+    openItems: readonly ShoppingItem[]
+  ): Promise<readonly ShoppingItem[]> {
+    const text = query.trim();
+
+    if (!text || !this.dependencies.semanticMemory) {
+      return [];
+    }
+
+    try {
+      const results = await this.dependencies.semanticMemory.search({
+        text,
+        limit: this.dependencies.semanticLimit ?? this.resultLimit()
+      });
+      const openItemsById = new Map(openItems.map((item) => [item.id, item]));
+      const ids = unique(results.flatMap((result) =>
+        extractShoppingItemReferenceIds(result.entry.body)
+      ));
+
+      return ids
+        .map((id) => openItemsById.get(id))
+        .filter((item): item is ShoppingItem => Boolean(item));
+    } catch {
+      return [];
+    }
+  }
+
+  private resultLimit(): number {
+    return this.dependencies.resultLimit ?? 10;
   }
 }
 
@@ -107,6 +147,35 @@ function formatMetadata(item: ShoppingItem): string {
   ].filter((value): value is string => Boolean(value));
 
   return metadata.length > 0 ? ` (${metadata.join(", ")})` : "";
+}
+
+function extractShoppingItemReferenceIds(text: string): readonly string[] {
+  return Array.from(
+    text.matchAll(/\bshopping_item:([a-zA-Z0-9._:-]+)/g),
+    (match) => match[1] ?? ""
+  ).filter((value) => value.length > 0);
+}
+
+function unique(values: readonly string[]): readonly string[] {
+  return Array.from(new Set(values));
+}
+
+function deduplicateShoppingItems(
+  items: readonly ShoppingItem[]
+): readonly ShoppingItem[] {
+  const seen = new Set<string>();
+  const deduplicated: ShoppingItem[] = [];
+
+  for (const item of items) {
+    if (seen.has(item.id)) {
+      continue;
+    }
+
+    seen.add(item.id);
+    deduplicated.push(item);
+  }
+
+  return deduplicated;
 }
 
 const stopWords = new Set([

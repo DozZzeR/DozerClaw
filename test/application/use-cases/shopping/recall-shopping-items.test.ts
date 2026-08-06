@@ -69,6 +69,59 @@ describe("RecallShoppingItemsUseCase", () => {
       ].join("\n")
     });
   });
+
+  it("uses semantic shopping references when lexical tokens miss", async () => {
+    const semanticMemory = new FakeMemory([
+      {
+        entry: {
+          id: "drawer-shopping-1",
+          body: [
+            "Shopping item for home repair: impact driver bits",
+            "",
+            "References:",
+            "- shopping_item:shopping-1"
+          ].join("\n")
+        },
+        score: 0.92
+      }
+    ]);
+    const useCase = new RecallShoppingItemsUseCase({
+      repository: new FakeShoppingRepository([
+        shoppingItem({
+          id: "shopping-1",
+          title: "биты для шуруповерта",
+          projectTag: "ремонт",
+          tags: ["инструменты"]
+        }),
+        shoppingItem({
+          id: "shopping-2",
+          title: "молоко",
+          tags: ["еда"]
+        })
+      ]),
+      semanticMemory,
+      recentLimit: 20,
+      resultLimit: 10,
+      semanticLimit: 5
+    });
+
+    await expect(
+      useCase.execute({
+        query: "что надо купить для дрели"
+      })
+    ).resolves.toEqual({
+      text: [
+        "Открытые покупки:",
+        "- биты для шуруповерта (проект: ремонт, теги: инструменты)"
+      ].join("\n")
+    });
+    expect(semanticMemory.searches).toEqual([
+      {
+        text: "что надо купить для дрели",
+        limit: 5
+      }
+    ]);
+  });
 });
 
 class FakeShoppingRepository {
@@ -80,6 +133,30 @@ class FakeShoppingRepository {
 
   async listRecentOpenShoppingItems() {
     return this.items;
+  }
+}
+
+class FakeMemory {
+  readonly searches: { readonly text: string; readonly limit: number }[] = [];
+
+  constructor(
+    private readonly results: readonly {
+      readonly entry: { readonly id: string; readonly body: string };
+      readonly score?: number;
+    }[]
+  ) {}
+
+  async store() {
+    return {
+      id: "drawer-unused",
+      body: "unused"
+    };
+  }
+
+  async search(input: { readonly text: string; readonly limit: number }) {
+    this.searches.push(input);
+
+    return this.results;
   }
 }
 

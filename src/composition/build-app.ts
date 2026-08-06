@@ -291,8 +291,10 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   });
   const shoppingRecall = new RecallShoppingItemsUseCase({
     repository: shoppingRepository,
+    ...(semanticMemory ? { semanticMemory } : {}),
     recentLimit: 50,
-    resultLimit: 10
+    resultLimit: 10,
+    semanticLimit: config.memory?.mempalace?.searchLimit ?? 5
   });
   const shoppingManager = new ManageShoppingItemUseCase({
     repository: shoppingRepository,
