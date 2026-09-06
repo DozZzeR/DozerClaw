@@ -101,8 +101,7 @@ import type {
   PendingChoiceClassifier
 } from "./classify-pending-choice.js";
 import {
-  allowsFreeFormPendingInterruption,
-  resolvePendingDecision
+  allowsFreeFormPendingInterruption
 } from "./resolve-pending-decision.js";
 import type { PendingDecisionPolicy } from "./resolve-pending-decision.js";
 import type {
@@ -128,7 +127,6 @@ import type {
 import type { NotificationRecord } from "../../../ports/notification-repository-port.js";
 import {
   buildClarificationClassifierText,
-  buildPendingDocumentPlacementInterruptionClassifierText,
   commandRailsHelpText,
   documentFromLastOperation,
   documentPlacementDecisionPolicy,
@@ -148,12 +146,9 @@ import {
   parseFamilyFactArchiveDecision,
   parseFileUploadDestination,
   parseNotificationId,
-  parsePlacementDecision,
   parseSkipDocumentMetadata,
   parseUploadFolderChoice,
   pendingActorDeniedReply,
-  placementDecisionOptions,
-  placementDecisionPrompt,
   planningDateFromIntent,
   requiredAccessActionForIntent,
   resolveFileUploadDestinationForModelIntent,
@@ -168,6 +163,7 @@ import { handlePendingFileDuplicateDecision } from "./pending-handlers/file-dupl
 import { savePlacementSuggestion } from "./services/save-placement-suggestion.js";
 import { AttachmentStorageService } from "./services/attachment-storage.js";
 import { handlePendingFileDestinationDecision } from "./pending-handlers/file-destination-handler.js";
+import { handlePendingDocumentPlacementDecision } from "./pending-handlers/document-placement-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1658,115 +1654,29 @@ export class DispatchAcceptedCommandUseCase {
     return reply;
   }
 
-  private async dispatchPendingDocumentPlacementDecision(
+  private dispatchPendingDocumentPlacementDecision(
     context: AcceptedMessageContext,
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply> {
-    const deniedReply = pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    const decision = await resolvePendingDecision<PlacementDecision>({
-      policy: documentPlacementDecisionPolicy,
-      prompt: placementDecisionPrompt(pending),
-      userReply: context.text,
-      options: placementDecisionOptions,
-      parseDeterministicChoice: parsePlacementDecision,
+    return handlePendingDocumentPlacementDecision(context, pending, {
       classifier: this.dependencies.pendingChoiceClassifier as
         | PendingChoiceClassifier<PlacementDecision>
-        | undefined
-    });
-
-    if (!decision) {
-      const interrupted = await this.dispatchSafePendingDocumentPlacementInterruption(
-        context,
-        pending
-      );
-
-      if (interrupted) {
-        return interrupted;
-      }
-
-      return {
-        chatId: context.chat.id,
-        text: placementDecisionPrompt(pending)
-      };
-    }
-
-    if (decision === "skip") {
-      await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
-        context.chat.id
-      );
-      await this.recordPendingRoutingEvent({
-        pendingKind: "document_placement",
-        policy: documentPlacementDecisionPolicy,
-        choiceResult: decision,
-        pendingCleared: true
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: `Ок, оставляю ${pending.document.name} на текущем месте.`
-      };
-    }
-
-    if (!pending.targetFolderId || !this.dependencies.documentPlacementMover) {
-      await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
-        context.chat.id
-      );
-      await this.recordPendingRoutingEvent({
-        pendingKind: "document_placement",
-        policy: documentPlacementDecisionPolicy,
-        choiceResult: decision,
-        pendingCleared: true
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: [
-          `Не двигаю ${pending.document.name}: для папки ${pending.targetFolderPath} пока не настроен Drive folder id.`,
-          "Файл остался на текущем месте."
-        ].join("\n")
-      };
-    }
-
-    await this.dependencies.documentPlacementMover.execute({
-      externalId: pending.document.externalId,
-      targetFolderId: pending.targetFolderId
-    });
-    await this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
-      context.chat.id
-    );
-    await this.recordPendingRoutingEvent({
-      pendingKind: "document_placement",
-      policy: documentPlacementDecisionPolicy,
-      choiceResult: decision,
-      pendingCleared: true
-    });
-
-    return {
-      chatId: context.chat.id,
-      text: `Готово: переместил ${pending.document.name} в ${pending.targetFolderPath}.`
-    };
-  }
-
-  private async dispatchSafePendingDocumentPlacementInterruption(
-    context: AcceptedMessageContext,
-    pending: PendingDocumentPlacementDecision
-  ): Promise<OutboundReply | undefined> {
-    return this.dispatchSafePendingInterruption({
-      pendingKind: "document_placement",
-      context,
-      policy: documentPlacementDecisionPolicy,
-      classifierText: buildPendingDocumentPlacementInterruptionClassifierText(
-        pending,
-        context.text
-      ),
-      clearPending: () =>
+        | undefined,
+      mover: this.dependencies.documentPlacementMover,
+      runInterruption: (interruptionContext, classifierText, clearPending) =>
+        this.dispatchSafePendingInterruption({
+          pendingKind: "document_placement",
+          context: interruptionContext,
+          policy: documentPlacementDecisionPolicy,
+          classifierText,
+          clearPending
+        }),
+      clearPending: (chatId) =>
         this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(
-          context.chat.id
-        )
+          chatId
+        ),
+      recordRoutingEvent: (attributes) =>
+        this.recordPendingRoutingEvent(attributes)
     });
   }
 
