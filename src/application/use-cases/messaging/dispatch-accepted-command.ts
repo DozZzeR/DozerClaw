@@ -2,7 +2,6 @@ import type { MessageAttachment } from "../../../core/domain/messaging/message.j
 import type { AccessAction } from "../../../core/domain/identity/access-policy.js";
 import { evaluateAccess } from "../../../core/domain/identity/access-policy.js";
 import type {
-  DocumentRecord,
   DocumentType
 } from "../../../core/domain/documents/document-record.js";
 import type {
@@ -18,7 +17,6 @@ import type {
   ManageDocumentRecordResult
 } from "../documents/manage-document-record.js";
 import type {
-  PreparedDocumentAttachment,
   StoreMessageDocumentAttachmentResult,
   StoreMessageDocumentAttachmentsInput
 } from "../documents/store-message-document-attachments.js";

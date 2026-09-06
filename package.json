@@ -21,16 +21,25 @@
     "dev:google-drive-smoke": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-google-drive-smoke.ts",
     "dev:subject-alias": "node --env-file-if-exists=.env --import tsx src/entrypoints/cli/dev-subject-alias.ts",
     "start": "node --env-file-if-exists=.env dist/main.js",
-    "dev:telegram": "node --env-file-if-exists=.env --import tsx src/main.ts"
+    "dev:telegram": "node --env-file-if-exists=.env --import tsx src/main.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.10",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^9.1.2",
+    "prettier": "^3.9.6",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^3.2.4"
   },
   "dependencies": {
