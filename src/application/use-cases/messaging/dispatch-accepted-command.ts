@@ -129,13 +129,11 @@ import type { NotificationRecord } from "../../../ports/notification-repository-
 import {
   buildClarificationClassifierText,
   buildPendingDocumentPlacementInterruptionClassifierText,
-  buildPendingFileDestinationInterruptionClassifierText,
   commandRailsHelpText,
   documentFromLastOperation,
   documentPlacementDecisionPolicy,
   domainClarificationQuestion,
   fileDestinationDecisionPolicy,
-  fileDestinationPrompt,
   formatDocumentSearchDescriptionResult,
   formatFamilyFactConfirmation,
   formatPlacementSuggestionLines,
@@ -169,6 +167,7 @@ import { handlePendingFamilyFactDecision } from "./pending-handlers/family-fact-
 import { handlePendingFileDuplicateDecision } from "./pending-handlers/file-duplicate-decision-handler.js";
 import { savePlacementSuggestion } from "./services/save-placement-suggestion.js";
 import { AttachmentStorageService } from "./services/attachment-storage.js";
+import { handlePendingFileDestinationDecision } from "./pending-handlers/file-destination-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1390,73 +1389,29 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async dispatchPendingFileDestinationDecision(
+  private dispatchPendingFileDestinationDecision(
     context: AcceptedMessageContext,
     pending: PendingFileDestinationDecision
   ): Promise<OutboundReply> {
-    const deniedReply = pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    const destination = parseFileUploadDestination(context.text);
-
-    if (!destination) {
-      const interrupted = await this.dispatchSafePendingFileDestinationInterruption(
-        context,
-        pending
-      );
-
-      if (interrupted) {
-        return interrupted;
-      }
-
-      return {
-        chatId: context.chat.id,
-        text: fileDestinationPrompt(pending.attachments)
-      };
-    }
-
-    const reply = await this.storeFamilyMessageAttachments(
-      {
-        ...context,
-        provider: pending.provider,
-        receivedAt: pending.receivedAt,
-        attachments: pending.attachments
-      },
-      undefined,
-      destination
-    );
-
-    await this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
-      context.chat.id
-    );
-    await this.recordPendingRoutingEvent({
-      pendingKind: "file_destination",
-      policy: fileDestinationDecisionPolicy,
-      choiceResult: destination,
-      pendingCleared: true
-    });
-
-    return reply;
-  }
-
-  private async dispatchSafePendingFileDestinationInterruption(
-    context: AcceptedMessageContext,
-    pending: PendingFileDestinationDecision
-  ): Promise<OutboundReply | undefined> {
-    return this.dispatchSafePendingInterruption({
-      pendingKind: "file_destination",
-      context,
-      policy: fileDestinationDecisionPolicy,
-      classifierText: buildPendingFileDestinationInterruptionClassifierText(
-        pending,
-        context.text
-      ),
-      clearPending: () =>
-        this.dependencies.pendingFileDestinationDecisions?.clearByChatId(
-          context.chat.id
-        )
+    return handlePendingFileDestinationDecision(context, pending, {
+      storeAttachments: (attachmentContext, destination) =>
+        this.attachmentStorage().storeMessageAttachments(
+          attachmentContext,
+          undefined,
+          destination
+        ),
+      runInterruption: (interruptionContext, classifierText, clearPending) =>
+        this.dispatchSafePendingInterruption({
+          pendingKind: "file_destination",
+          context: interruptionContext,
+          policy: fileDestinationDecisionPolicy,
+          classifierText,
+          clearPending
+        }),
+      clearPending: (chatId) =>
+        this.dependencies.pendingFileDestinationDecisions?.clearByChatId(chatId),
+      recordRoutingEvent: (attributes) =>
+        this.recordPendingRoutingEvent(attributes)
     });
   }
 
