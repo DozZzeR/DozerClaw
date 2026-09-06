@@ -131,7 +131,6 @@ import {
   buildClarificationClassifierText,
   buildPendingDocumentPlacementInterruptionClassifierText,
   buildPendingFileDestinationInterruptionClassifierText,
-  canonicalDocumentFolderPath,
   canUseLocalFileStorage,
   commandRailsHelpText,
   documentFromLastOperation,
@@ -175,6 +174,7 @@ import {
 import { handlePendingFamilyFactArchiveDecision } from "./pending-handlers/family-fact-archive-handler.js";
 import { handlePendingFamilyFactDecision } from "./pending-handlers/family-fact-decision-handler.js";
 import { handlePendingFileDuplicateDecision } from "./pending-handlers/file-duplicate-decision-handler.js";
+import { savePlacementSuggestion } from "./services/save-placement-suggestion.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -2747,32 +2747,15 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async savePendingDocumentPlacementSuggestion(
+  private savePendingDocumentPlacementSuggestion(
     context: AcceptedMessageContext,
     documents: readonly PendingDocumentPlacementDecision["document"][]
   ): Promise<boolean> {
-    const [document] = documents;
-
-    if (!document || !this.dependencies.pendingDocumentPlacementDecisions) {
-      return false;
-    }
-
-    const targetFolderPath = canonicalDocumentFolderPath(document);
-    const targetFolderId =
-      this.dependencies.documentFolderResolver?.findFolderIdByPath(
-        targetFolderPath
-      );
-    const now = this.dependencies.now?.() ?? new Date();
-    await this.dependencies.pendingDocumentPlacementDecisions.save({
-      chatId: context.chat.id,
-      actorId: context.actor.id,
-      document,
-      targetFolderPath,
-      ...(targetFolderId ? { targetFolderId } : {}),
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
+    return savePlacementSuggestion(context, documents, {
+      store: this.dependencies.pendingDocumentPlacementDecisions,
+      folderResolver: this.dependencies.documentFolderResolver,
+      now: () => this.dependencies.now?.() ?? new Date()
     });
-    return true;
   }
 
   private dispatchPendingFamilyFactDecision(
