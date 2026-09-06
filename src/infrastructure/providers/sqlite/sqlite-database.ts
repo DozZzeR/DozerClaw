@@ -106,6 +106,40 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingDocumentPlacementDecisionsTable(database);
   ensureNotificationsTables(database);
   ensureProcessedMessageReceiptsTable(database);
+  ensureIndexes(database);
+}
+
+function ensureIndexes(database: SqliteDatabase): void {
+  // Secondary indexes for the hot read patterns exercised by the repositories.
+  // All are additive and do not change query results.
+  database.exec(`
+    create index if not exists idx_family_facts_status_created_at
+      on family_facts (status, created_at desc);
+
+    create index if not exists idx_family_journal_status_occurred_at
+      on family_journal_entries (status, occurred_at desc);
+
+    create index if not exists idx_shopping_items_status_created_at
+      on shopping_items (status, created_at desc);
+
+    create index if not exists idx_documents_status_updated_at
+      on documents (status, updated_at desc);
+
+    create index if not exists idx_documents_subject_id
+      on documents (subject_id);
+
+    create index if not exists idx_documents_document_type
+      on documents (document_type);
+
+    create index if not exists idx_file_inbox_records_name_created_at
+      on file_inbox_records (original_file_name, created_at desc);
+
+    create index if not exists idx_notification_deliveries_actor_id
+      on notification_deliveries (actor_id);
+
+    create index if not exists idx_operational_events_type_id
+      on operational_events (type, id desc);
+  `);
 }
 
 function ensureProcessedMessageReceiptsTable(database: SqliteDatabase): void {
