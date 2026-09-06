@@ -170,6 +170,7 @@ import {
   handleRecordFamilyJournalEntry
 } from "./intent-handlers/journal-intents.js";
 import { handleManageSubjectAliases } from "./intent-handlers/subject-alias-intents.js";
+import { handleUpdateLastOperation } from "./intent-handlers/last-operation-intents.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1552,194 +1553,18 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async updateLastOperation(
+  private updateLastOperation(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "update_last_operation" }>,
     lastOperation?: LastOperationContext
   ): Promise<OutboundReply> {
-    if (intent.operationAction === "append_checklist") {
-      return this.addChecklistItemsToLastPlanningTask(
-        context,
-        intent,
-        lastOperation
-      );
-    }
-
-    if (!lastOperation) {
-      return {
-        chatId: context.chat.id,
-        text: "What should I update?"
-      };
-    }
-
-    if (lastOperation.entityKind === "family_fact") {
-      if (!intent.summary) {
-        return {
-          chatId: context.chat.id,
-          text: "What should I update?"
-        };
-      }
-
-      if (!this.dependencies.familyFactUpdater) {
-        return {
-          chatId: context.chat.id,
-          text: "Family fact updates are not connected yet."
-        };
-      }
-
-      const result = await this.dependencies.familyFactUpdater.execute({
-        factId: lastOperation.entityId,
-        body: intent.summary
-      });
-
-      if (result.status !== "updated") {
-        return {
-          chatId: context.chat.id,
-          text: "I could not find the latest family fact to update."
-        };
-      }
-
-      await this.saveLastOperationContext(context, {
-        operationKind: "family_fact_recorded",
-        entityKind: "family_fact",
-        entityId: result.fact.id,
-        entityLabel: result.fact.body
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: `Updated family fact: ${result.fact.body}`
-      };
-    }
-
-    if (lastOperation.entityKind === "family_journal_entry") {
-      if (!intent.summary) {
-        return {
-          chatId: context.chat.id,
-          text: "What should I update?"
-        };
-      }
-
-      if (!this.dependencies.familyJournalUpdater) {
-        return {
-          chatId: context.chat.id,
-          text: "Family journal updates are not connected yet."
-        };
-      }
-
-      const result = await this.dependencies.familyJournalUpdater.execute({
-        entryId: lastOperation.entityId,
-        body: intent.summary
-      });
-
-      if (result.status !== "updated") {
-        return {
-          chatId: context.chat.id,
-          text: "I could not find the latest family journal entry to update."
-        };
-      }
-
-      await this.saveLastOperationContext(context, {
-        operationKind: "family_journal_entry_recorded",
-        entityKind: "family_journal_entry",
-        entityId: result.entry.id,
-        entityLabel: result.entry.body
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: `Updated family journal entry: ${result.entry.body}`
-      };
-    }
-
-    if (lastOperation.entityKind === "planning_task") {
-      if (!intent.summary) {
-        return {
-          chatId: context.chat.id,
-          text: "What should I update?"
-        };
-      }
-
-      if (!this.dependencies.planningTaskManager) {
-        return {
-          chatId: context.chat.id,
-          text: "Planning writes are not connected yet."
-        };
-      }
-
-      const result = await this.dependencies.planningTaskManager.execute({
-        action: "update",
-        taskId: lastOperation.entityId,
-        title: intent.summary
-      });
-
-      if (result.status === "updated") {
-        await this.saveLastOperationContext(context, {
-          operationKind: "planning_task_created",
-          entityKind: "planning_task",
-          entityId: result.item.id,
-          entityLabel: result.item.title
-        });
-      }
-
-      return {
-        chatId: context.chat.id,
-        text: result.text
-      };
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: "I cannot update that latest operation yet."
-    };
-  }
-
-  private async addChecklistItemsToLastPlanningTask(
-    context: AcceptedMessageContext,
-    intent: Extract<InboundIntent, { readonly kind: "update_last_operation" }>,
-    lastOperation?: LastOperationContext
-  ): Promise<OutboundReply> {
-    if (!lastOperation || lastOperation.entityKind !== "planning_task") {
-      return {
-        chatId: context.chat.id,
-        text: "I can add checklist items only to the latest planning task."
-      };
-    }
-
-    if (!intent.checklistItems?.length) {
-      return {
-        chatId: context.chat.id,
-        text: "Which checklist items should I add?"
-      };
-    }
-
-    if (!this.dependencies.planningTaskManager) {
-      return {
-        chatId: context.chat.id,
-        text: "Planning writes are not connected yet."
-      };
-    }
-
-    const result = await this.dependencies.planningTaskManager.execute({
-      action: "add_checklist_items",
-      taskId: lastOperation.entityId,
-      ...(lastOperation.entityLabel ? { taskTitle: lastOperation.entityLabel } : {}),
-      checklistItems: intent.checklistItems
+    return handleUpdateLastOperation(context, intent, lastOperation, {
+      familyFactUpdater: this.dependencies.familyFactUpdater,
+      familyJournalUpdater: this.dependencies.familyJournalUpdater,
+      planningTaskManager: this.dependencies.planningTaskManager,
+      saveLastOperation: (operationContext, input) =>
+        this.saveLastOperationContext(operationContext, input)
     });
-
-    if (result.status === "checklist_items_added") {
-      await this.saveLastOperationContext(context, {
-        operationKind: "planning_task_created",
-        entityKind: "planning_task",
-        entityId: result.item.id,
-        entityLabel: result.item.title
-      });
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
   }
 
   private dispatchPendingDocumentDecision(
