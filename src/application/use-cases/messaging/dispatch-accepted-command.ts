@@ -140,8 +140,6 @@ import {
   duplicateAttachmentReply,
   duplicateDecisionOptions,
   duplicateDecisionPrompt,
-  familyFactDecisionOptions,
-  familyFactDecisionPrompt,
   fileDestinationDecisionPolicy,
   fileDestinationPrompt,
   formatDocumentSearchDescriptionResult,
@@ -158,7 +156,6 @@ import {
   parseDocumentMetadata,
   parseDuplicateDecision,
   parseFamilyFactArchiveDecision,
-  parseFamilyFactDecision,
   parseFileUploadDestination,
   parseModelDocumentMetadata,
   parseNotificationId,
@@ -179,6 +176,7 @@ import {
   toSubjectAliasAction
 } from "./dispatch-command-helpers.js";
 import { handlePendingFamilyFactArchiveDecision } from "./pending-handlers/family-fact-archive-handler.js";
+import { handlePendingFamilyFactDecision } from "./pending-handlers/family-fact-decision-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -2858,79 +2856,18 @@ export class DispatchAcceptedCommandUseCase {
     return true;
   }
 
-  private async dispatchPendingFamilyFactDecision(
+  private dispatchPendingFamilyFactDecision(
     context: AcceptedMessageContext,
     pending: PendingFamilyFactDecision
   ): Promise<OutboundReply> {
-    const deniedReply = pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    const deterministicDecision = parseFamilyFactDecision(context.text);
-    const modelDecision = deterministicDecision
-      ? undefined
-      : await resolvePendingDecision<FamilyFactDecision>({
-          policy: "choice_only",
-          prompt: familyFactDecisionPrompt(pending),
-          userReply: context.text,
-          options: familyFactDecisionOptions,
-          parseDeterministicChoice: (text) =>
-            parseFamilyFactDecision(text)?.decision,
-          classifier: this.dependencies.pendingChoiceClassifier as
-            | PendingChoiceClassifier<FamilyFactDecision>
-            | undefined
-        });
-    const parsedDecision =
-      deterministicDecision ?? (modelDecision ? { decision: modelDecision } : undefined);
-
-    if (!parsedDecision) {
-      return {
-        chatId: context.chat.id,
-        text: [
-          "Я жду решение по семейному факту.",
-          "Можно написать: \"обнови существующий\", \"создай новый\" или \"отмена\"."
-        ].join("\n")
-      };
-    }
-
-    if (!this.dependencies.factDecisionResolver) {
-      return {
-        chatId: context.chat.id,
-        text: "Memory decision resolver is not configured."
-      };
-    }
-
-    const result = await this.dependencies.factDecisionResolver.execute({
-      decision: parsedDecision.decision,
-      ...(parsedDecision.candidateIndex !== undefined
-        ? { candidateIndex: parsedDecision.candidateIndex }
-        : {}),
-      pending
+    return handlePendingFamilyFactDecision(context, pending, {
+      resolver: this.dependencies.factDecisionResolver,
+      classifier: this.dependencies.pendingChoiceClassifier as
+        | PendingChoiceClassifier<FamilyFactDecision>
+        | undefined,
+      clearPending: (chatId) =>
+        this.dependencies.pendingFamilyFactDecisions?.clearByChatId(chatId)
     });
-
-    await this.dependencies.pendingFamilyFactDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    if (result.status === "cancelled") {
-      return {
-        chatId: context.chat.id,
-        text: "Ок, не меняю семейную память."
-      };
-    }
-
-    if (result.status === "updated") {
-      return {
-        chatId: context.chat.id,
-        text: `Готово: обновил семейный факт: ${result.fact.body}`
-      };
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: `Готово: сохранил новый семейный факт: ${result.fact.body}`
-    };
   }
 
   private dispatchPendingFamilyFactArchiveDecision(
