@@ -132,7 +132,6 @@ import {
   documentPlacementDecisionPolicy,
   domainClarificationQuestion,
   fileDestinationDecisionPolicy,
-  formatFamilyFactConfirmation,
   formatRegisteredDocumentReply,
   mergeAttachments,
   parseActorId,
@@ -156,6 +155,11 @@ import { handlePendingFileDestinationDecision } from "./pending-handlers/file-de
 import { handlePendingDocumentPlacementDecision } from "./pending-handlers/document-placement-handler.js";
 import { handlePendingFileDuplicateDestination } from "./pending-handlers/file-duplicate-destination-handler.js";
 import { handlePendingDocumentDecision } from "./pending-handlers/document-decision-handler.js";
+import {
+  handleArchiveFamilyFact,
+  handleRecallFamilyFacts,
+  handleRecordFamilyFact
+} from "./intent-handlers/family-fact-intents.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -763,54 +767,17 @@ export class DispatchAcceptedCommandUseCase {
     return undefined;
   }
 
-  private async recordFamilyFact(
+  private recordFamilyFact(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "record_fact" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.familyFactRecorder) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.familyFactRecorder.execute({
-      summary: intent.summary,
-      ...(intent.category ? { category: intent.category } : {}),
-      ...(intent.subjectId ? { subjectId: intent.subjectId } : {}),
-      sourceActorId: context.actor.id,
-      sourceChatId: context.chat.id,
-      sourceMessageText: context.text
+    return handleRecordFamilyFact(context, intent, {
+      recorder: this.dependencies.familyFactRecorder,
+      pendingStore: this.dependencies.pendingFamilyFactDecisions,
+      saveLastOperation: (operationContext, input) =>
+        this.saveLastOperationContext(operationContext, input),
+      now: () => this.dependencies.now?.() ?? new Date()
     });
-
-    if (result.status === "needs_confirmation") {
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingFamilyFactDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        newFact: result.newFact,
-        candidates: result.candidates,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: formatFamilyFactConfirmation(result)
-      };
-    }
-
-    await this.saveLastOperationContext(context, {
-      operationKind: "family_fact_recorded",
-      entityKind: "family_fact",
-      entityId: result.fact.id,
-      entityLabel: result.fact.body
-    });
-
-    return {
-      chatId: context.chat.id,
-      text: `Saved family fact: ${result.fact.body}`
-    };
   }
 
   private dispatchShoppingIntent(
@@ -847,25 +814,13 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async recallFamilyFacts(
+  private recallFamilyFacts(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "answer_from_memory" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.familyFactRecall) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.familyFactRecall.execute({
-      query: intent.query
+    return handleRecallFamilyFacts(context, intent, {
+      recall: this.dependencies.familyFactRecall
     });
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
   }
 
   private async recordFamilyJournalEntry(
@@ -1032,52 +987,15 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async archiveFamilyFact(
+  private archiveFamilyFact(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "archive_fact" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.familyFactArchiver) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.familyFactArchiver.execute({
-      query: intent.query
+    return handleArchiveFamilyFact(context, intent, {
+      archiver: this.dependencies.familyFactArchiver,
+      pendingStore: this.dependencies.pendingFamilyFactArchiveDecisions,
+      now: () => this.dependencies.now?.() ?? new Date()
     });
-
-    if (result.status === "archived") {
-      return {
-        chatId: context.chat.id,
-        text: `Archived family fact: ${result.fact.body}`
-      };
-    }
-
-    if (result.status === "ambiguous") {
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingFamilyFactArchiveDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        candidates: result.candidates,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: [
-          "I found multiple active family facts that could match.",
-          ...result.candidates.map((fact, index) => `${index + 1}. ${fact.body}`),
-          "Reply with the number to archive, or cancel."
-        ].join("\n")
-      };
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: "I could not find an active family fact matching that request."
-    };
   }
 
   private async listPendingAccessRequests(chatId: string): Promise<OutboundReply> {
