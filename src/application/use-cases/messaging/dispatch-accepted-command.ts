@@ -132,10 +132,7 @@ import {
   domainClarificationQuestion,
   fileDestinationDecisionPolicy,
   mergeAttachments,
-  parseActorId,
-  parseAdminSecret,
   parseFileUploadDestination,
-  parseNotificationId,
   pendingActorDeniedReply,
   requiredAccessActionForIntent,
   resolveFileUploadDestinationForModelIntent,
@@ -171,6 +168,15 @@ import {
 } from "./intent-handlers/journal-intents.js";
 import { handleManageSubjectAliases } from "./intent-handlers/subject-alias-intents.js";
 import { handleUpdateLastOperation } from "./intent-handlers/last-operation-intents.js";
+import {
+  handleActivateAdminSession,
+  handleListPendingAccessRequests,
+  handleReviewPendingAccessRequest
+} from "./command-handlers/access-command-handlers.js";
+import {
+  handleListUnreadNotifications,
+  handleMarkNotificationRead
+} from "./command-handlers/notification-command-handlers.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -907,178 +913,43 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async listPendingAccessRequests(chatId: string): Promise<OutboundReply> {
-    if (!this.dependencies.pendingAccessRequests) {
-      return {
-        chatId,
-        text: "Pending access review is not configured."
-      };
-    }
-
-    const requests = await this.dependencies.pendingAccessRequests.list();
-
-    if (requests.length === 0) {
-      return {
-        chatId,
-        text: "No pending access requests."
-      };
-    }
-
-    return {
-      chatId,
-      text: [
-        "Pending access requests:",
-        ...requests.flatMap((request) => [
-          `- ${request.actor.id}: ${request.actor.displayName} (${request.identity.provider} user ${request.identity.providerUserId}, chat ${request.chat.providerChatId}, ${request.chat.kind})`,
-          `Approve: /approve ${request.actor.id}`,
-          `Reject: /reject ${request.actor.id}`
-        ])
-      ].join("\n")
-    };
+  private listPendingAccessRequests(chatId: string): Promise<OutboundReply> {
+    return handleListPendingAccessRequests(chatId, {
+      reviewer: this.dependencies.pendingAccessRequests
+    });
   }
 
-  private async reviewPendingAccessRequest(
+  private reviewPendingAccessRequest(
     input: DispatchAcceptedCommandInput
   ): Promise<OutboundReply> {
-    if (!this.dependencies.pendingAccessRequests) {
-      return {
-        chatId: input.context.chat.id,
-        text: "Pending access review is not configured."
-      };
-    }
-
-    const actorId = parseActorId(input.route.normalizedText);
-
-    if (!actorId) {
-      return {
-        chatId: input.context.chat.id,
-        text: `Usage: /${input.route.kind === "approve_access_request" ? "approve" : "reject"} <actorId>.`
-      };
-    }
-
-    const decision: PendingIdentityDecision =
-      input.route.kind === "approve_access_request" ? "approve" : "reject";
-    const result = await this.dependencies.pendingAccessRequests.review({
-      actorId,
-      decision
+    return handleReviewPendingAccessRequest(input, {
+      reviewer: this.dependencies.pendingAccessRequests
     });
-
-    if (!result.reviewed) {
-      return {
-        chatId: input.context.chat.id,
-        text: `No pending access request found for ${actorId}.`
-      };
-    }
-
-    return {
-      chatId: input.context.chat.id,
-      text:
-        decision === "approve"
-          ? `Approved access request for ${actorId}.`
-          : `Rejected access request for ${actorId}.`
-    };
   }
 
-  private async listUnreadNotifications(
+  private listUnreadNotifications(
     context: AcceptedMessageContext
   ): Promise<OutboundReply> {
-    if (!this.dependencies.notifications) {
-      return {
-        chatId: context.chat.id,
-        text: "Notifications are not configured."
-      };
-    }
-
-    const result = await this.dependencies.notifications.listUnread({
-      actorId: context.actor.id
+    return handleListUnreadNotifications(context, {
+      notifications: this.dependencies.notifications
     });
-
-    if (result.notifications.length === 0) {
-      return {
-        chatId: context.chat.id,
-        text: "No unread notifications."
-      };
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: [
-        "Unread notifications:",
-        ...result.notifications.flatMap((notification, index) => [
-          `${index + 1}. ${notification.title}`,
-          ...notification.body.split("\n").map((line) => `   ${line}`),
-          `   id: ${notification.id}`
-        ])
-      ].join("\n")
-    };
   }
 
-  private async markNotificationRead(
+  private markNotificationRead(
     input: DispatchAcceptedCommandInput
   ): Promise<OutboundReply> {
-    if (!this.dependencies.notifications) {
-      return {
-        chatId: input.context.chat.id,
-        text: "Notifications are not configured."
-      };
-    }
-
-    const notificationId = parseNotificationId(input.route.normalizedText);
-
-    if (!notificationId) {
-      return {
-        chatId: input.context.chat.id,
-        text: "Usage: /read <notificationId>."
-      };
-    }
-
-    await this.dependencies.notifications.markRead({
-      notificationId,
-      actorId: input.context.actor.id
+    return handleMarkNotificationRead(input, {
+      notifications: this.dependencies.notifications
     });
-
-    return {
-      chatId: input.context.chat.id,
-      text: `Marked notification ${notificationId} as read.`
-    };
   }
 
-  private async activateAdminSession(
+  private activateAdminSession(
     input: DispatchAcceptedCommandInput
   ): Promise<OutboundReply> {
-    if (!this.dependencies.adminSessionActivator) {
-      return {
-        chatId: input.context.chat.id,
-        text: "Admin mode is not configured."
-      };
-    }
-
-    const secret = parseAdminSecret(input.route.normalizedText);
-    if (!secret) {
-      return {
-        chatId: input.context.chat.id,
-        text: "Usage: /admin <secret>."
-      };
-    }
-
-    const result = await this.dependencies.adminSessionActivator.execute({
-      actor: input.context.actor,
-      chat: input.context.chat,
-      secret,
-      now: this.dependencies.now?.() ?? input.context.receivedAt
+    return handleActivateAdminSession(input, {
+      activator: this.dependencies.adminSessionActivator,
+      now: () => this.dependencies.now?.() ?? input.context.receivedAt
     });
-
-    if (!result.activated) {
-      return {
-        chatId: input.context.chat.id,
-        text: `Admin mode not activated: ${result.reason}.`
-      };
-    }
-
-    return {
-      chatId: input.context.chat.id,
-      text: `Admin mode activated until ${result.session.expiresAt.toISOString()}.`
-    };
   }
 
   private storeFamilyMessageAttachments(
