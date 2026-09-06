@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
@@ -15,6 +15,12 @@ export function createSqliteDatabase(
   ensureDatabaseDirectory(options.path);
 
   const database = new Database(options.path);
+
+  if (options.path !== ":memory:") {
+    // The database holds sensitive family data; keep it owner-only.
+    chmodSync(options.path, 0o600);
+  }
+
   bootstrapSqliteDatabase(database);
 
   return database;
@@ -31,7 +37,7 @@ function ensureDatabaseDirectory(databasePath: string): void {
     return;
   }
 
-  mkdirSync(directory, { recursive: true });
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
 }
 
 function bootstrapSqliteDatabase(database: SqliteDatabase): void {

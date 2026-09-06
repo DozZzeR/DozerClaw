@@ -27,8 +27,9 @@ export class LocalFileStorage
     const fileName = sanitizeFileName(input.fileName);
     const path = join(directory, fileName);
 
-    await mkdir(directory, { recursive: true });
-    await writeFile(path, input.bytes);
+    // Restrict permissions: family file contents are sensitive at rest.
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(path, input.bytes, { mode: 0o600 });
 
     return {
       id,
