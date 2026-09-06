@@ -128,11 +128,9 @@ import type { NotificationRecord } from "../../../ports/notification-repository-
 import {
   buildClarificationClassifierText,
   commandRailsHelpText,
-  documentFromLastOperation,
   documentPlacementDecisionPolicy,
   domainClarificationQuestion,
   fileDestinationDecisionPolicy,
-  formatRegisteredDocumentReply,
   mergeAttachments,
   parseActorId,
   parseAdminSecret,
@@ -160,6 +158,11 @@ import {
   handleRecallFamilyFacts,
   handleRecordFamilyFact
 } from "./intent-handlers/family-fact-intents.js";
+import {
+  handleFindDocuments,
+  handleManageDocument,
+  handleRegisterDocument
+} from "./intent-handlers/document-intents.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1609,61 +1612,27 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async registerDocument(
+  private registerDocument(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "register_document" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.documentRegistrar) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.documentRegistrar.execute({
-      externalIdOrUrl: intent.externalIdOrUrl,
-      ...(intent.documentType ? { documentType: intent.documentType } : {}),
-      ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
+    return handleRegisterDocument(context, intent, {
+      registrar: this.dependencies.documentRegistrar,
+      saveLastOperation: (operationContext, input) =>
+        this.saveLastOperationContext(operationContext, input)
     });
-    await this.saveLastOperationContext(context, {
-      operationKind: "document_registered",
-      entityKind: "document",
-      entityId: result.document.id,
-      entityLabel: result.document.name,
-      document: result.document
-    });
-
-    return {
-      chatId: context.chat.id,
-      text: formatRegisteredDocumentReply(result.document)
-    };
   }
 
-  private async findDocuments(
+  private findDocuments(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "find_document" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.documentLookup) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.documentLookup.execute({
-      ...(intent.query ? { query: intent.query } : {}),
-      ...(intent.documentType ? { documentType: intent.documentType } : {}),
-      ...(intent.subjectId ? { subjectId: intent.subjectId } : {}),
-      ...(intent.requests ? { requests: intent.requests } : {})
+    return handleFindDocuments(context, intent, {
+      lookup: this.dependencies.documentLookup
     });
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
   }
 
-  private async manageDocument(
+  private manageDocument(
     context: AcceptedMessageContext,
     intent: Extract<
       InboundIntent,
@@ -1671,68 +1640,11 @@ export class DispatchAcceptedCommandUseCase {
     >,
     lastOperation?: LastOperationContext
   ): Promise<OutboundReply> {
-    if (!this.dependencies.documentManager) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const lastDocument =
-      intent.kind === "update_document" && !intent.query
-        ? documentFromLastOperation(lastOperation)
-        : undefined;
-    const query = intent.query ?? lastDocument?.name;
-
-    if (!query) {
-      return {
-        chatId: context.chat.id,
-        text: "Which document should I update?"
-      };
-    }
-
-    const result = await this.dependencies.documentManager.execute(
-      intent.kind === "archive_document"
-        ? {
-            action: "archive",
-            query
-          }
-        : {
-            action: "update_metadata",
-            query,
-            ...(lastDocument ? { document: lastDocument } : {}),
-            ...(intent.documentType ? { documentType: intent.documentType } : {}),
-            ...(intent.subjectId ? { subjectId: intent.subjectId } : {})
-          }
-    );
-
-    if (result.pending) {
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingDocumentDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        action:
-          result.pending.action.action === "archive"
-            ? { kind: "archive" }
-            : {
-                kind: "update_metadata",
-                ...(result.pending.action.documentType
-                  ? { documentType: result.pending.action.documentType }
-                  : {}),
-                ...(result.pending.action.subjectId
-                  ? { subjectId: result.pending.action.subjectId }
-                  : {})
-              },
-        candidates: result.pending.candidates,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
+    return handleManageDocument(context, intent, lastOperation, {
+      manager: this.dependencies.documentManager,
+      pendingStore: this.dependencies.pendingDocumentDecisions,
+      now: () => this.dependencies.now?.() ?? new Date()
+    });
   }
 
   private async updateLastOperation(
