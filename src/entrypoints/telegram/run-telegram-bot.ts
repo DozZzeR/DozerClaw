@@ -59,15 +59,32 @@ export async function runTelegramBot(
 
 function formatRuntimeError(error: unknown): string {
   if (error instanceof TelegramApiError) {
-    return [
+    const message = [
       `Telegram ${error.method} failed`,
       error.statusCode ? `HTTP ${error.statusCode}` : undefined,
       error.description
     ]
       .filter(Boolean)
-      .join(": ")
-      .concat("\n");
+      .join(": ");
+
+    return `${redactSensitive(message)}\n`;
   }
 
-  return `${error instanceof Error ? error.stack : String(error)}\n`;
+  const detail = error instanceof Error ? error.stack : String(error);
+
+  return `${redactSensitive(detail ?? "")}\n`;
+}
+
+/**
+ * Mask secret-like substrings before writing errors to logs: Telegram bot
+ * tokens, bearer tokens, and token/key query parameters. Addresses DC-LOW-004.
+ */
+export function redactSensitive(text: string): string {
+  return text
+    .replace(/\d{6,12}:[A-Za-z0-9_-]{30,}/g, "[redacted-telegram-token]")
+    .replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(
+      /([?&](?:access_token|refresh_token|token|api_key|apikey|key|secret)=)[^&\s]+/gi,
+      "$1[redacted]"
+    );
 }
