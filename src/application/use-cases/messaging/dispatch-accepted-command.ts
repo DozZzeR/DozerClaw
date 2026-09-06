@@ -127,16 +127,13 @@ import type {
 } from "../planning/manage-planning-task.js";
 import type { NotificationRecord } from "../../../ports/notification-repository-port.js";
 import {
-  attachmentIoErrorMessage,
   buildClarificationClassifierText,
   buildPendingDocumentPlacementInterruptionClassifierText,
   buildPendingFileDestinationInterruptionClassifierText,
-  canUseLocalFileStorage,
   commandRailsHelpText,
   documentFromLastOperation,
   documentPlacementDecisionPolicy,
   domainClarificationQuestion,
-  duplicateAttachmentReply,
   fileDestinationDecisionPolicy,
   fileDestinationPrompt,
   formatDocumentSearchDescriptionResult,
@@ -147,13 +144,11 @@ import {
   formatUploadFolderChoicePrompt,
   isUploadedDocumentMetadataDecision,
   mergeAttachments,
-  mergeDocumentMetadata,
   parseActorId,
   parseAdminSecret,
   parseDocumentMetadata,
   parseFamilyFactArchiveDecision,
   parseFileUploadDestination,
-  parseModelDocumentMetadata,
   parseNotificationId,
   parsePlacementDecision,
   parseSkipDocumentMetadata,
@@ -166,8 +161,6 @@ import {
   resolveFileUploadDestinationForModelIntent,
   scopedClassifierText,
   selectedUploadFolderMetadata,
-  sourceAttachmentForDuplicate,
-  suggestCopyName,
   toClassifierLastOperation,
   toSubjectAliasAction
 } from "./dispatch-command-helpers.js";
@@ -175,6 +168,7 @@ import { handlePendingFamilyFactArchiveDecision } from "./pending-handlers/famil
 import { handlePendingFamilyFactDecision } from "./pending-handlers/family-fact-decision-handler.js";
 import { handlePendingFileDuplicateDecision } from "./pending-handlers/file-duplicate-decision-handler.js";
 import { savePlacementSuggestion } from "./services/save-placement-suggestion.js";
+import { AttachmentStorageService } from "./services/attachment-storage.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1273,138 +1267,16 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async storeFamilyMessageAttachments(
+  private storeFamilyMessageAttachments(
     context: AcceptedMessageContext,
     intent?: Extract<InboundIntent, { readonly kind: "store_file" }>,
-    destination: FileUploadDestination | undefined = parseFileUploadDestination(
-      context.text
-    )
+    destination?: FileUploadDestination
   ): Promise<OutboundReply> {
-    if (context.attachments.length === 0) {
-      return {
-        chatId: context.chat.id,
-        text: "I can store a file after you attach one."
-      };
-    }
-
-    if (!destination) {
-      if (this.dependencies.documentAttachmentStore) {
-        destination = "google_drive";
-      } else if (!this.dependencies.pendingFileDestinationDecisions) {
-        destination = "local_inbox";
-      } else {
-        const now = this.dependencies.now?.() ?? new Date();
-        await this.dependencies.pendingFileDestinationDecisions?.save({
-          chatId: context.chat.id,
-          actorId: context.actor.id,
-          provider: context.provider,
-          receivedAt: context.receivedAt,
-          attachments: context.attachments,
-          createdAt: now,
-          expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-        });
-
-        return {
-          chatId: context.chat.id,
-          text: fileDestinationPrompt(context.attachments)
-        };
-      }
-    }
-
-    if (destination === "google_drive") {
-      return this.storeFamilyMessageDocumentAttachments(
-        context,
-        parseModelDocumentMetadata(intent)
-      );
-    }
-
-    if (!canUseLocalFileStorage(context)) {
-      return {
-        chatId: context.chat.id,
-        text: "Локальное хранилище доступно только админу. Файл не сохранен."
-      };
-    }
-
-    let results:
-      | Awaited<
-          ReturnType<NonNullable<typeof this.dependencies.attachmentStore>["execute"]>
-        >
-      | undefined;
-
-    try {
-      results = await this.dependencies.attachmentStore?.execute({
-        provider: context.provider,
-        receivedAt: context.receivedAt,
-        attachments: context.attachments
-      });
-    } catch (error) {
-      const message = attachmentIoErrorMessage(error);
-      if (message) {
-        return {
-          chatId: context.chat.id,
-          text: message
-        };
-      }
-
-      throw error;
-    }
-
-    if (!results || results.length === 0) {
-      return {
-        chatId: context.chat.id,
-        text: "No downloadable attachments found."
-      };
-    }
-
-    const duplicates = results.filter(
-      (result): result is Extract<StoreInboundFileResult, { status: "duplicate" }> =>
-        result.status === "duplicate"
+    return this.attachmentStorage().storeMessageAttachments(
+      context,
+      intent,
+      destination
     );
-
-    if (duplicates.length > 0) {
-      const first = duplicates[0];
-      if (first) {
-        const now = this.dependencies.now?.() ?? new Date();
-        await this.dependencies.pendingFileDuplicateDecisions?.save({
-          chatId: context.chat.id,
-          actorId: context.actor.id,
-          fileName: first.fileName,
-          suggestedCopyName: suggestCopyName(first.fileName),
-          existingRecordId: first.existingRecord.id,
-          provider: context.provider,
-          receivedAt: context.receivedAt,
-          ...sourceAttachmentForDuplicate(context.attachments, first.fileName),
-          createdAt: now,
-          expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-        });
-      }
-
-      return {
-        chatId: context.chat.id,
-        text: duplicateAttachmentReply(duplicates)
-      };
-    }
-
-    const storedRecords = results.flatMap((result) =>
-      result.status === "stored" ? [result.record] : []
-    );
-    const firstStoredRecord = storedRecords[0];
-
-    if (firstStoredRecord) {
-      await this.saveLastOperationContext(context, {
-        operationKind: "file_stored",
-        entityKind: "file_inbox_record",
-        entityId: firstStoredRecord.id,
-        entityLabel: firstStoredRecord.originalFileName
-      });
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: intent?.summary
-        ? `Saved ${storedRecords.length} attachment(s): ${intent.summary}.`
-        : `Saved ${storedRecords.length} attachment(s).`
-    };
   }
 
   private async saveLastDocumentOperationContext(
@@ -1482,191 +1354,40 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async storeFamilyMessageDocumentAttachments(
+  private storeFamilyMessageDocumentAttachments(
     context: AcceptedMessageContext,
     metadataOverride: {
       readonly documentType?: DocumentType;
       readonly subjectId?: string;
     } = {}
   ): Promise<OutboundReply> {
-    if (!this.dependencies.documentAttachmentStore) {
-      return {
-        chatId: context.chat.id,
-        text: "Google Drive upload is not configured yet. File was not saved."
-      };
-    }
-
-    const metadata = mergeDocumentMetadata(
-      parseDocumentMetadata(context.text),
+    return this.attachmentStorage().storeMessageDocumentAttachments(
+      context,
       metadataOverride
     );
-    let results: Awaited<
-      ReturnType<NonNullable<typeof this.dependencies.documentAttachmentStore>["execute"]>
-    >;
+  }
 
-    try {
-      results = await this.dependencies.documentAttachmentStore.execute({
-        provider: context.provider,
-        receivedAt: context.receivedAt,
-        attachments: context.attachments,
-        userText: context.text,
-        ...metadata
-      });
-    } catch (error) {
-      const message = attachmentIoErrorMessage(error);
-      if (message) {
-        return {
-          chatId: context.chat.id,
-          text: message
-        };
-      }
-
-      throw error;
-    }
-    const folderChoices = results.flatMap((result) =>
-      result.status === "needs_folder_choice" ? [result] : []
-    );
-
-    const choice = folderChoices[0];
-
-    if (choice) {
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingDocumentDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        action: {
-          kind: "choose_upload_folder",
-          provider: context.provider,
-          receivedAt: context.receivedAt.toISOString(),
-          attachment: {
-            fileName: choice.attachment.fileName,
-            ...(choice.attachment.mimeType
-              ? { mimeType: choice.attachment.mimeType }
-              : {}),
-            bytesBase64: Buffer.from(choice.attachment.bytes).toString("base64")
-          },
-          parentPath: choice.parentPath,
-          parentFolderId: choice.parentFolderId,
-          options: choice.options,
-          ...(choice.documentType ? { documentType: choice.documentType } : {}),
-          ...(choice.subjectId ? { subjectId: choice.subjectId } : {})
-        },
-        candidates: [],
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: formatUploadFolderChoicePrompt(choice)
-      };
-    }
-
-    const uploadedDocuments = results.flatMap((result) =>
-      result.status === "uploaded" ? [result.document] : []
-    );
-
-    if (uploadedDocuments.length === 0) {
-      return {
-        chatId: context.chat.id,
-        text: "No downloadable attachments found."
-      };
-    }
-
-    const receiptWarrantyProcessing =
-      this.dependencies.receiptWarrantyUploadProcessor
-        ? await this.dependencies.receiptWarrantyUploadProcessor.execute({
-            documents: uploadedDocuments,
-            ...(metadata.documentType
-              ? { documentType: metadata.documentType }
-              : {}),
-            description: context.text,
-            receivedAt: context.receivedAt,
-            actorId: context.actor.id
-          })
-        : {
-            documents: uploadedDocuments,
-            replyLines: []
-          };
-    const describedDocuments = receiptWarrantyProcessing.documents;
-    const warrantyReminderLines = receiptWarrantyProcessing.replyLines;
-
-    if (
-      !metadata.documentType &&
-      !metadata.subjectId &&
-      this.dependencies.documentSearchDescriptionRecorder
-    ) {
-      await this.saveLastDocumentOperationContext(
-        context,
-        describedDocuments,
-        "document_uploaded"
-      );
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingDocumentDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        action: { kind: "describe_for_search" },
-        candidates: describedDocuments,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: [
-          formatUploadedDocumentsReply(uploadedDocuments),
-          "Как описать этот файл для поиска?",
-          "Можно ответить коротко, например: личная карта Алекса, или skip."
-        ].join("\n")
-      };
-    }
-
-    if (!metadata.documentType && !metadata.subjectId) {
-      await this.saveLastDocumentOperationContext(
-        context,
-        describedDocuments,
-        "document_uploaded"
-      );
-      const now = this.dependencies.now?.() ?? new Date();
-      await this.dependencies.pendingDocumentDecisions?.save({
-        chatId: context.chat.id,
-        actorId: context.actor.id,
-        action: { kind: "update_metadata" },
-        candidates: describedDocuments,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 30 * 60 * 1000)
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: [
-          formatUploadedDocumentsReply(uploadedDocuments),
-          "Какой это документ?",
-          "Можно ответить тип и subject, например: identity max, или skip."
-        ].join("\n")
-      };
-    }
-
-    const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
-      context,
-      describedDocuments
-    );
-    await this.saveLastDocumentOperationContext(
-      context,
-      describedDocuments,
-      "document_uploaded"
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: [
-        formatUploadedDocumentsReply(describedDocuments),
-        ...(placementSuggested && describedDocuments[0]
-          ? formatPlacementSuggestionLines(describedDocuments[0])
-          : []),
-        ...warrantyReminderLines
-      ].join("\n")
-    };
+  private attachmentStorage(): AttachmentStorageService {
+    return new AttachmentStorageService({
+      attachmentStore: this.dependencies.attachmentStore,
+      documentAttachmentStore: this.dependencies.documentAttachmentStore,
+      pendingFileDestinationDecisions:
+        this.dependencies.pendingFileDestinationDecisions,
+      pendingFileDuplicateDecisions:
+        this.dependencies.pendingFileDuplicateDecisions,
+      pendingDocumentDecisions: this.dependencies.pendingDocumentDecisions,
+      receiptWarrantyUploadProcessor:
+        this.dependencies.receiptWarrantyUploadProcessor,
+      documentSearchDescriptionRecorder:
+        this.dependencies.documentSearchDescriptionRecorder,
+      now: () => this.dependencies.now?.() ?? new Date(),
+      saveLastOperation: (context, input) =>
+        this.saveLastOperationContext(context, input),
+      saveLastDocumentOperation: (context, documents, operationKind) =>
+        this.saveLastDocumentOperationContext(context, documents, operationKind),
+      savePlacementSuggestion: (context, documents) =>
+        this.savePendingDocumentPlacementSuggestion(context, documents)
+    });
   }
 
   private async dispatchPendingFileDestinationDecision(
