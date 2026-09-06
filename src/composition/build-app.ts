@@ -66,7 +66,10 @@ import { SqliteNotificationRepository } from "../infrastructure/providers/sqlite
 import { SqliteMessageReceiptRepository } from "../infrastructure/providers/sqlite/sqlite-message-receipt-repository.js";
 import { SqliteShoppingRepository } from "../infrastructure/providers/sqlite/sqlite-shopping-repository.js";
 import { SqliteServiceRegistryRepository } from "../infrastructure/providers/sqlite/sqlite-service-registry-repository.js";
-import { SqliteStateRepository } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
+import {
+  purgeExpiredState,
+  SqliteStateRepository
+} from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
 import type { AttachmentDownloadPort } from "../ports/attachment-download-port.js";
 import type { DocumentFolderPolicyPort } from "../ports/document-folder-policy-port.js";
@@ -89,6 +92,7 @@ export interface BuildAppOptions {
 export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const config = loadConfig(options.env ?? process.env);
   const database = createSqliteDatabase({ path: config.sqlite.databasePath });
+  purgeExpiredState(database, new Date());
   const stateRepository = new SqliteStateRepository(database);
   const eventLog = new SqliteEventLog(database);
   const identityAccessRepository = new SqliteIdentityAccessRepository(database);

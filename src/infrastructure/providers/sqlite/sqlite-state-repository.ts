@@ -16,6 +16,42 @@ import type {
 } from "../../../ports/state-repository-port.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
+const EXPIRING_STATE_TABLES = [
+  "last_operation_contexts",
+  "pending_clarifications",
+  "pending_file_duplicate_decisions",
+  "pending_file_destination_decisions",
+  "pending_family_fact_decisions",
+  "pending_family_fact_archive_decisions",
+  "pending_shopping_item_decisions",
+  "pending_document_decisions",
+  "pending_document_placement_decisions"
+] as const;
+
+/**
+ * Physically remove expired pending-state rows. Reads already ignore rows past
+ * `expires_at`, but nothing deleted them, so stale sensitive context lingered on
+ * disk. Safe to run at startup; returns the number of rows removed. See
+ * DC-LOW-003.
+ */
+export function purgeExpiredState(database: SqliteDatabase, now: Date): number {
+  const cutoff = now.toISOString();
+
+  const purge = database.transaction((iso: string): number => {
+    let removed = 0;
+
+    for (const table of EXPIRING_STATE_TABLES) {
+      removed += database
+        .prepare(`delete from ${table} where expires_at < ?`)
+        .run(iso).changes;
+    }
+
+    return removed;
+  });
+
+  return purge(cutoff);
+}
+
 export class SqliteStateRepository implements StateRepositoryPort {
   constructor(private readonly database: SqliteDatabase) {}
 
