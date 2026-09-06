@@ -140,8 +140,7 @@ import {
   requiredAccessActionForIntent,
   resolveFileUploadDestinationForModelIntent,
   scopedClassifierText,
-  toClassifierLastOperation,
-  toSubjectAliasAction
+  toClassifierLastOperation
 } from "./dispatch-command-helpers.js";
 import { handlePendingFamilyFactArchiveDecision } from "./pending-handlers/family-fact-archive-handler.js";
 import { handlePendingFamilyFactDecision } from "./pending-handlers/family-fact-decision-handler.js";
@@ -166,6 +165,11 @@ import {
   handleManagePlanningTask,
   handleQueryPlanningState
 } from "./intent-handlers/planning-intents.js";
+import {
+  handleRecallFamilyJournalEntries,
+  handleRecordFamilyJournalEntry
+} from "./intent-handlers/journal-intents.js";
+import { handleManageSubjectAliases } from "./intent-handlers/subject-alias-intents.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -829,57 +833,24 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async recordFamilyJournalEntry(
+  private recordFamilyJournalEntry(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "record_journal_entry" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.familyJournalRecorder) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.familyJournalRecorder.execute({
-      body: intent.summary,
-      ...(intent.journalCategory ? { category: intent.journalCategory } : {}),
-      ...(intent.subjectId ? { subjectId: intent.subjectId } : {}),
-      sourceActorId: context.actor.id,
-      sourceChatId: context.chat.id,
-      sourceMessageText: context.text
+    return handleRecordFamilyJournalEntry(context, intent, {
+      recorder: this.dependencies.familyJournalRecorder,
+      saveLastOperation: (operationContext, input) =>
+        this.saveLastOperationContext(operationContext, input)
     });
-    await this.saveLastOperationContext(context, {
-      operationKind: "family_journal_entry_recorded",
-      entityKind: "family_journal_entry",
-      entityId: result.entry.id,
-      entityLabel: result.entry.body
-    });
-
-    return {
-      chatId: context.chat.id,
-      text: `Saved family journal entry: ${result.entry.body}`
-    };
   }
 
-  private async recallFamilyJournalEntries(
+  private recallFamilyJournalEntries(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "recall_journal_entries" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.familyJournalRecall) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.familyJournalRecall.execute({
-      query: intent.query
+    return handleRecallFamilyJournalEntries(context, intent, {
+      recall: this.dependencies.familyJournalRecall
     });
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
   }
 
   private queryPlanningState(
@@ -906,7 +877,7 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async manageSubjectAliases(
+  private manageSubjectAliases(
     context: AcceptedMessageContext,
     intent: Extract<
       InboundIntent,
@@ -919,21 +890,9 @@ export class DispatchAcceptedCommandUseCase {
       }
     >
   ): Promise<OutboundReply> {
-    if (!this.dependencies.subjectAliasManager) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.subjectAliasManager.execute(
-      toSubjectAliasAction(intent)
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
+    return handleManageSubjectAliases(context, intent, {
+      manager: this.dependencies.subjectAliasManager
+    });
   }
 
   private archiveFamilyFact(
