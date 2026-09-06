@@ -518,7 +518,12 @@ class StubSubjectAliasRepository implements SubjectAliasRepositoryPort {
   async saveSubjectAlias(): Promise<void> {}
 
   async listSubjectAliases() {
-    return [];
+    return Object.entries(this.aliases).map(
+      ([aliasSubjectId, canonicalSubjectId]) => ({
+        aliasSubjectId,
+        canonicalSubjectId
+      })
+    );
   }
 
   async deleteSubjectAlias(): Promise<boolean> {

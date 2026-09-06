@@ -212,19 +212,23 @@ export class RecallFamilyFactsUseCase {
 
     const aliasCandidates = [...tokens, ...subjectAliasPhraseCandidates(tokens)];
 
-    await Promise.all(
-      aliasCandidates.map(async (token) => {
-        try {
-          expandedTokens.add(
-            await this.dependencies.subjectAliases!.resolveCanonicalSubjectId(
-              token
-            )
-          );
-        } catch {
-          expandedTokens.add(token);
-        }
-      })
-    );
+    // Load the alias map once (a single query) and resolve candidates in memory
+    // instead of issuing one repository call per token/phrase (better-sqlite3 is
+    // synchronous, so Promise.all did not parallelize the N+1). See DC-ARCH-002.
+    let aliasMap: ReadonlyMap<string, string>;
+
+    try {
+      const aliases = await this.dependencies.subjectAliases.listSubjectAliases();
+      aliasMap = new Map(
+        aliases.map((alias) => [alias.aliasSubjectId, alias.canonicalSubjectId])
+      );
+    } catch {
+      aliasMap = new Map();
+    }
+
+    for (const token of aliasCandidates) {
+      expandedTokens.add(aliasMap.get(token) ?? token);
+    }
 
     const resolvedTokens = [...expandedTokens].filter(Boolean);
 
