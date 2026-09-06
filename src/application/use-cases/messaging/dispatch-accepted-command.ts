@@ -164,6 +164,7 @@ import { savePlacementSuggestion } from "./services/save-placement-suggestion.js
 import { AttachmentStorageService } from "./services/attachment-storage.js";
 import { handlePendingFileDestinationDecision } from "./pending-handlers/file-destination-handler.js";
 import { handlePendingDocumentPlacementDecision } from "./pending-handlers/document-placement-handler.js";
+import { handlePendingFileDuplicateDestination } from "./pending-handlers/file-duplicate-destination-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1584,74 +1585,32 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async dispatchPendingDuplicateDestination(
+  private dispatchPendingDuplicateDestination(
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision,
     destination: FileUploadDestination
   ): Promise<OutboundReply> {
-    const deniedReply = pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    if (
-      destination === "google_drive" &&
-      this.dependencies.fileInboxDocumentUploader
-    ) {
-      const upload = await this.dependencies.fileInboxDocumentUploader.execute({
-        fileInboxRecordId: pending.existingRecordId
-      });
-
-      if (upload.status === "not_found") {
-        return {
-          chatId: context.chat.id,
-          text: `Не могу сохранить ${pending.fileName} в Google Drive: локальная запись не найдена. Пришли файл еще раз.`
-        };
-      }
-
-      const placementSuggested =
-        await this.savePendingDocumentPlacementSuggestion(context, [
-          upload.document
-        ]);
-
-      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: [
-          formatUploadedDocumentsReply([upload.document]),
-          ...(placementSuggested
-            ? formatPlacementSuggestionLines(upload.document)
-            : [])
-        ].join("\n")
-      };
-    }
-
-    if (!pending.provider || !pending.receivedAt || !pending.sourceAttachment) {
-      return {
-        chatId: context.chat.id,
-        text: `Не могу сохранить ${pending.fileName} в выбранное место: не сохранились данные исходного вложения. Пришли файл еще раз.`
-      };
-    }
-
-    const reply = await this.storeFamilyMessageAttachments(
+    return handlePendingFileDuplicateDestination(
+      context,
+      pending,
+      destination,
       {
-        ...context,
-        provider: pending.provider,
-        receivedAt: pending.receivedAt,
-        attachments: [pending.sourceAttachment]
-      },
-      undefined,
-      destination
+        uploadFromInbox: this.dependencies.fileInboxDocumentUploader,
+        storeAttachments: (attachmentContext, target) =>
+          this.attachmentStorage().storeMessageAttachments(
+            attachmentContext,
+            undefined,
+            target
+          ),
+        savePlacementSuggestion: (placementContext, documents) =>
+          this.savePendingDocumentPlacementSuggestion(
+            placementContext,
+            documents
+          ),
+        clearPending: (chatId) =>
+          this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(chatId)
+      }
     );
-
-    await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return reply;
   }
 
   private dispatchPendingDocumentPlacementDecision(
