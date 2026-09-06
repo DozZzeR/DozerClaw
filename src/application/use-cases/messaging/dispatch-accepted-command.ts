@@ -165,6 +165,7 @@ import {
   parsePlacementDecision,
   parseSkipDocumentMetadata,
   parseUploadFolderChoice,
+  pendingActorDeniedReply,
   placementDecisionOptions,
   placementDecisionPrompt,
   planningDateFromIntent,
@@ -177,6 +178,7 @@ import {
   toClassifierLastOperation,
   toSubjectAliasAction
 } from "./dispatch-command-helpers.js";
+import { handlePendingFamilyFactArchiveDecision } from "./pending-handlers/family-fact-archive-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -551,7 +553,7 @@ export class DispatchAcceptedCommandUseCase {
         now
       );
     const pendingDeniedReply = pending
-      ? this.pendingActorDeniedReply(context, pending)
+      ? pendingActorDeniedReply(context, pending)
       : undefined;
     if (pendingDeniedReply) {
       return pendingDeniedReply;
@@ -1484,20 +1486,6 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private pendingActorDeniedReply(
-    context: AcceptedMessageContext,
-    pending: { readonly actorId: string }
-  ): OutboundReply | undefined {
-    if (pending.actorId === context.actor.id) {
-      return undefined;
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: "This pending action belongs to another user."
-    };
-  }
-
   private async storeFamilyMessageDocumentAttachments(
     context: AcceptedMessageContext,
     metadataOverride: {
@@ -1689,7 +1677,7 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDestinationDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }
@@ -1915,7 +1903,7 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }
@@ -2012,7 +2000,7 @@ export class DispatchAcceptedCommandUseCase {
     pending: PendingFileDuplicateDecision,
     destination: FileUploadDestination
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }
@@ -2081,7 +2069,7 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentPlacementDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }
@@ -2570,7 +2558,7 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }
@@ -2874,7 +2862,7 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     pending: PendingFamilyFactDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }
@@ -2945,80 +2933,24 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async dispatchPendingFamilyFactArchiveDecision(
+  private dispatchPendingFamilyFactArchiveDecision(
     context: AcceptedMessageContext,
     pending: PendingFamilyFactArchiveDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    const decision = parseFamilyFactArchiveDecision(context.text);
-
-    if (decision === undefined) {
-      return {
-        chatId: context.chat.id,
-        text: [
-          "Я жду выбор семейного факта для архивации.",
-          "Можно написать номер факта или \"отмена\"."
-        ].join("\n")
-      };
-    }
-
-    if (decision === "cancel") {
-      await this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: "Ок, не архивирую семейный факт."
-      };
-    }
-
-    if (!this.dependencies.familyFactArchiver) {
-      return {
-        chatId: context.chat.id,
-        text: "Memory archive resolver is not configured."
-      };
-    }
-
-    const candidate = pending.candidates[decision];
-
-    if (!candidate) {
-      return {
-        chatId: context.chat.id,
-        text: "I could not find that archive candidate anymore."
-      };
-    }
-
-    const result = await this.dependencies.familyFactArchiver.execute({
-      query: candidate.body,
-      factId: candidate.id
+    return handlePendingFamilyFactArchiveDecision(context, pending, {
+      archiver: this.dependencies.familyFactArchiver,
+      clearPending: (chatId) =>
+        this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
+          chatId
+        )
     });
-    await this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    if (result.status === "archived") {
-      return {
-        chatId: context.chat.id,
-        text: `Archived family fact: ${result.fact.body}`
-      };
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: "I could not find an active family fact matching that request."
-    };
   }
 
   private async dispatchPendingShoppingItemDecision(
     context: AcceptedMessageContext,
     pending: PendingShoppingItemDecision
   ): Promise<OutboundReply> {
-    const deniedReply = this.pendingActorDeniedReply(context, pending);
+    const deniedReply = pendingActorDeniedReply(context, pending);
     if (deniedReply) {
       return deniedReply;
     }

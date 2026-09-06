@@ -1,6 +1,7 @@
 // Pure helpers extracted from dispatch-accepted-command.ts (DC-ARCH-001, stage 1).
 import type { AcceptedMessageContext } from "./process-inbound-message.js";
 
+import type { OutboundReply } from "../../../core/domain/messaging/reply.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 import type { AccessAction } from "../../../core/domain/identity/access-policy.js";
 import type { DocumentType } from "../../../core/domain/documents/document-record.js";
@@ -978,4 +979,18 @@ export function formatFamilyFactConfirmation(
     ...result.candidates.map((fact, index) => `${index + 1}. ${fact.body}`),
     "Reply whether to update an existing fact or create a new one."
   ].join("\n");
+}
+
+export function pendingActorDeniedReply(
+  context: AcceptedMessageContext,
+  pending: { readonly actorId: string }
+): OutboundReply | undefined {
+  if (pending.actorId === context.actor.id) {
+    return undefined;
+  }
+
+  return {
+    chatId: context.chat.id,
+    text: "This pending action belongs to another user."
+  };
 }
