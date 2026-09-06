@@ -132,28 +132,18 @@ import {
   documentPlacementDecisionPolicy,
   domainClarificationQuestion,
   fileDestinationDecisionPolicy,
-  formatDocumentSearchDescriptionResult,
   formatFamilyFactConfirmation,
-  formatPlacementSuggestionLines,
   formatRegisteredDocumentReply,
-  formatUploadedDocumentsReply,
-  formatUploadFolderChoicePrompt,
-  isUploadedDocumentMetadataDecision,
   mergeAttachments,
   parseActorId,
   parseAdminSecret,
-  parseDocumentMetadata,
-  parseFamilyFactArchiveDecision,
   parseFileUploadDestination,
   parseNotificationId,
-  parseSkipDocumentMetadata,
-  parseUploadFolderChoice,
   pendingActorDeniedReply,
   planningDateFromIntent,
   requiredAccessActionForIntent,
   resolveFileUploadDestinationForModelIntent,
   scopedClassifierText,
-  selectedUploadFolderMetadata,
   toClassifierLastOperation,
   toSubjectAliasAction
 } from "./dispatch-command-helpers.js";
@@ -165,6 +155,7 @@ import { AttachmentStorageService } from "./services/attachment-storage.js";
 import { handlePendingFileDestinationDecision } from "./pending-handlers/file-destination-handler.js";
 import { handlePendingDocumentPlacementDecision } from "./pending-handlers/document-placement-handler.js";
 import { handlePendingFileDuplicateDestination } from "./pending-handlers/file-duplicate-destination-handler.js";
+import { handlePendingDocumentDecision } from "./pending-handlers/document-decision-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -2016,280 +2007,20 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async dispatchPendingDocumentDecision(
+  private dispatchPendingDocumentDecision(
     context: AcceptedMessageContext,
     pending: PendingDocumentDecision
   ): Promise<OutboundReply> {
-    const deniedReply = pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    if (pending.action.kind === "choose_upload_folder") {
-      return this.dispatchPendingUploadFolderChoice(context, pending);
-    }
-
-    if (pending.action.kind === "describe_for_search") {
-      return this.dispatchPendingDocumentSearchDescription(context, pending);
-    }
-
-    if (isUploadedDocumentMetadataDecision(pending)) {
-      return this.dispatchPendingUploadedDocumentMetadata(context, pending);
-    }
-
-    const decision = parseFamilyFactArchiveDecision(context.text);
-
-    if (decision === undefined) {
-      return {
-        chatId: context.chat.id,
-        text: [
-          "Я жду выбор документа.",
-          "Можно написать номер документа или \"отмена\"."
-        ].join("\n")
-      };
-    }
-
-    if (decision === "cancel") {
-      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: "Ок, не меняю документ."
-      };
-    }
-
-    if (!this.dependencies.documentManager) {
-      return {
-        chatId: context.chat.id,
-        text: "Document manager is not configured."
-      };
-    }
-
-    const document = pending.candidates[decision];
-
-    if (!document) {
-      return {
-        chatId: context.chat.id,
-        text: "I could not find that document candidate anymore."
-      };
-    }
-
-    const result = await this.dependencies.documentManager.execute(
-      pending.action.kind === "archive"
-        ? {
-            action: "archive",
-            query: document.name,
-            document
-          }
-        : {
-            action: "update_metadata",
-            query: document.name,
-            document,
-            ...(pending.action.documentType
-              ? { documentType: pending.action.documentType }
-              : {}),
-            ...(pending.action.subjectId
-              ? { subjectId: pending.action.subjectId }
-              : {})
-          }
-    );
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
-  }
-
-  private async dispatchPendingUploadFolderChoice(
-    context: AcceptedMessageContext,
-    pending: PendingDocumentDecision
-  ): Promise<OutboundReply> {
-    if (pending.action.kind !== "choose_upload_folder") {
-      return {
-        chatId: context.chat.id,
-        text: "Document folder choice is not pending."
-      };
-    }
-
-    const decision = parseUploadFolderChoice(context.text, pending.action.options);
-
-    if (decision === "cancel") {
-      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: "Ок, не сохраняю файл."
-      };
-    }
-
-    if (!decision) {
-      return {
-        chatId: context.chat.id,
-        text: formatUploadFolderChoicePrompt({
-          status: "needs_folder_choice",
-          attachment: {
-            fileName: pending.action.attachment.fileName,
-            ...(pending.action.attachment.mimeType
-              ? { mimeType: pending.action.attachment.mimeType }
-              : {}),
-            bytes: new Uint8Array()
-          },
-          parentPath: pending.action.parentPath,
-          parentFolderId: pending.action.parentFolderId,
-          options: pending.action.options,
-          ...(pending.action.documentType
-            ? { documentType: pending.action.documentType }
-            : {}),
-          ...(pending.action.subjectId ? { subjectId: pending.action.subjectId } : {})
-        })
-      };
-    }
-
-    if (!this.dependencies.documentAttachmentStore) {
-      return {
-        chatId: context.chat.id,
-        text: "Google Drive upload is not configured yet. File was not saved."
-      };
-    }
-
-    const uploaded = await this.dependencies.documentAttachmentStore.uploadPrepared({
-      attachment: {
-        fileName: pending.action.attachment.fileName,
-        ...(pending.action.attachment.mimeType
-          ? { mimeType: pending.action.attachment.mimeType }
-          : {}),
-        bytes: Buffer.from(pending.action.attachment.bytesBase64, "base64")
-      },
-      targetFolderId: decision.folderId,
-      ...selectedUploadFolderMetadata(pending.action, decision)
+    return handlePendingDocumentDecision(context, pending, {
+      documentManager: this.dependencies.documentManager,
+      documentAttachmentStore: this.dependencies.documentAttachmentStore,
+      documentSearchDescriptionRecorder:
+        this.dependencies.documentSearchDescriptionRecorder,
+      savePlacementSuggestion: (placementContext, documents) =>
+        this.savePendingDocumentPlacementSuggestion(placementContext, documents),
+      clearPending: (chatId) =>
+        this.dependencies.pendingDocumentDecisions?.clearByChatId(chatId)
     });
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: formatUploadedDocumentsReply([uploaded.document])
-    };
-  }
-
-  private async dispatchPendingDocumentSearchDescription(
-    context: AcceptedMessageContext,
-    pending: PendingDocumentDecision
-  ): Promise<OutboundReply> {
-    if (parseSkipDocumentMetadata(context.text)) {
-      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: "Ок, оставляю документ без описания для поиска."
-      };
-    }
-
-    if (!this.dependencies.documentSearchDescriptionRecorder) {
-      return {
-        chatId: context.chat.id,
-        text: "Semantic document search storage is not configured."
-      };
-    }
-
-    const updated: string[] = [];
-
-    for (const document of pending.candidates) {
-      const result =
-        await this.dependencies.documentSearchDescriptionRecorder.execute({
-          document,
-          description: context.text
-        });
-
-      updated.push(formatDocumentSearchDescriptionResult(result.document, result));
-    }
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: updated.join("\n")
-    };
-  }
-
-  private async dispatchPendingUploadedDocumentMetadata(
-    context: AcceptedMessageContext,
-    pending: PendingDocumentDecision
-  ): Promise<OutboundReply> {
-    if (parseSkipDocumentMetadata(context.text)) {
-      await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-        context.chat.id
-      );
-
-      return {
-        chatId: context.chat.id,
-        text: "Ок, оставляю документ без metadata."
-      };
-    }
-
-    const metadata = parseDocumentMetadata(context.text);
-
-    if (!metadata.documentType && !metadata.subjectId) {
-      return {
-        chatId: context.chat.id,
-        text: [
-          "Я жду metadata для загруженного документа.",
-          "Можно написать тип и subject, например: identity max, или skip."
-        ].join("\n")
-      };
-    }
-
-    if (!this.dependencies.documentManager) {
-      return {
-        chatId: context.chat.id,
-        text: "Document manager is not configured."
-      };
-    }
-
-    const updated: string[] = [];
-    const updatedDocuments = pending.candidates.map((document) => ({
-      ...document,
-      ...metadata
-    }));
-
-    for (const document of updatedDocuments) {
-      const result = await this.dependencies.documentManager.execute({
-        action: "update_metadata",
-        query: document.name,
-        document,
-        ...metadata
-      });
-      updated.push(result.text);
-    }
-    await this.dependencies.pendingDocumentDecisions?.clearByChatId(
-      context.chat.id
-    );
-
-    const placementSuggested = await this.savePendingDocumentPlacementSuggestion(
-      context,
-      updatedDocuments
-    );
-
-    return {
-      chatId: context.chat.id,
-      text: [
-        updated.join("\n"),
-        ...(placementSuggested
-          ? formatPlacementSuggestionLines(updatedDocuments[0])
-          : [])
-      ].join("\n")
-    };
   }
 
   private savePendingDocumentPlacementSuggestion(
