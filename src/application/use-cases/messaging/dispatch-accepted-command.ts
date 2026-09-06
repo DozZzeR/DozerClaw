@@ -138,8 +138,6 @@ import {
   documentPlacementDecisionPolicy,
   domainClarificationQuestion,
   duplicateAttachmentReply,
-  duplicateDecisionOptions,
-  duplicateDecisionPrompt,
   fileDestinationDecisionPolicy,
   fileDestinationPrompt,
   formatDocumentSearchDescriptionResult,
@@ -154,7 +152,6 @@ import {
   parseActorId,
   parseAdminSecret,
   parseDocumentMetadata,
-  parseDuplicateDecision,
   parseFamilyFactArchiveDecision,
   parseFileUploadDestination,
   parseModelDocumentMetadata,
@@ -177,6 +174,7 @@ import {
 } from "./dispatch-command-helpers.js";
 import { handlePendingFamilyFactArchiveDecision } from "./pending-handlers/family-fact-archive-handler.js";
 import { handlePendingFamilyFactDecision } from "./pending-handlers/family-fact-decision-handler.js";
+import { handlePendingFileDuplicateDecision } from "./pending-handlers/file-duplicate-decision-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -1897,100 +1895,21 @@ export class DispatchAcceptedCommandUseCase {
     });
   }
 
-  private async dispatchPendingDuplicateDecision(
+  private dispatchPendingDuplicateDecision(
     context: AcceptedMessageContext,
     pending: PendingFileDuplicateDecision
   ): Promise<OutboundReply> {
-    const deniedReply = pendingActorDeniedReply(context, pending);
-    if (deniedReply) {
-      return deniedReply;
-    }
-
-    const decision = await resolvePendingDecision<DuplicateDecision>({
-      policy: "choice_only",
-      prompt: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName),
-      userReply: context.text,
-      options: duplicateDecisionOptions,
-      parseDeterministicChoice: parseDuplicateDecision,
+    return handlePendingFileDuplicateDecision(context, pending, {
       classifier: this.dependencies.pendingChoiceClassifier as
         | PendingChoiceClassifier<DuplicateDecision>
-        | undefined
+        | undefined,
+      resolveDuplicate: (decision, target) =>
+        this.resolveDuplicateMutation(decision, target),
+      recordRoutingEvent: (attributes) =>
+        this.recordPendingRoutingEvent(attributes),
+      clearPending: (chatId) =>
+        this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(chatId)
     });
-
-    if (decision === undefined) {
-      await this.recordPendingRoutingEvent({
-        pendingKind: "file_duplicate",
-        policy: "choice_only",
-        choiceResult: "unclear",
-        pendingCleared: false
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: [
-          `Я жду решение по файлу ${pending.fileName}.`,
-          `Можно написать: "сохрани копию", "перезапиши" или "ничего не делай".`
-        ].join("\n")
-      };
-    }
-
-    if (decision === "skip") {
-      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-        context.chat.id
-      );
-      await this.recordPendingRoutingEvent({
-        pendingKind: "file_duplicate",
-        policy: "choice_only",
-        choiceResult: decision,
-        pendingCleared: true
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: `Ок, ничего не делаю с файлом ${pending.fileName}.`
-      };
-    }
-
-    const result = await this.resolveDuplicateMutation(decision, pending);
-
-    if (result.status === "copied") {
-      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-        context.chat.id
-      );
-      await this.recordPendingRoutingEvent({
-        pendingKind: "file_duplicate",
-        policy: "choice_only",
-        choiceResult: decision,
-        pendingCleared: true
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: `Готово: сохранил копию как ${pending.suggestedCopyName}.`
-      };
-    }
-
-    if (result.status === "overwritten") {
-      await this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(
-        context.chat.id
-      );
-      await this.recordPendingRoutingEvent({
-        pendingKind: "file_duplicate",
-        policy: "choice_only",
-        choiceResult: decision,
-        pendingCleared: true
-      });
-
-      return {
-        chatId: context.chat.id,
-        text: `Готово: перезаписал ${pending.fileName}.`
-      };
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: `Не могу применить решение по файлу ${pending.fileName}: не сохранились данные исходного вложения. Пришли файл еще раз.`
-    };
   }
 
   private async dispatchPendingDuplicateDestination(
