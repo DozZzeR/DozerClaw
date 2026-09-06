@@ -52,6 +52,26 @@ export function purgeExpiredState(database: SqliteDatabase, now: Date): number {
   return purge(cutoff);
 }
 
+/**
+ * Raised when a stored JSON payload cannot be parsed (a corrupt or truncated
+ * row). Carries the column context but never the raw payload, which may contain
+ * sensitive family data. See DC-LOW-002.
+ */
+export class StateDataError extends Error {
+  constructor(context: string, cause: unknown) {
+    super(`Corrupt stored JSON for ${context}`, { cause });
+    this.name = "StateDataError";
+  }
+}
+
+export function safeJsonParse(json: string, context: string): unknown {
+  try {
+    return JSON.parse(json) as unknown;
+  } catch (error) {
+    throw new StateDataError(context, error);
+  }
+}
+
 export class SqliteStateRepository implements StateRepositoryPort {
   constructor(private readonly database: SqliteDatabase) {}
 
@@ -680,7 +700,10 @@ export class SqliteStateRepository implements StateRepositoryPort {
     return {
       chatId: row.chatId,
       actorId: row.actorId,
-      action: JSON.parse(row.actionJson) as PendingDocumentDecision["action"],
+      action: safeJsonParse(
+        row.actionJson,
+        "pending_document_decisions.action_json"
+      ) as PendingDocumentDecision["action"],
       candidates: parseDocumentRecords(row.candidatesJson),
       createdAt: new Date(row.createdAt),
       expiresAt: new Date(row.expiresAt)
@@ -908,7 +931,7 @@ interface PendingDocumentPlacementDecisionRow {
 }
 
 function parseAttachments(json: string): readonly MessageAttachment[] {
-  const parsed = JSON.parse(json) as unknown;
+  const parsed = safeJsonParse(json, "pending_state.attachments");
 
   if (!Array.isArray(parsed)) {
     return [];
@@ -952,7 +975,7 @@ function familyFactToJson(fact: FamilyFact): Record<string, unknown> {
 }
 
 function parseFamilyFacts(json: string): readonly FamilyFact[] {
-  const parsed = JSON.parse(json) as unknown;
+  const parsed = safeJsonParse(json, "pending_state.family_fact_candidates");
 
   if (!Array.isArray(parsed)) {
     return [];
@@ -966,7 +989,7 @@ function parseFamilyFacts(json: string): readonly FamilyFact[] {
 }
 
 function parseDocumentRecords(json: string): readonly DocumentRecord[] {
-  const parsed = JSON.parse(json) as unknown;
+  const parsed = safeJsonParse(json, "pending_state.document_records");
 
   if (!Array.isArray(parsed)) {
     return [];
@@ -1055,7 +1078,7 @@ function documentRecordToJson(document: DocumentRecord): Record<string, unknown>
 }
 
 function parseShoppingItems(json: string): readonly ShoppingItem[] {
-  const parsed = JSON.parse(json) as unknown;
+  const parsed = safeJsonParse(json, "pending_state.shopping_items");
 
   if (!Array.isArray(parsed)) {
     return [];
@@ -1111,7 +1134,9 @@ function shoppingItemToJson(item: ShoppingItem): Record<string, unknown> {
 }
 
 function parseFamilyFact(json: string): FamilyFact {
-  const fact = parseFamilyFactValue(JSON.parse(json) as unknown);
+  const fact = parseFamilyFactValue(
+    safeJsonParse(json, "last_operation.family_fact")
+  );
 
   if (!fact) {
     throw new Error("Invalid pending family fact payload");
