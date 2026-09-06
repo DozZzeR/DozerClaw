@@ -137,7 +137,6 @@ import {
   parseFileUploadDestination,
   parseNotificationId,
   pendingActorDeniedReply,
-  planningDateFromIntent,
   requiredAccessActionForIntent,
   resolveFileUploadDestinationForModelIntent,
   scopedClassifierText,
@@ -163,6 +162,10 @@ import {
   handleManageDocument,
   handleRegisterDocument
 } from "./intent-handlers/document-intents.js";
+import {
+  handleManagePlanningTask,
+  handleQueryPlanningState
+} from "./intent-handlers/planning-intents.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -879,85 +882,28 @@ export class DispatchAcceptedCommandUseCase {
     };
   }
 
-  private async queryPlanningState(
+  private queryPlanningState(
     context: AcceptedMessageContext,
     intent: Extract<InboundIntent, { readonly kind: "query_planning" }>
   ): Promise<OutboundReply> {
-    if (!this.dependencies.planningQuery) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result = await this.dependencies.planningQuery.execute({
-      query: intent.query,
-      now: context.receivedAt
+    return handleQueryPlanningState(context, intent, {
+      planningQuery: this.dependencies.planningQuery
     });
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
   }
 
-  private async managePlanningTask(
+  private managePlanningTask(
     context: AcceptedMessageContext,
     intent: Extract<
       InboundIntent,
       { readonly kind: "create_reminder" | "manage_planning" }
     >
   ): Promise<OutboundReply> {
-    if (!this.dependencies.planningTaskManager) {
-      return {
-        chatId: context.chat.id,
-        text: `I understood this as ${intent.kind}, but that action is not connected yet.`
-      };
-    }
-
-    const result =
-      intent.kind === "create_reminder" || intent.action === "create"
-        ? await this.dependencies.planningTaskManager.execute({
-            action: "create",
-            title:
-              intent.kind === "create_reminder"
-                ? intent.summary
-                : intent.title ?? "",
-            actorId: context.actor.id,
-            ...planningDateFromIntent(
-              context,
-              intent,
-              this.dependencies.timeZone ?? "UTC"
-            ),
-            ...(intent.kind === "manage_planning" && intent.checklistItems
-              ? { checklistItems: intent.checklistItems }
-              : {})
-          })
-        : await this.dependencies.planningTaskManager.execute({
-            action: "complete",
-            query: intent.query ?? "",
-            now: context.receivedAt
-          });
-
-    if (intent.kind === "create_reminder" || intent.action === "create") {
-      const title = intent.kind === "create_reminder"
-        ? intent.summary
-        : intent.title ?? "";
-
-      if (result.status === "created" && title) {
-        await this.saveLastOperationContext(context, {
-          operationKind: "planning_task_created",
-          entityKind: "planning_task",
-          entityId: result.item.id,
-          entityLabel: result.item.title
-        });
-      }
-    }
-
-    return {
-      chatId: context.chat.id,
-      text: result.text
-    };
+    return handleManagePlanningTask(context, intent, {
+      planningTaskManager: this.dependencies.planningTaskManager,
+      saveLastOperation: (operationContext, input) =>
+        this.saveLastOperationContext(operationContext, input),
+      timeZone: this.dependencies.timeZone ?? "UTC"
+    });
   }
 
   private async manageSubjectAliases(
