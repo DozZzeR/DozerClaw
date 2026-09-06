@@ -634,96 +634,109 @@ export class DispatchAcceptedCommandUseCase {
     context: AcceptedMessageContext,
     now: Date
   ): Promise<OutboundReply | undefined> {
-    const pendingDestination =
-      await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingDestination && context.attachments.length === 0) {
-      return this.dispatchPendingFileDestinationDecision(
-        context,
-        pendingDestination
-      );
+    // Every pending-decision reply is text: an incoming attachment is a new
+    // upload, not an answer to the pending question, so no handler applies.
+    if (context.attachments.length > 0) {
+      return undefined;
     }
 
-    const pendingPlacement =
-      await this.dependencies.pendingDocumentPlacementDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
+    const chatId = context.chat.id;
 
-    if (pendingPlacement && context.attachments.length === 0) {
-      return this.dispatchPendingDocumentPlacementDecision(
-        context,
-        pendingPlacement
-      );
-    }
+    // Registry of feature-owned pending handlers, tried in priority order. Each
+    // entry finds its own active pending record and, when present, hands off to
+    // the feature handler; the shared loop owns only selection and ordering.
+    const handlers: readonly (() => Promise<OutboundReply | undefined>)[] = [
+      async () => {
+        const pending =
+          await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
 
-    const pendingDuplicate =
-      await this.dependencies.pendingFileDuplicateDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
+        return pending
+          ? this.dispatchPendingFileDestinationDecision(context, pending)
+          : undefined;
+      },
+      async () => {
+        const pending =
+          await this.dependencies.pendingDocumentPlacementDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
 
-    if (pendingDuplicate && context.attachments.length === 0) {
-      const destination = parseFileUploadDestination(context.text);
+        return pending
+          ? this.dispatchPendingDocumentPlacementDecision(context, pending)
+          : undefined;
+      },
+      async () => {
+        const pending =
+          await this.dependencies.pendingFileDuplicateDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
 
-      if (destination) {
-        return this.dispatchPendingDuplicateDestination(
-          context,
-          pendingDuplicate,
-          destination
-        );
+        if (!pending) {
+          return undefined;
+        }
+
+        const destination = parseFileUploadDestination(context.text);
+
+        return destination
+          ? this.dispatchPendingDuplicateDestination(context, pending, destination)
+          : this.dispatchPendingDuplicateDecision(context, pending);
+      },
+      async () => {
+        const pending =
+          await this.dependencies.pendingFamilyFactDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
+
+        return pending
+          ? this.dispatchPendingFamilyFactDecision(context, pending)
+          : undefined;
+      },
+      async () => {
+        const pending =
+          await this.dependencies.pendingFamilyFactArchiveDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
+
+        return pending
+          ? this.dispatchPendingFamilyFactArchiveDecision(context, pending)
+          : undefined;
+      },
+      async () => {
+        const pending =
+          await this.dependencies.pendingShoppingItemDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
+
+        return pending
+          ? this.dispatchPendingShoppingItemDecision(context, pending)
+          : undefined;
+      },
+      async () => {
+        const pending =
+          await this.dependencies.pendingDocumentDecisions?.findActiveByChatId(
+            chatId,
+            now
+          );
+
+        return pending
+          ? this.dispatchPendingDocumentDecision(context, pending)
+          : undefined;
       }
+    ];
 
-      return this.dispatchPendingDuplicateDecision(context, pendingDuplicate);
-    }
+    for (const handler of handlers) {
+      const reply = await handler();
 
-    const pendingFamilyFact =
-      await this.dependencies.pendingFamilyFactDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingFamilyFact && context.attachments.length === 0) {
-      return this.dispatchPendingFamilyFactDecision(context, pendingFamilyFact);
-    }
-
-    const pendingFamilyFactArchive =
-      await this.dependencies.pendingFamilyFactArchiveDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingFamilyFactArchive && context.attachments.length === 0) {
-      return this.dispatchPendingFamilyFactArchiveDecision(
-        context,
-        pendingFamilyFactArchive
-      );
-    }
-
-    const pendingShoppingItem =
-      await this.dependencies.pendingShoppingItemDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingShoppingItem && context.attachments.length === 0) {
-      return this.dispatchPendingShoppingItemDecision(
-        context,
-        pendingShoppingItem
-      );
-    }
-
-    const pendingDocument =
-      await this.dependencies.pendingDocumentDecisions?.findActiveByChatId(
-        context.chat.id,
-        now
-      );
-
-    if (pendingDocument && context.attachments.length === 0) {
-      return this.dispatchPendingDocumentDecision(context, pendingDocument);
+      if (reply) {
+        return reply;
+      }
     }
 
     return undefined;
