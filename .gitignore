@@ -7,3 +7,7 @@ data/
 !.env.example
 setting_key.json
 npm-debug.log*
+
+# ops health-check runtime (secrets + state, never committed)
+ops/notify.env
+ops/state/
