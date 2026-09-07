@@ -136,6 +136,7 @@ describe("CodexCliRunner", () => {
         "exec",
         "--json",
         "--ephemeral",
+        "--skip-git-repo-check",
         "--sandbox",
         "read-only",
         "-C",

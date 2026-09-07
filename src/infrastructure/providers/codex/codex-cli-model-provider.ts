@@ -201,6 +201,9 @@ export class CodexCliRunner implements CodexCliRunnerPort {
       "exec",
       "--json",
       "--ephemeral",
+      // The model runs in a dedicated, non-git workspace; recent Codex CLI
+      // versions refuse to run outside a trusted (git) directory without this.
+      "--skip-git-repo-check",
       "--sandbox",
       "read-only",
       "-C",
