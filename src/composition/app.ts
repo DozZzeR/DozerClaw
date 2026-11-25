@@ -1,3 +1,4 @@
+import type { MorningDigestRunResult } from "../application/use-cases/calendar/send-morning-digest.js";
 import type { StartupDiagnostic } from "../core/domain/diagnostics/startup-diagnostic.js";
 import type {
   BootstrapOwnerIdentityInput,
@@ -16,5 +17,10 @@ export interface DozerClawApp {
   handleNormalizedInboundMessage(
     input: HandleNormalizedInboundMessageInput
   ): Promise<OutboundReply>;
+  runMorningDigestTick?(now?: Date): Promise<MorningDigestRunResult | undefined>;
+  startBackgroundSchedulers?(options?: {
+    readonly onError?: (error: unknown) => void;
+  }): void;
+  stopBackgroundSchedulers?(): void;
   close?(): void;
 }

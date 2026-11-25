@@ -10,7 +10,10 @@ export interface DevGoogleOAuthOptions {
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/calendar.events"
+].join(" ");
 const DEFAULT_REDIRECT_URI = "http://127.0.0.1:53682/oauth2callback";
 
 interface OAuthTokenResponse {
@@ -43,7 +46,7 @@ export async function runDevGoogleOAuth(
   let code = options.env.DOZERCLAW_GOOGLE_OAUTH_CODE?.trim();
 
   if (!code) {
-    options.write("Open this URL and approve Drive access:");
+    options.write("Open this URL and approve Drive and Calendar access:");
     options.write(buildAuthorizationUrl({ clientId, redirectUri }));
     options.write("Waiting for OAuth callback...");
     code = await (options.waitForCode ?? waitForOAuthCallback)(redirectUri);
@@ -93,7 +96,7 @@ function buildAuthorizationUrl(input: {
   url.searchParams.set("client_id", input.clientId);
   url.searchParams.set("redirect_uri", input.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", DRIVE_SCOPE);
+  url.searchParams.set("scope", GOOGLE_SCOPES);
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
 

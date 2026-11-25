@@ -372,6 +372,37 @@ describe("TelegramBotRuntime", () => {
       { chatId: "300", text: "Admin active" }
     ]);
   });
+
+  it("appends hidden text_link URLs from Telegram entities for forwarded webinar posts", async () => {
+    const app = new FakeApp({ chatId: "internal-chat", text: "Scheduled" });
+    const telegram = new FakeTelegramApi([
+      {
+        update_id: 11,
+        message: {
+          message_id: 21,
+          date: 1783152000,
+          chat: { id: 300, type: "private" },
+          from: { id: 400, first_name: "Alex" },
+          text: "Вебинар завтра в 19:00 — Регистрация",
+          entities: [
+            {
+              type: "text_link",
+              offset: 25,
+              length: 11,
+              url: "https://example.com/webinar-register"
+            }
+          ]
+        }
+      }
+    ]);
+    const runtime = new TelegramBotRuntime({ app, telegram });
+
+    await runtime.pollOnce();
+
+    expect(app.messageInputs[0]?.text).toBe(
+      "Вебинар завтра в 19:00 — Регистрация\nhttps://example.com/webinar-register"
+    );
+  });
 });
 
 class FakeApp implements DozerClawApp {

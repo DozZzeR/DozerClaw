@@ -886,6 +886,10 @@ export function domainClarificationQuestion(): string {
 export function requiredAccessActionForIntent(
   intent: InboundIntent
 ): AccessAction | undefined {
+  if (intent.kind === "schedule_event") {
+    return "owner_read";
+  }
+
   if (
     intent.kind === "store_file" ||
     intent.kind === "record_fact" ||

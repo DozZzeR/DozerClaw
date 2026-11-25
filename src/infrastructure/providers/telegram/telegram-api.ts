@@ -27,6 +27,13 @@ export interface TelegramUpdate {
   readonly message?: TelegramMessage;
 }
 
+export interface TelegramMessageEntity {
+  readonly type: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly url?: string;
+}
+
 export interface TelegramMessage {
   readonly message_id: number;
   readonly date: number;
@@ -34,6 +41,9 @@ export interface TelegramMessage {
   readonly from?: TelegramUser;
   readonly text?: string;
   readonly caption?: string;
+  readonly entities?: readonly TelegramMessageEntity[];
+  readonly caption_entities?: readonly TelegramMessageEntity[];
+  readonly forward_origin?: unknown;
   readonly document?: TelegramDocument;
   readonly photo?: readonly TelegramPhotoSize[];
 }

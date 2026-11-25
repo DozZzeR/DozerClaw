@@ -36,9 +36,10 @@ describe("runDevGoogleOAuth", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(lines[0]).toBe("Open this URL and approve Drive access:");
+    expect(lines[0]).toBe("Open this URL and approve Drive and Calendar access:");
     expect(lines[1]).toContain("https://accounts.google.com/o/oauth2/v2/auth?");
     expect(lines[1]).toContain("client_id=oauth-client");
+    expect(lines[1]).toContain("calendar.events");
     expect(lines[1]).toContain("access_type=offline");
     expect(lines[1]).toContain("prompt=consent");
     expect(lines).toContain("Waiting for OAuth callback...");

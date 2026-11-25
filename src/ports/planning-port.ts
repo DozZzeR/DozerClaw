@@ -15,6 +15,8 @@ export interface PlanningQuery {
   readonly scope: PlanningScope;
   readonly startDateFrom?: string;
   readonly startDateTo?: string;
+  readonly startDateTimeFrom?: string;
+  readonly startDateTimeTo?: string;
 }
 
 export interface PlanningQueryResult {
@@ -25,12 +27,16 @@ export interface PlanningItem {
   readonly id: string;
   readonly title: string;
   readonly status: string;
+  readonly start?: string;
+  readonly note?: string;
 }
 
 export interface PlanningTaskCreate {
   readonly title: string;
   readonly scope: PlanningScope;
   readonly date?: string;
+  readonly startDateTime?: string;
+  readonly note?: string;
   readonly checklistItems?: readonly string[];
 }
 

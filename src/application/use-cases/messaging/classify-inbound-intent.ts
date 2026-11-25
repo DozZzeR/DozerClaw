@@ -79,6 +79,16 @@ export type InboundIntent =
       readonly checklistItems?: readonly string[];
     }
   | {
+      readonly kind: "schedule_event";
+      readonly title?: string;
+      readonly date?: string;
+      readonly startTime?: string;
+      readonly durationMinutes?: number;
+      readonly url?: string;
+      readonly notes?: string;
+      readonly scope?: "personal" | "family";
+    }
+  | {
       readonly kind: "update_last_operation";
       readonly summary?: string;
       readonly operationAction?: "replace_text" | "append_checklist";
@@ -135,6 +145,8 @@ export interface ClassifyInboundIntentInput {
   readonly text: string;
   readonly attachments: readonly MessageAttachment[];
   readonly lastOperation?: LastOperationPromptContext;
+  readonly currentLocalDateTime?: string;
+  readonly timeZone?: string;
 }
 
 export interface LastOperationPromptContext {
@@ -424,6 +436,27 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
       '{"kind":"manage_planning","action":"complete","title":null,"date":null,"checklistItems":[],"query":"Buy groceries"}'
     ].join("\n"),
     "",
+    "# schedule_event field rules",
+    [
+      "- Use `schedule_event` when the user shares a meeting link (Google Meet, Zoom, etc.), webinar announcement, forwarded Telegram post about an upcoming event/stream, or asks to add/check a timed event in Google Calendar and Singularity.",
+      "- Resolve relative dates like `сегодня`, `завтра`, `в четверг` using `currentLocalDateTime` and `timeZone` when provided.",
+      "- `title`: concise event title, or `null` if unknown (for example, a bare Google Meet link).",
+      "- `date`: YYYY-MM-DD in the user's local timezone, or `null` if not stated.",
+      "- `startTime`: HH:mm in 24-hour local time (e.g. `15:00`), or `null` if not stated.",
+      "- `durationMinutes`: positive integer duration when stated, otherwise `null`.",
+      "- `externalIdOrUrl`: the Meet, Zoom, webinar, or event URL from the message, or `null` when absent.",
+      "- `summary`: optional short notes/context to keep in the event description, or `null`.",
+      "- `eventScope`: `family` only when explicitly a family event; otherwise `personal` or `null`.",
+      "- Do NOT use `schedule_event` if the user explicitly asks to save a link only as a memory note/fact or to cancel/ignore a meeting."
+    ].join("\n"),
+    "",
+    "# schedule_event examples",
+    [
+      '{"kind":"schedule_event","title":"Созвон с командой","date":"2026-09-08","startTime":"15:00","durationMinutes":60,"externalIdOrUrl":"https://meet.google.com/abc-defg-hij","summary":null,"eventScope":"personal"}',
+      '{"kind":"schedule_event","title":null,"date":null,"startTime":null,"durationMinutes":null,"externalIdOrUrl":"https://meet.google.com/abc-defg-hij","summary":null,"eventScope":"personal"}',
+      '{"kind":"schedule_event","title":"Вебинар по архитектуре","date":"2026-09-10","startTime":"19:00","durationMinutes":90,"externalIdOrUrl":"https://example.com/webinar","summary":"Пересланный пост из Telegram","eventScope":"personal"}'
+    ].join("\n"),
+    "",
     "# Input",
     JSON.stringify({
       text: input.text,
@@ -434,7 +467,11 @@ function buildClassifierPrompt(input: ClassifyInboundIntentInput): string {
         sizeBytes: attachment.sizeBytes,
         hasProviderFileId: Boolean(attachment.providerFileId)
       })),
-      lastOperation: input.lastOperation ?? null
+      lastOperation: input.lastOperation ?? null,
+      ...(input.currentLocalDateTime
+        ? { currentLocalDateTime: input.currentLocalDateTime }
+        : {}),
+      ...(input.timeZone ? { timeZone: input.timeZone } : {})
     })
   ].join("\n\n");
 }
@@ -770,6 +807,48 @@ export function parseInboundIntent(text: string): InboundIntent {
       };
     }
 
+    if (parsed.kind === "schedule_event") {
+      const title =
+        typeof parsed.title === "string" && parsed.title.trim()
+          ? parsed.title.trim()
+          : undefined;
+      const url =
+        typeof parsed.externalIdOrUrl === "string" &&
+        parsed.externalIdOrUrl.trim()
+          ? parsed.externalIdOrUrl.trim()
+          : undefined;
+      const notes =
+        typeof parsed.summary === "string" && parsed.summary.trim()
+          ? parsed.summary.trim()
+          : undefined;
+      const startTime =
+        typeof parsed.startTime === "string" &&
+        /^([01]\d|2[0-3]):[0-5]\d$/.test(parsed.startTime.trim())
+          ? parsed.startTime.trim()
+          : undefined;
+      const durationMinutes =
+        typeof parsed.durationMinutes === "number" &&
+        Number.isFinite(parsed.durationMinutes) &&
+        parsed.durationMinutes > 0
+          ? Math.round(parsed.durationMinutes)
+          : undefined;
+      const scope =
+        parsed.eventScope === "personal" || parsed.eventScope === "family"
+          ? parsed.eventScope
+          : undefined;
+
+      return {
+        kind: "schedule_event",
+        ...(title ? { title } : {}),
+        ...optionalIsoDate(parsed.date),
+        ...(startTime ? { startTime } : {}),
+        ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+        ...(url ? { url } : {}),
+        ...(notes ? { notes } : {}),
+        ...(scope ? { scope } : {})
+      };
+    }
+
     if (parsed.kind === "unsupported" && typeof parsed.reason === "string") {
       return {
         kind: "unsupported",
@@ -801,6 +880,7 @@ const inboundIntentSchema = {
         "manage_shopping_item",
         "query_planning",
         "manage_planning",
+        "schedule_event",
         "update_last_operation",
         "archive_fact",
         "register_document",
@@ -896,6 +976,16 @@ const inboundIntentSchema = {
     date: {
       type: ["string", "null"]
     },
+    startTime: {
+      type: ["string", "null"]
+    },
+    durationMinutes: {
+      type: ["integer", "null"]
+    },
+    eventScope: {
+      type: ["string", "null"],
+      enum: ["personal", "family", null]
+    },
     checklistItems: {
       type: ["array", "null"],
       items: {
@@ -962,6 +1052,9 @@ const inboundIntentSchema = {
     "projectTag",
     "tags",
     "date",
+    "startTime",
+    "durationMinutes",
+    "eventScope",
     "checklistItems",
     "operationAction",
     "requests",

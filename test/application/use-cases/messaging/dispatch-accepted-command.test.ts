@@ -130,12 +130,13 @@ describe("DispatchAcceptedCommandUseCase", () => {
       chatId: "chat-owner",
       text: "Saved family fact: Max prefers jasmine tea."
     });
-    expect(intentClassifier.seenInput).toEqual({
+    expect(intentClassifier.seenInput).toMatchObject({
       text: [
         "Command scope: family_fact",
         "User text: Max prefers jasmine tea"
       ].join("\n"),
-      attachments: []
+      attachments: [],
+      timeZone: "UTC"
     });
   });
 
@@ -1469,7 +1470,7 @@ describe("DispatchAcceptedCommandUseCase", () => {
       chatId: "chat-owner",
       text: "Saved 1 attachment(s): passport scan."
     });
-    expect(intentClassifier.seenInput).toEqual({
+    expect(intentClassifier.seenInput).toMatchObject({
       text: [
         "Previous message: sent file",
         "Assistant asked: What is this file?",
@@ -1483,7 +1484,8 @@ describe("DispatchAcceptedCommandUseCase", () => {
           mimeType: "image/jpeg",
           sizeBytes: 123
         }
-      ]
+      ],
+      timeZone: "UTC"
     });
     expect(attachmentStore.seenInput?.attachments).toEqual([
       {

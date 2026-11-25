@@ -50,13 +50,25 @@ export async function runTelegramBot(
     }
   });
 
-  process.once("SIGINT", () => runtime.stop());
-  process.once("SIGTERM", () => runtime.stop());
+  const stopAll = () => {
+    app.stopBackgroundSchedulers?.();
+    runtime.stop();
+  };
+
+  process.once("SIGINT", stopAll);
+  process.once("SIGTERM", stopAll);
+
+  app.startBackgroundSchedulers?.({
+    onError(error) {
+      stderr.write(formatRuntimeError(error));
+    }
+  });
 
   stdout.write("DozerClaw Telegram bot polling started.\n");
   try {
     await runtime.start();
   } finally {
+    app.stopBackgroundSchedulers?.();
     app.close?.();
   }
 }

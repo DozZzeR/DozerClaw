@@ -10,7 +10,9 @@ export interface AppConfig {
   readonly codex: CodexConfig;
   readonly memory?: MemoryConfig;
   readonly googleDrive?: GoogleDriveConfig;
+  readonly googleCalendar?: GoogleCalendarConfig;
   readonly planning?: PlanningConfig;
+  readonly morningDigest: MorningDigestConfig;
 }
 
 export interface SqliteConfig {
@@ -75,6 +77,21 @@ export interface GoogleOAuthConfig {
   readonly refreshToken: string;
 }
 
+export interface GoogleCalendarConfig {
+  readonly accessToken?: string;
+  readonly oauth?: GoogleOAuthConfig;
+  readonly apiBaseUrl: string;
+  readonly calendarId: string;
+  readonly requestTimeoutMs: number;
+}
+
+export interface MorningDigestConfig {
+  readonly enabled: boolean;
+  readonly digestTime: string;
+  readonly catchUpUntil: string;
+  readonly pollIntervalMs: number;
+}
+
 export interface MempalaceMemoryConfig {
   readonly endpointUrl: string;
   readonly wing: string;
@@ -137,7 +154,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     },
     ...memoryConfig(env, environment),
     ...googleDriveConfig(env, environment),
-    ...planningConfig(env, environment)
+    ...googleCalendarConfig(env, environment),
+    ...planningConfig(env, environment),
+    morningDigest: morningDigestConfig(env)
   };
 }
 
@@ -205,6 +224,98 @@ function googleOAuthConfig(env: NodeJS.ProcessEnv): GoogleOAuthConfig | undefine
     clientSecret,
     refreshToken
   };
+}
+
+function googleCalendarConfig(
+  env: NodeJS.ProcessEnv,
+  environment: RuntimeEnvironment
+): { readonly googleCalendar?: GoogleCalendarConfig } {
+  const enabled =
+    env.DOZERCLAW_GOOGLE_CALENDAR_ENABLED === "true" ||
+    env.DOZERCLAW_GOOGLE_CALENDAR_ENABLED === "1";
+
+  if (!enabled) {
+    return {};
+  }
+
+  const accessToken = env.DOZERCLAW_GOOGLE_CALENDAR_ACCESS_TOKEN?.trim();
+  const oauth = googleOAuthConfig(env);
+
+  if (!accessToken && !oauth) {
+    return {};
+  }
+
+  const apiBaseUrl =
+    env.DOZERCLAW_GOOGLE_CALENDAR_API_BASE_URL?.trim() ||
+    "https://www.googleapis.com";
+
+  validateGoogleCalendarApiBaseUrl(apiBaseUrl, environment);
+
+  return {
+    googleCalendar: {
+      ...(accessToken ? { accessToken } : {}),
+      ...(oauth ? { oauth } : {}),
+      apiBaseUrl,
+      calendarId: env.DOZERCLAW_GOOGLE_CALENDAR_ID?.trim() || "primary",
+      requestTimeoutMs: parsePositiveInteger(
+        env.DOZERCLAW_GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS,
+        15_000
+      )
+    }
+  };
+}
+
+function morningDigestConfig(env: NodeJS.ProcessEnv): MorningDigestConfig {
+  const enabled =
+    env.DOZERCLAW_MORNING_DIGEST_ENABLED === "true" ||
+    env.DOZERCLAW_MORNING_DIGEST_ENABLED === "1";
+
+  return {
+    enabled,
+    digestTime: parseWallClockTime(env.DOZERCLAW_MORNING_DIGEST_TIME, "08:00"),
+    catchUpUntil: parseWallClockTime(
+      env.DOZERCLAW_MORNING_DIGEST_CATCH_UP_UNTIL,
+      "12:00"
+    ),
+    pollIntervalMs: parsePositiveInteger(
+      env.DOZERCLAW_MORNING_DIGEST_POLL_INTERVAL_MS,
+      60_000
+    )
+  };
+}
+
+function parseWallClockTime(
+  value: string | undefined,
+  fallback: string
+): string {
+  const trimmed = value?.trim();
+  if (trimmed && /^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return fallback;
+}
+
+function validateGoogleCalendarApiBaseUrl(
+  value: string,
+  environment: RuntimeEnvironment
+): void {
+  if (environment !== "production") {
+    return;
+  }
+
+  const url = parseUrl(value);
+
+  if (
+    !url ||
+    url.protocol !== "https:" ||
+    url.hostname !== "www.googleapis.com" ||
+    url.pathname.replace(/\/+$/u, "") !== ""
+  ) {
+    throw new Error(
+      "DOZERCLAW_GOOGLE_CALENDAR_API_BASE_URL must be https://www.googleapis.com in production."
+    );
+  }
 }
 
 function parseDriveFolderMap(

@@ -20,8 +20,11 @@ export interface SingularityPlanningProviderOptions {
   readonly fetch?: typeof fetch;
 }
 
+const MAX_SINGULARITY_PAGES = 10;
+
 interface SingularityTaskListResponse {
   readonly tasks?: readonly unknown[];
+  readonly nextPageToken?: string;
 }
 
 export class SingularityPlanningProvider implements PlanningPort {
@@ -40,23 +43,38 @@ export class SingularityPlanningProvider implements PlanningPort {
   async queryPlanningState(
     query: PlanningQuery
   ): Promise<PlanningQueryResult> {
-    const response = await this.fetchWithTimeout(this.taskListUrl(query), {
-      method: "GET",
-      headers: {
-        authorization: `Bearer ${this.options.token}`
-      }
-    });
+    const rawTasks: unknown[] = [];
+    let pageToken: string | undefined;
 
-    if (!response.ok) {
-      throw new Error(
-        `Singularity task list request failed: HTTP ${response.status}`
+    for (let page = 0; page < MAX_SINGULARITY_PAGES; page += 1) {
+      const response = await this.fetchWithTimeout(
+        this.taskListUrl(query, pageToken),
+        {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${this.options.token}`
+          }
+        }
       );
-    }
 
-    const payload = (await response.json()) as SingularityTaskListResponse;
+      if (!response.ok) {
+        throw new Error(
+          `Singularity task list request failed: HTTP ${response.status}`
+        );
+      }
 
-    if (!Array.isArray(payload.tasks)) {
-      throw new Error("Singularity task list response was incomplete");
+      const payload = (await response.json()) as SingularityTaskListResponse;
+
+      if (!Array.isArray(payload.tasks)) {
+        throw new Error("Singularity task list response was incomplete");
+      }
+
+      rawTasks.push(...payload.tasks);
+
+      if (!payload.nextPageToken) {
+        break;
+      }
+      pageToken = payload.nextPageToken;
     }
 
     const tokens = query.text
@@ -65,7 +83,7 @@ export class SingularityPlanningProvider implements PlanningPort {
       .filter(Boolean);
 
     return {
-      items: payload.tasks
+      items: rawTasks
         .map(toSearchablePlanningItem)
         .filter((item): item is SearchablePlanningItem => Boolean(item))
         .filter((item) => matchesQuery(item, tokens))
@@ -84,7 +102,12 @@ export class SingularityPlanningProvider implements PlanningPort {
         ...(input.scope === "family"
           ? { projectId: this.options.familyProjectId }
           : {}),
-        ...(input.date ? { start: toSingularityDateTime(input.date) } : {})
+        ...(input.startDateTime
+          ? { start: input.startDateTime, useTime: true }
+          : input.date
+            ? { start: toSingularityDateTime(input.date) }
+            : {}),
+        ...(input.note ? { note: encodeQuillDeltaNote(input.note) } : {})
       })
     });
 
@@ -214,7 +237,7 @@ export class SingularityPlanningProvider implements PlanningPort {
     };
   }
 
-  private taskListUrl(query: PlanningQuery): string {
+  private taskListUrl(query: PlanningQuery, pageToken?: string): string {
     const url = new URL("/v2/task", this.apiBaseUrl);
     url.searchParams.set(
       "maxCount",
@@ -223,13 +246,17 @@ export class SingularityPlanningProvider implements PlanningPort {
     url.searchParams.set("includeRemoved", "false");
     url.searchParams.set("includeArchived", "false");
     url.searchParams.set("includeAllRecurrenceInstances", "false");
-    if (query.startDateFrom) {
+    if (query.startDateTimeFrom) {
+      url.searchParams.set("startDateFrom", query.startDateTimeFrom);
+    } else if (query.startDateFrom) {
       url.searchParams.set(
         "startDateFrom",
         toSingularityDateTime(query.startDateFrom)
       );
     }
-    if (query.startDateTo) {
+    if (query.startDateTimeTo) {
+      url.searchParams.set("startDateTo", query.startDateTimeTo);
+    } else if (query.startDateTo) {
       url.searchParams.set(
         "startDateTo",
         toSingularityEndOfDay(query.startDateTo)
@@ -237,6 +264,9 @@ export class SingularityPlanningProvider implements PlanningPort {
     }
     if (query.scope === "family") {
       url.searchParams.set("projectId", this.options.familyProjectId);
+    }
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
     }
 
     return url.toString();
@@ -327,6 +357,7 @@ function toSearchablePlanningItem(
       item.id,
       item.title,
       item.status,
+      item.note,
       stringField(record, "note"),
       stringField(record, "projectId"),
       ...stringArrayField(record, "tags")
@@ -352,15 +383,21 @@ function toPlanningItem(
     return undefined;
   }
 
-  const item = {
+  const start = stringField(value, "start");
+  const rawNote = stringField(value, "note");
+  const note = rawNote ? decodeQuillDeltaNote(rawNote) : undefined;
+
+  const item: PlanningItem = {
     id,
     title,
     status:
       isCompletedTask(value)
         ? "completed"
-        : stringField(value, "start") || stringField(value, "deadline")
+        : start || stringField(value, "deadline")
         ? "scheduled"
-        : "open"
+        : "open",
+    ...(start ? { start } : {}),
+    ...(note ? { note } : {})
   };
 
   return item;
@@ -433,4 +470,44 @@ function toSingularityDateTime(date: string): string {
 
 function toSingularityEndOfDay(date: string): string {
   return `${date}T23:59:59.999Z`;
+}
+
+export function encodeQuillDeltaNote(note: string): string {
+  const trimmed = note.trim();
+  const content = trimmed.endsWith("\n") ? trimmed : `${trimmed}\n`;
+
+  return JSON.stringify({
+    ops: [{ insert: content }]
+  });
+}
+
+export function decodeQuillDeltaNote(rawNote: string): string | undefined {
+  const trimmed = rawNote.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    const ops = Array.isArray(parsed)
+      ? parsed
+      : isRecord(parsed) && Array.isArray(parsed.ops)
+        ? parsed.ops
+        : undefined;
+
+    if (ops) {
+      const text = ops
+        .map((op) =>
+          isRecord(op) && typeof op.insert === "string" ? op.insert : ""
+        )
+        .join("")
+        .trim();
+
+      return text || undefined;
+    }
+  } catch {
+    // Fall back to plain text note if Singularity returned non-Delta content.
+  }
+
+  return trimmed;
 }

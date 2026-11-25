@@ -2,6 +2,7 @@ import type { AccessAction } from "../../../core/domain/identity/access-policy.j
 
 export type CommandKind =
   | "system_health"
+  | "morning_digest"
   | "admin_mode_activate"
   | "admin_write"
   | "start"
@@ -26,6 +27,14 @@ export function routeCommand(text: string): CommandRoute {
   if (isSystemHealthCommand(comparable)) {
     return {
       kind: "system_health",
+      action: "owner_read",
+      normalizedText
+    };
+  }
+
+  if (comparable === "/digest" || comparable === "digest") {
+    return {
+      kind: "morning_digest",
       action: "owner_read",
       normalizedText
     };

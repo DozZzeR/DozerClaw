@@ -144,7 +144,7 @@ export class TelegramBotRuntime {
           providerUserId === this.options.ownerUserId
       }),
       displayName,
-      text: message.text ?? message.caption ?? "",
+      text: extractMessageTextWithEntityLinks(message),
       attachments: attachmentsFromMessage(message),
       receivedAt: new Date(message.date * 1000),
       now: this.now()
@@ -160,6 +160,31 @@ export class TelegramBotRuntime {
       this.options.onError?.(error);
     }
   }
+}
+
+function extractMessageTextWithEntityLinks(message: TelegramMessage): string {
+  const baseText = message.text ?? message.caption ?? "";
+  const entities = message.text ? message.entities : message.caption_entities;
+
+  if (!entities || entities.length === 0) {
+    return baseText;
+  }
+
+  const hiddenUrls: string[] = [];
+  for (const entity of entities) {
+    if (entity.type === "text_link" && entity.url) {
+      const url = entity.url.trim();
+      if (url && !baseText.includes(url) && !hiddenUrls.includes(url)) {
+        hiddenUrls.push(url);
+      }
+    }
+  }
+
+  if (hiddenUrls.length === 0) {
+    return baseText;
+  }
+
+  return baseText ? `${baseText}\n${hiddenUrls.join("\n")}` : hiddenUrls.join("\n");
 }
 
 function containsAdminSecret(text: string): boolean {

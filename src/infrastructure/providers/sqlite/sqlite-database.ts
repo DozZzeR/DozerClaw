@@ -110,6 +110,8 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingShoppingItemDecisionsTable(database);
   ensurePendingDocumentDecisionsTable(database);
   ensurePendingDocumentPlacementDecisionsTable(database);
+  ensurePendingEventScheduleDecisionsTable(database);
+  ensureScheduledDigestRunsTable(database);
   ensureNotificationsTables(database);
   ensureProcessedMessageReceiptsTable(database);
   ensureIndexes(database);
@@ -550,6 +552,33 @@ function ensurePendingDocumentPlacementDecisionsTable(
       target_folder_id text,
       created_at text not null,
       expires_at text not null
+    );
+  `);
+}
+
+function ensurePendingEventScheduleDecisionsTable(
+  database: SqliteDatabase
+): void {
+  database.exec(`
+    create table if not exists pending_event_schedule_decisions (
+      chat_id text primary key,
+      actor_id text not null,
+      payload_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+  `);
+}
+
+function ensureScheduledDigestRunsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists scheduled_digest_runs (
+      digest_key text not null,
+      local_date text not null,
+      status text not null check (status in ('reserved', 'sent')),
+      reserved_at text not null,
+      sent_at text,
+      primary key (digest_key, local_date)
     );
   `);
 }

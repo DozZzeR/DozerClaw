@@ -22,6 +22,9 @@ import { StoreMessageDocumentAttachmentsUseCase } from "../application/use-cases
 import { UploadFileInboxDocumentUseCase } from "../application/use-cases/documents/upload-file-inbox-document.js";
 import { QueryPlanningStateUseCase } from "../application/use-cases/planning/query-planning-state.js";
 import { ManagePlanningTaskUseCase } from "../application/use-cases/planning/manage-planning-task.js";
+import { ScheduleEventUseCase } from "../application/use-cases/calendar/schedule-event.js";
+import { SendMorningDigestUseCase } from "../application/use-cases/calendar/send-morning-digest.js";
+import { MorningDigestScheduler } from "../application/use-cases/calendar/morning-digest-scheduler.js";
 import {
   CreateNotificationUseCase,
   ListUnreadNotificationsUseCase,
@@ -54,8 +57,10 @@ import { CodexCliModelProvider } from "../infrastructure/providers/codex/codex-c
 import { MempalaceMemoryProvider } from "../infrastructure/providers/mempalace/mempalace-memory-provider.js";
 import { JsonDocumentFolderPolicy } from "../infrastructure/providers/document-folder-policy/json-document-folder-policy.js";
 import { GoogleDriveDocumentStorageProvider } from "../infrastructure/providers/google-drive/google-drive-document-storage.js";
+import { GoogleCalendarProvider } from "../infrastructure/providers/google/google-calendar-provider.js";
 import { SingularityPlanningProvider } from "../infrastructure/providers/singularity/singularity-planning-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
+import { SqliteDigestRunRepository } from "../infrastructure/providers/sqlite/sqlite-digest-run-repository.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sqlite-document-repository.js";
 import { SqliteFamilyJournalRepository } from "../infrastructure/providers/sqlite/sqlite-family-journal-repository.js";
@@ -72,6 +77,7 @@ import {
 } from "../infrastructure/providers/sqlite/sqlite-state-repository.js";
 import { SqliteSubjectAliasRepository } from "../infrastructure/providers/sqlite/sqlite-subject-alias-repository.js";
 import type { AttachmentDownloadPort } from "../ports/attachment-download-port.js";
+import type { CalendarPort } from "../ports/calendar-port.js";
 import type { DocumentFolderPolicyPort } from "../ports/document-folder-policy-port.js";
 import type { DocumentStoragePort } from "../ports/document-storage-port.js";
 import type { ModelPort } from "../ports/model-port.js";
@@ -82,6 +88,7 @@ import type { NotificationDeliveryPort } from "../ports/notification-delivery-po
 export interface BuildAppOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly attachmentDownloader?: AttachmentDownloadPort;
+  readonly calendarProvider?: CalendarPort;
   readonly documentStorage?: DocumentStoragePort;
   readonly documentFolderPolicy?: DocumentFolderPolicyPort;
   readonly modelProvider?: ModelPort;
@@ -321,6 +328,45 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     (config.planning?.singularity
       ? new SingularityPlanningProvider(config.planning.singularity)
       : undefined);
+  const calendarProvider =
+    options.calendarProvider ??
+    (config.googleCalendar
+      ? new GoogleCalendarProvider(config.googleCalendar)
+      : undefined);
+  const digestRunRepository = new SqliteDigestRunRepository(database);
+  const resolveOwnerChatId = async (): Promise<string | undefined> => {
+    const row = database
+      .prepare(
+        `
+          select provider_chat_id as providerChatId
+          from messenger_chats
+          where provider = 'telegram' and kind = 'owner_private' and approved = 1
+          order by created_at asc
+          limit 1
+        `
+      )
+      .get() as { readonly providerChatId: string } | undefined;
+
+    return row?.providerChatId ?? config.telegram.ownerUserId;
+  };
+  const eventScheduler =
+    calendarProvider || planningProvider
+      ? new ScheduleEventUseCase({
+          ...(calendarProvider ? { calendar: calendarProvider } : {}),
+          ...(planningProvider ? { planning: planningProvider } : {}),
+          timeZone: config.timeZone
+        })
+      : undefined;
+  const morningDigest = new SendMorningDigestUseCase({
+    ...(calendarProvider ? { calendar: calendarProvider } : {}),
+    ...(planningProvider ? { planning: planningProvider } : {}),
+    digestRuns: digestRunRepository,
+    ...(options.notificationDelivery
+      ? { delivery: options.notificationDelivery }
+      : {}),
+    resolveOwnerChatId,
+    timeZone: config.timeZone
+  });
   const planningQuery = planningProvider
     ? new QueryPlanningStateUseCase({
         planning: planningProvider,
@@ -393,6 +439,18 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     shoppingManager,
     ...(planningQuery ? { planningQuery } : {}),
     ...(planningTaskManager ? { planningTaskManager } : {}),
+    ...(eventScheduler ? { eventScheduler } : {}),
+    morningDigest,
+    pendingEventScheduleDecisions: {
+      findActiveByChatId: (chatId, now) =>
+        stateRepository.findActivePendingEventScheduleDecisionByChatId(
+          chatId,
+          now
+        ),
+      save: (input) => stateRepository.savePendingEventScheduleDecision(input),
+      clearByChatId: (chatId) =>
+        stateRepository.clearPendingEventScheduleDecisionByChatId(chatId)
+    },
     notifications: {
       listUnread: (input) => notificationLister.execute(input),
       markRead: (input) => notificationReader.execute(input)
@@ -490,6 +548,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     }
   );
 
+  let activeMorningDigestScheduler: MorningDigestScheduler | undefined;
+
   return {
     async getStartupDiagnostics() {
       const stateRepositoryHealth = await stateRepository.healthCheck();
@@ -520,7 +580,41 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     handleNormalizedInboundMessage(input) {
       return handleNormalizedInboundMessage.execute(input);
     },
+    runMorningDigestTick(now) {
+      const scheduler = new MorningDigestScheduler({
+        runner: morningDigest,
+        timeZone: config.timeZone,
+        digestTime: config.morningDigest.digestTime,
+        catchUpUntil: config.morningDigest.catchUpUntil,
+        ...(now ? { now: () => now } : {})
+      });
+
+      return scheduler.tick();
+    },
+    startBackgroundSchedulers(schedulerOptions) {
+      if (!config.morningDigest.enabled || activeMorningDigestScheduler) {
+        return;
+      }
+
+      activeMorningDigestScheduler = new MorningDigestScheduler({
+        runner: morningDigest,
+        timeZone: config.timeZone,
+        digestTime: config.morningDigest.digestTime,
+        catchUpUntil: config.morningDigest.catchUpUntil,
+        pollIntervalMs: config.morningDigest.pollIntervalMs,
+        ...(schedulerOptions?.onError
+          ? { onError: schedulerOptions.onError }
+          : {})
+      });
+      activeMorningDigestScheduler.start();
+    },
+    stopBackgroundSchedulers() {
+      activeMorningDigestScheduler?.stop();
+      activeMorningDigestScheduler = undefined;
+    },
     close() {
+      activeMorningDigestScheduler?.stop();
+      activeMorningDigestScheduler = undefined;
       database.close();
     }
   };

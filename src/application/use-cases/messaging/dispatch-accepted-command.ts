@@ -1,3 +1,7 @@
+import {
+  formatLocalDateTimeParts,
+  isBareGoogleMeetMessage
+} from "../../../core/domain/calendar/calendar-event.js";
 import type { MessageAttachment } from "../../../core/domain/messaging/message.js";
 export type { DuplicateDecision } from "./dispatch-command-helpers.js";
 import type { AccessAction } from "../../../core/domain/identity/access-policy.js";
@@ -177,6 +181,14 @@ import {
   handleListUnreadNotifications,
   handleMarkNotificationRead
 } from "./command-handlers/notification-command-handlers.js";
+import type { ScheduleEventUseCase } from "../calendar/schedule-event.js";
+import type { SendMorningDigestUseCase } from "../calendar/send-morning-digest.js";
+import {
+  handleMorningDigestCommand,
+  handleScheduleEvent,
+  type PendingEventScheduleDecisionStore
+} from "./intent-handlers/calendar-intents.js";
+import { handlePendingEventScheduleDecision } from "./pending-handlers/event-schedule-handler.js";
 import type {
   DuplicateDecision,
   FileUploadDestination,
@@ -434,6 +446,9 @@ export interface DispatchAcceptedCommandDependencies {
   readonly shoppingManager?: ShoppingManager;
   readonly planningQuery?: PlanningStateQuery;
   readonly planningTaskManager?: PlanningTaskManager;
+  readonly eventScheduler?: Pick<ScheduleEventUseCase, "execute">;
+  readonly morningDigest?: Pick<SendMorningDigestUseCase, "buildDigest">;
+  readonly pendingEventScheduleDecisions?: PendingEventScheduleDecisionStore;
   readonly familyFactArchiver?: FamilyFactArchiver;
   readonly documentRegistrar?: DocumentRegistrar;
   readonly documentLookup?: DocumentLookup;
@@ -470,6 +485,13 @@ export class DispatchAcceptedCommandUseCase {
     if (input.route.kind === "system_health") {
       return this.dependencies.systemHealthHandler.execute({
         chatId: input.context.chat.id
+      });
+    }
+
+    if (input.route.kind === "morning_digest") {
+      return handleMorningDigestCommand(input.context, {
+        morningDigest: this.dependencies.morningDigest,
+        now: this.dependencies.now ?? (() => new Date())
       });
     }
 
@@ -545,6 +567,11 @@ export class DispatchAcceptedCommandUseCase {
       return commandRailReply;
     }
 
+    const bareMeetReply = await this.dispatchBareMeetShortcut(context);
+    if (bareMeetReply) {
+      return bareMeetReply;
+    }
+
     const pending =
       await this.dependencies.pendingClarifications?.findActiveByChatId(
         context.chat.id,
@@ -576,10 +603,14 @@ export class DispatchAcceptedCommandUseCase {
           now
         );
     let intent: InboundIntent;
+    const timeZone = this.dependencies.timeZone ?? "UTC";
+    const localParts = formatLocalDateTimeParts(now, timeZone);
     try {
       intent = await this.dependencies.intentClassifier!.execute({
         text: classifierInput.text,
         attachments: classifierInput.attachments,
+        currentLocalDateTime: `${localParts.offsetIso} (${localParts.weekday})`,
+        timeZone,
         ...(lastOperation
           ? { lastOperation: toClassifierLastOperation(lastOperation) }
           : {})
@@ -616,6 +647,11 @@ export class DispatchAcceptedCommandUseCase {
       return commandRailReply;
     }
 
+    const bareMeetReply = await this.dispatchBareMeetShortcut(context);
+    if (bareMeetReply) {
+      return bareMeetReply;
+    }
+
     if (
       context.attachments.length > 0 &&
       (this.dependencies.attachmentStore ||
@@ -628,6 +664,39 @@ export class DispatchAcceptedCommandUseCase {
       chatId: context.chat.id,
       text: "Command not implemented yet: family_message."
     });
+  }
+
+  private async dispatchBareMeetShortcut(
+    context: AcceptedMessageContext
+  ): Promise<OutboundReply | undefined> {
+    if (
+      !this.dependencies.eventScheduler ||
+      context.attachments.length > 0 ||
+      context.actor.role !== "owner" ||
+      context.chat.kind !== "owner_private"
+    ) {
+      return undefined;
+    }
+
+    const meetUrl = isBareGoogleMeetMessage(context.text);
+    if (!meetUrl) {
+      return undefined;
+    }
+
+    return handleScheduleEvent(
+      context,
+      {
+        kind: "schedule_event",
+        url: meetUrl,
+        scope: "personal"
+      },
+      {
+        eventScheduler: this.dependencies.eventScheduler,
+        pendingEventScheduleDecisions:
+          this.dependencies.pendingEventScheduleDecisions,
+        now: this.dependencies.now ?? (() => new Date())
+      }
+    );
   }
 
   private async dispatchDeterministicPendingDecision(
@@ -646,6 +715,20 @@ export class DispatchAcceptedCommandUseCase {
     // entry finds its own active pending record and, when present, hands off to
     // the feature handler; the shared loop owns only selection and ordering.
     const handlers: readonly (() => Promise<OutboundReply | undefined>)[] = [
+      async () => {
+        const store = this.dependencies.pendingEventScheduleDecisions;
+        const pending = await store?.findActiveByChatId(chatId, now);
+
+        return pending && store
+          ? handlePendingEventScheduleDecision(context, pending, {
+              eventScheduler: this.dependencies.eventScheduler,
+              intentClassifier: this.dependencies.intentClassifier,
+              store,
+              timeZone: this.dependencies.timeZone ?? "UTC",
+              now: this.dependencies.now ?? (() => new Date())
+            })
+          : undefined;
+      },
       async () => {
         const pending =
           await this.dependencies.pendingFileDestinationDecisions?.findActiveByChatId(
@@ -1220,6 +1303,15 @@ export class DispatchAcceptedCommandUseCase {
 
     if (intent.kind === "create_reminder") {
       return this.managePlanningTask(context, intent);
+    }
+
+    if (intent.kind === "schedule_event") {
+      return handleScheduleEvent(context, intent, {
+        eventScheduler: this.dependencies.eventScheduler,
+        pendingEventScheduleDecisions:
+          this.dependencies.pendingEventScheduleDecisions,
+        now: this.dependencies.now ?? (() => new Date())
+      });
     }
 
     if (intent.kind === "update_last_operation") {

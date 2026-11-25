@@ -7,6 +7,7 @@ import type {
   PendingClarification,
   PendingDocumentDecision,
   PendingDocumentPlacementDecision,
+  PendingEventScheduleDecision,
   PendingFamilyFactArchiveDecision,
   PendingFamilyFactDecision,
   PendingFileDestinationDecision,
@@ -25,7 +26,8 @@ const EXPIRING_STATE_TABLES = [
   "pending_family_fact_archive_decisions",
   "pending_shopping_item_decisions",
   "pending_document_decisions",
-  "pending_document_placement_decisions"
+  "pending_document_placement_decisions",
+  "pending_event_schedule_decisions"
 ] as const;
 
 /**
@@ -855,6 +857,141 @@ export class SqliteStateRepository implements StateRepositoryPort {
       )
       .run(chatId);
   }
+
+  async findActivePendingEventScheduleDecisionByChatId(
+    chatId: string,
+    now: Date
+  ): Promise<PendingEventScheduleDecision | undefined> {
+    const row = this.database
+      .prepare(
+        `
+          select
+            chat_id as chatId,
+            actor_id as actorId,
+            payload_json as payloadJson,
+            created_at as createdAt,
+            expires_at as expiresAt
+          from pending_event_schedule_decisions
+          where chat_id = ? and expires_at > ?
+        `
+      )
+      .get(chatId, now.toISOString()) as
+      | PendingEventScheduleDecisionRow
+      | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = safeJsonParse(
+        row.payloadJson,
+        "pending_event_schedule_decisions.payload_json"
+      );
+    } catch (error) {
+      if (!(error instanceof StateDataError)) {
+        throw error;
+      }
+      await this.clearPendingEventScheduleDecisionByChatId(chatId);
+      return undefined;
+    }
+
+    if (!isRecord(parsed) || typeof parsed.originalText !== "string") {
+      await this.clearPendingEventScheduleDecisionByChatId(chatId);
+      return undefined;
+    }
+
+    const candidateDates = Array.isArray(parsed.candidateDates)
+      ? parsed.candidateDates.filter(
+          (item): item is string => typeof item === "string"
+        )
+      : undefined;
+
+    return {
+      chatId: row.chatId,
+      actorId: row.actorId,
+      originalText: parsed.originalText,
+      ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
+      ...(typeof parsed.date === "string" ? { date: parsed.date } : {}),
+      ...(typeof parsed.startTime === "string"
+        ? { startTime: parsed.startTime }
+        : {}),
+      ...(typeof parsed.durationMinutes === "number"
+        ? { durationMinutes: parsed.durationMinutes }
+        : {}),
+      ...(typeof parsed.url === "string" ? { url: parsed.url } : {}),
+      ...(typeof parsed.notes === "string" ? { notes: parsed.notes } : {}),
+      ...(parsed.scope === "personal" || parsed.scope === "family"
+        ? { scope: parsed.scope }
+        : {}),
+      ...(candidateDates && candidateDates.length > 0 ? { candidateDates } : {}),
+      createdAt: new Date(row.createdAt),
+      expiresAt: new Date(row.expiresAt)
+    };
+  }
+
+  async savePendingEventScheduleDecision(
+    input: PendingEventScheduleDecision
+  ): Promise<void> {
+    this.database
+      .prepare(
+        `
+          insert into pending_event_schedule_decisions (
+            chat_id,
+            actor_id,
+            payload_json,
+            created_at,
+            expires_at
+          )
+          values (?, ?, ?, ?, ?)
+          on conflict(chat_id) do update set
+            actor_id = excluded.actor_id,
+            payload_json = excluded.payload_json,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at
+        `
+      )
+      .run(
+        input.chatId,
+        input.actorId,
+        JSON.stringify({
+          originalText: input.originalText,
+          ...(input.title ? { title: input.title } : {}),
+          ...(input.date ? { date: input.date } : {}),
+          ...(input.startTime ? { startTime: input.startTime } : {}),
+          ...(input.durationMinutes !== undefined
+            ? { durationMinutes: input.durationMinutes }
+            : {}),
+          ...(input.url ? { url: input.url } : {}),
+          ...(input.notes ? { notes: input.notes } : {}),
+          ...(input.scope ? { scope: input.scope } : {}),
+          ...(input.candidateDates && input.candidateDates.length > 0
+            ? { candidateDates: input.candidateDates }
+            : {})
+        }),
+        input.createdAt.toISOString(),
+        input.expiresAt.toISOString()
+      );
+  }
+
+  async clearPendingEventScheduleDecisionByChatId(
+    chatId: string
+  ): Promise<void> {
+    this.database
+      .prepare(
+        "delete from pending_event_schedule_decisions where chat_id = ?"
+      )
+      .run(chatId);
+  }
+}
+
+interface PendingEventScheduleDecisionRow {
+  readonly chatId: string;
+  readonly actorId: string;
+  readonly payloadJson: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
 }
 
 interface PendingClarificationRow {

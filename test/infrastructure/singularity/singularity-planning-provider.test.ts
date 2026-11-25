@@ -41,7 +41,8 @@ describe("SingularityPlanningProvider", () => {
         {
           id: "T-2",
           title: "Book dentist",
-          status: "scheduled"
+          status: "scheduled",
+          start: "2026-07-24"
         }
       ]
     });
@@ -379,6 +380,82 @@ describe("SingularityPlanningProvider", () => {
       provider.queryPlanningState({ text: "tasks", scope: "family" })
     ).rejects.toThrow("Singularity request timed out after 1ms");
     expect(fetcher.requests[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("creates timed tasks with useTime: true and Quill Delta note, and decodes note/start across paginated reads", async () => {
+    const fetcher = new RecordingFetchSequence([
+      task({
+        id: "T-meet",
+        title: "Design review",
+        start: "2026-09-08T15:00:00+02:00",
+        note: JSON.stringify({
+          ops: [{ insert: "https://meet.google.com/abc-defg-hij\n" }]
+        })
+      }),
+      {
+        tasks: [
+          task({
+            id: "T-meet",
+            title: "Design review",
+            start: "2026-09-08T15:00:00+02:00",
+            note: JSON.stringify({
+              ops: [{ insert: "https://meet.google.com/abc-defg-hij\n" }]
+            })
+          })
+        ],
+        nextPageToken: "p-2"
+      },
+      {
+        tasks: [
+          task({
+            id: "T-extra",
+            title: "Second page task",
+            start: "2026-09-08T18:00:00+02:00"
+          })
+        ]
+      }
+    ]);
+    const provider = new SingularityPlanningProvider({
+      token: "singularity-token",
+      apiBaseUrl: "https://api.singularity-app.com",
+      familyProjectId: "P-family",
+      fetch: fetcher.fetch
+    });
+
+    const created = await provider.createPlanningTask({
+      title: "Design review",
+      scope: "personal",
+      startDateTime: "2026-09-08T15:00:00+02:00",
+      note: "https://meet.google.com/abc-defg-hij"
+    });
+
+    expect(created.item).toEqual({
+      id: "T-meet",
+      title: "Design review",
+      status: "scheduled",
+      start: "2026-09-08T15:00:00+02:00",
+      note: "https://meet.google.com/abc-defg-hij"
+    });
+    expect(fetcher.requests[0]?.body).toEqual({
+      title: "Design review",
+      start: "2026-09-08T15:00:00+02:00",
+      useTime: true,
+      note: JSON.stringify({
+        ops: [{ insert: "https://meet.google.com/abc-defg-hij\n" }]
+      })
+    });
+
+    const listed = await provider.queryPlanningState({
+      text: "",
+      scope: "personal",
+      startDateTimeFrom: "2026-09-08T00:00:00+02:00",
+      startDateTimeTo: "2026-09-09T00:00:00+02:00"
+    });
+
+    expect(listed.items).toHaveLength(2);
+    expect(listed.items[0]?.note).toBe("https://meet.google.com/abc-defg-hij");
+    expect(listed.items[1]?.id).toBe("T-extra");
+    expect(fetcher.requests[2]?.url).toContain("pageToken=p-2");
   });
 });
 
