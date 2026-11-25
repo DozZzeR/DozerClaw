@@ -26,8 +26,22 @@ describe("SendMorningDigestUseCase & MorningDigestScheduler", () => {
         throw new Error("unused");
       }
     };
+    const queries: Array<{
+      readonly scope: string;
+      readonly startDateTimeFrom?: string;
+      readonly startDateTimeTo?: string;
+    }> = [];
     const planning: PlanningPort = {
       async queryPlanningState(query) {
+        queries.push({
+          scope: query.scope,
+          ...(query.startDateTimeFrom
+            ? { startDateTimeFrom: query.startDateTimeFrom }
+            : {}),
+          ...(query.startDateTimeTo
+            ? { startDateTimeTo: query.startDateTimeTo }
+            : {})
+        });
         if (query.scope === "personal") {
           return {
             items: [
@@ -36,13 +50,15 @@ describe("SendMorningDigestUseCase & MorningDigestScheduler", () => {
                 title: "Daily sync",
                 status: "scheduled",
                 start: "2026-09-08T10:00:00+02:00",
+                useTime: true,
                 note: "https://meet.google.com/abc-defg-hij"
               },
               {
                 id: "t-1",
                 title: "Call clinic",
                 status: "scheduled",
-                start: "2026-09-08T14:00:00+02:00"
+                start: "2026-09-08T14:00:00+02:00",
+                useTime: true
               }
             ]
           };
@@ -53,7 +69,8 @@ describe("SendMorningDigestUseCase & MorningDigestScheduler", () => {
               id: "t-2",
               title: "Call clinic",
               status: "scheduled",
-              start: "2026-09-08T00:00:00.000Z"
+              start: "2026-09-07T22:00:00.000Z",
+              useTime: false
             }
           ]
         };
@@ -78,7 +95,9 @@ describe("SendMorningDigestUseCase & MorningDigestScheduler", () => {
     expect(digest.text).toContain("https://meet.google.com/abc-defg-hij");
     expect(digest.text).toContain("Задачи Singularity:");
     expect(digest.text).toContain("- 14:00 — Call clinic");
-    expect(digest.text).toContain("- Call clinic");
+    expect(digest.text).toContain("\n- Call clinic");
+    expect(digest.text).not.toContain("00:00 — Call clinic");
+    expect(queries[0]?.startDateTimeTo).toBe("2026-09-08T21:59:59.999Z");
   });
 
   it("delivers once per local date via SQLite reservation and retries after a transient delivery failure", async () => {

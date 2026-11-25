@@ -410,7 +410,8 @@ describe("SingularityPlanningProvider", () => {
           task({
             id: "T-extra",
             title: "Second page task",
-            start: "2026-09-08T18:00:00+02:00"
+            start: "2026-09-07T22:00:00.000Z",
+            useTime: false
           })
         ]
       }
@@ -438,7 +439,7 @@ describe("SingularityPlanningProvider", () => {
     });
     expect(fetcher.requests[0]?.body).toEqual({
       title: "Design review",
-      start: "2026-09-08T15:00:00+02:00",
+      start: "2026-09-08T13:00:00.000Z",
       useTime: true,
       note: JSON.stringify({
         ops: [{ insert: "https://meet.google.com/abc-defg-hij\n" }]
@@ -449,12 +450,19 @@ describe("SingularityPlanningProvider", () => {
       text: "",
       scope: "personal",
       startDateTimeFrom: "2026-09-08T00:00:00+02:00",
-      startDateTimeTo: "2026-09-09T00:00:00+02:00"
+      startDateTimeTo: "2026-09-08T23:59:59.999+02:00"
     });
 
     expect(listed.items).toHaveLength(2);
     expect(listed.items[0]?.note).toBe("https://meet.google.com/abc-defg-hij");
     expect(listed.items[1]?.id).toBe("T-extra");
+    expect(listed.items[1]?.useTime).toBe(false);
+    expect(fetcher.requests[1]?.url).toContain(
+      "startDateFrom=2026-09-07T22%3A00%3A00.000Z"
+    );
+    expect(fetcher.requests[1]?.url).toContain(
+      "startDateTo=2026-09-08T21%3A59%3A59.999Z"
+    );
     expect(fetcher.requests[2]?.url).toContain("pageToken=p-2");
   });
 });

@@ -103,7 +103,7 @@ export class SingularityPlanningProvider implements PlanningPort {
           ? { projectId: this.options.familyProjectId }
           : {}),
         ...(input.startDateTime
-          ? { start: input.startDateTime, useTime: true }
+          ? { start: toSingularityUtcDateTime(input.startDateTime), useTime: true }
           : input.date
             ? { start: toSingularityDateTime(input.date) }
             : {}),
@@ -247,7 +247,10 @@ export class SingularityPlanningProvider implements PlanningPort {
     url.searchParams.set("includeArchived", "false");
     url.searchParams.set("includeAllRecurrenceInstances", "false");
     if (query.startDateTimeFrom) {
-      url.searchParams.set("startDateFrom", query.startDateTimeFrom);
+      url.searchParams.set(
+        "startDateFrom",
+        toSingularityUtcDateTime(query.startDateTimeFrom)
+      );
     } else if (query.startDateFrom) {
       url.searchParams.set(
         "startDateFrom",
@@ -255,7 +258,10 @@ export class SingularityPlanningProvider implements PlanningPort {
       );
     }
     if (query.startDateTimeTo) {
-      url.searchParams.set("startDateTo", query.startDateTimeTo);
+      url.searchParams.set(
+        "startDateTo",
+        toSingularityUtcDateTime(query.startDateTimeTo)
+      );
     } else if (query.startDateTo) {
       url.searchParams.set(
         "startDateTo",
@@ -384,6 +390,8 @@ function toPlanningItem(
   }
 
   const start = stringField(value, "start");
+  const useTime =
+    typeof value.useTime === "boolean" ? value.useTime : undefined;
   const rawNote = stringField(value, "note");
   const note = rawNote ? decodeQuillDeltaNote(rawNote) : undefined;
 
@@ -397,6 +405,7 @@ function toPlanningItem(
         ? "scheduled"
         : "open",
     ...(start ? { start } : {}),
+    ...(useTime !== undefined ? { useTime } : {}),
     ...(note ? { note } : {})
   };
 
@@ -470,6 +479,12 @@ function toSingularityDateTime(date: string): string {
 
 function toSingularityEndOfDay(date: string): string {
   return `${date}T23:59:59.999Z`;
+}
+
+function toSingularityUtcDateTime(value: string): string {
+  const ms = Date.parse(value);
+
+  return Number.isNaN(ms) ? value : new Date(ms).toISOString();
 }
 
 export function encodeQuillDeltaNote(note: string): string {

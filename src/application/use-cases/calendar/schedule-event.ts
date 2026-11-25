@@ -380,7 +380,7 @@ export class ScheduleEventUseCase {
         ...(bounds
           ? {
               startDateTimeFrom: bounds.startIso,
-              startDateTimeTo: bounds.endIso
+              startDateTimeTo: subtractOneMsIso(bounds.endIso)
             }
           : {})
       });
@@ -522,4 +522,10 @@ function formatStatusLabel(status: SyncOutcomeStatus): string {
     case "not_configured":
       return "не подключен";
   }
+}
+
+function subtractOneMsIso(iso: string): string {
+  const ms = Date.parse(iso);
+
+  return Number.isNaN(ms) ? iso : new Date(ms - 1).toISOString();
 }

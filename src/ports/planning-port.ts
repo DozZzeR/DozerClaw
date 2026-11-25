@@ -28,6 +28,7 @@ export interface PlanningItem {
   readonly title: string;
   readonly status: string;
   readonly start?: string;
+  readonly useTime?: boolean;
   readonly note?: string;
 }
 

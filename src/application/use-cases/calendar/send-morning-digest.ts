@@ -65,19 +65,20 @@ export class SendMorningDigestUseCase {
     let planningUnavailable = false;
 
     if (this.dependencies.planning) {
+      const planningEndIso = subtractOneMsIso(bounds.endIso);
       try {
         const [personal, family] = await Promise.all([
           this.dependencies.planning.queryPlanningState({
             text: "",
             scope: "personal",
             startDateTimeFrom: bounds.startIso,
-            startDateTimeTo: bounds.endIso
+            startDateTimeTo: planningEndIso
           }),
           this.dependencies.planning.queryPlanningState({
             text: "",
             scope: "family",
             startDateTimeFrom: bounds.startIso,
-            startDateTimeTo: bounds.endIso
+            startDateTimeTo: planningEndIso
           })
         ]);
         planningTasks = mergePlanningTasksById([
@@ -125,7 +126,7 @@ export class SendMorningDigestUseCase {
     if (distinctPlanningTasks.length > 0) {
       lines.push("", "Задачи Singularity:");
       for (const task of distinctPlanningTasks) {
-        const timePrefix = formatTaskTimePrefix(task.start, timeZone);
+        const timePrefix = formatTaskTimePrefix(task, timeZone);
         lines.push(`- ${timePrefix}${task.title}`);
         const taskUrl = task.note ? pickPrimaryEventUrl(task.note) : undefined;
         if (taskUrl) {
@@ -299,17 +300,28 @@ function taskMirrorsCalendarUrl(
 }
 
 function formatTaskTimePrefix(
-  start: string | undefined,
+  task: PlanningItem,
   timeZone: string
 ): string {
+  if (task.useTime === false) {
+    return "";
+  }
+
+  const start = task.start;
   if (!start || !start.includes("T")) {
     return "";
   }
 
-  // Legacy date-only tasks are stored as T00:00:00.000Z.
-  if (start.endsWith("T00:00:00.000Z")) {
+  // Legacy date-only tasks without explicit useTime are stored as T00:00:00.000Z.
+  if (task.useTime === undefined && start.endsWith("T00:00:00.000Z")) {
     return "";
   }
 
   return `${formatLocalTime(start, timeZone)} — `;
+}
+
+function subtractOneMsIso(iso: string): string {
+  const ms = Date.parse(iso);
+
+  return Number.isNaN(ms) ? iso : new Date(ms - 1).toISOString();
 }
