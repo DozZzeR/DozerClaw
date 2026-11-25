@@ -4,9 +4,25 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { buildApp } from "../../src/composition/build-app.js";
+import { buildApp as buildRawApp } from "../../src/composition/build-app.js";
+
+const openApps: ReturnType<typeof buildRawApp>[] = [];
+
+function buildApp(options?: Parameters<typeof buildRawApp>[0]) {
+  const app = buildRawApp(options);
+  openApps.push(app);
+  return app;
+}
+
+function closeOpenApps(): void {
+  while (openApps.length > 0) {
+    openApps.pop()?.close?.();
+  }
+}
+
+afterEach(closeOpenApps);
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import { SqliteDocumentRepository } from "../../src/infrastructure/providers/sqlite/sqlite-document-repository.js";
 import { SqliteFamilyMemoryRepository } from "../../src/infrastructure/providers/sqlite/sqlite-family-memory-repository.js";
@@ -137,6 +153,7 @@ describe("buildApp", () => {
         "- mempalace: unknown (manual service has no automatic check)"
       );
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -194,6 +211,7 @@ describe("buildApp", () => {
         "- local-service: failed (unsafe local_path path: path is outside allowed roots)"
       );
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -259,6 +277,7 @@ describe("buildApp", () => {
       ]);
       database.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -340,6 +359,7 @@ describe("buildApp", () => {
       ]);
       database.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -432,6 +452,7 @@ describe("buildApp", () => {
       );
       database.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -560,6 +581,7 @@ describe("buildApp", () => {
       expect(recallReply.text).toContain("- шурупы 30 мм");
       expect(recallReply.text).not.toContain("- шурупы 50 мм");
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -656,6 +678,7 @@ describe("buildApp", () => {
         pending_cleared: true
       });
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -725,6 +748,7 @@ describe("buildApp", () => {
 
       expect(reply.text).toBe("Max prefers chamomile tea before sleep.");
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1042,6 +1066,7 @@ describe("buildApp", () => {
 
       expect(recallReply.text).toBe("I do not have any saved family facts yet.");
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1152,6 +1177,7 @@ describe("buildApp", () => {
       ]);
       verifyDatabase.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1225,6 +1251,7 @@ describe("buildApp", () => {
       );
       database.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1282,6 +1309,7 @@ describe("buildApp", () => {
       ]);
     } finally {
       await drive.close();
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1354,6 +1382,7 @@ describe("buildApp", () => {
         ].join("\n")
       );
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1450,6 +1479,7 @@ describe("buildApp", () => {
         ].join("\n")
       );
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1553,6 +1583,7 @@ describe("buildApp", () => {
       ).resolves.toEqual([]);
       verifyDatabase.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1668,6 +1699,7 @@ describe("buildApp", () => {
       ]);
       verifyDatabase.close();
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1773,6 +1805,7 @@ describe("buildApp", () => {
 
       expect(reply.text).toBe("Max prefers chamomile tea before sleep.");
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1883,6 +1916,7 @@ describe("buildApp", () => {
       ]);
     } finally {
       await mempalace.close();
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -1987,6 +2021,7 @@ describe("buildApp", () => {
         "Command not implemented yet: family_message."
       );
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });

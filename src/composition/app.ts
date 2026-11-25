@@ -16,4 +16,5 @@ export interface DozerClawApp {
   handleNormalizedInboundMessage(
     input: HandleNormalizedInboundMessageInput
   ): Promise<OutboundReply>;
+  close?(): void;
 }

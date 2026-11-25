@@ -9,9 +9,12 @@ They run outside the bot process (via cron) so a crashed bot is still detected.
 
 - `healthcheck-liveness.sh` — the pm2 `dozerclaw` process is online, and the
   Telegram bot answers `getMe`. Cheap; run frequently.
-- `healthcheck-model.sh` — the Codex model provider answers a smoke test
-  (expects `DOZERCLAW_CODEX_SMOKE_OK`). Expensive/slow; run infrequently.
+- `healthcheck-model.sh` — runs the prod-safe compiled Codex health check
+  (`dist/entrypoints/cli/codex-healthcheck.js`, expects `DOZERCLAW_CODEX_SMOKE_OK`).
+  Requires `npm run build`. Expensive/slow; run infrequently.
 - `lib.sh` — shared ntfy notify + transition-only alert logic. Sourced by both.
+  Writes state atomically only after `notify` succeeds so transient ntfy errors
+  do not swallow alerts.
 
 State is kept in `state/*.status` (gitignored) so alerts fire only on change.
 Both scripts set `PATH` to the bot's runtime (`~/.local/bin`,
@@ -20,7 +23,11 @@ Both scripts set `PATH` to the bot's runtime (`~/.local/bin`,
 ## Setup on a fresh server
 
 ```bash
-cd ~/DozerClawProject/repo/ops
+cd ~/DozerClawProject/repo
+npm run build
+
+cd ops
+mkdir -p "$PWD/state"
 cp notify.env.example notify.env
 chmod 600 notify.env
 # edit notify.env: set NTFY_URL (and NTFY_TOKEN if the topic is private)

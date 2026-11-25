@@ -7,6 +7,7 @@ import type { AcceptedMessageContext } from "../process-inbound-message.js";
 import type { FileInboxDocumentUploader } from "../dispatch-accepted-command.js";
 import type { FileUploadDestination } from "../dispatch-command-helpers.js";
 import {
+  duplicateDecisionPrompt,
   formatPlacementSuggestionLines,
   formatUploadedDocumentsReply,
   pendingActorDeniedReply
@@ -69,6 +70,13 @@ export async function handlePendingFileDuplicateDestination(
           ? formatPlacementSuggestionLines(upload.document)
           : [])
       ].join("\n")
+    };
+  }
+
+  if (destination === "local_inbox") {
+    return {
+      chatId: context.chat.id,
+      text: duplicateDecisionPrompt(pending.fileName, pending.suggestedCopyName)
     };
   }
 

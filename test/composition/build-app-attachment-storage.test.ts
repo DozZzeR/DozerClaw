@@ -2,9 +2,25 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { buildApp } from "../../src/composition/build-app.js";
+import { buildApp as buildRawApp } from "../../src/composition/build-app.js";
+
+const openApps: ReturnType<typeof buildRawApp>[] = [];
+
+function buildApp(options?: Parameters<typeof buildRawApp>[0]) {
+  const app = buildRawApp(options);
+  openApps.push(app);
+  return app;
+}
+
+function closeOpenApps(): void {
+  while (openApps.length > 0) {
+    openApps.pop()?.close?.();
+  }
+}
+
+afterEach(closeOpenApps);
 import { createSqliteDatabase } from "../../src/infrastructure/providers/sqlite/sqlite-database.js";
 import type { AttachmentDownloadPort } from "../../src/ports/attachment-download-port.js";
 import type {
@@ -98,6 +114,7 @@ describe("buildApp attachment storage", () => {
         })
       );
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -212,6 +229,7 @@ describe("buildApp attachment storage", () => {
         }
       ]);
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -306,6 +324,7 @@ describe("buildApp attachment storage", () => {
       );
       expect(documentStorage.moves).toEqual([]);
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -387,6 +406,7 @@ describe("buildApp attachment storage", () => {
       ]);
       expect(documentStorage.moves).toEqual([]);
     } finally {
+      closeOpenApps();
       rmSync(directory, { recursive: true, force: true });
     }
   });

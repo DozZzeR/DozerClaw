@@ -438,6 +438,39 @@ describe("RecallFamilyFactsUseCase", () => {
       text: "Saved family facts:\n- Max prefers chamomile tea before sleep."
     });
   });
+
+  it("matches hyphenated canonical subject aliases over newer competing facts", async () => {
+    const repository = new StubFamilyMemoryRepository([
+      familyFact({
+        id: "fact-newer-other",
+        category: "preference",
+        subjectId: "john-smith",
+        body: "John likes black coffee in the morning."
+      }),
+      familyFact({
+        id: "fact-target",
+        category: "preference",
+        subjectId: "anna-smith",
+        body: "Prefers green tea with mint."
+      })
+    ]);
+    const useCase = new RecallFamilyFactsUseCase({
+      repository,
+      subjectAliases: new StubSubjectAliasRepository({
+        nana: "anna-smith"
+      }),
+      recentLimit: 10,
+      resultLimit: 1
+    });
+
+    await expect(
+      useCase.execute({
+        query: "what does nana like?"
+      })
+    ).resolves.toEqual({
+      text: "Saved family facts:\n- Prefers green tea with mint."
+    });
+  });
 });
 
 class StubFamilyMemoryRepository implements FamilyMemoryRepositoryPort {

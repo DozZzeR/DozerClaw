@@ -1,8 +1,8 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm } from "node:fs/promises";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { EventEmitter } from "node:events";
 
 import type {
@@ -10,6 +10,9 @@ import type {
   ModelTextRequest,
   ModelTextResponse
 } from "../../../ports/model-port.js";
+
+const DEFAULT_MAX_DIAGNOSTIC_BYTES = 8192;
+const DEFAULT_MAX_STDOUT_LINE_BYTES = 2 * 1024 * 1024;
 
 export interface CodexCliModelProviderOptions {
   readonly model: string;
@@ -95,19 +98,22 @@ export class CodexCliModelProvider implements ModelPort {
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      this.waiters.push(resolve);
+    await new Promise<void>((resolveSlot) => {
+      this.waiters.push(resolveSlot);
     });
-    this.activeRuns += 1;
   }
 
   private releaseSlot(): void {
-    this.activeRuns -= 1;
     const next = this.waiters.shift();
 
     if (next) {
+      // Hand off the occupied slot directly to the queued waiter so a newly
+      // arriving caller cannot over-admit before the waiter's microtask runs.
       next();
+      return;
     }
+
+    this.activeRuns -= 1;
   }
 }
 
@@ -122,6 +128,7 @@ export interface CodexCliRunnerDependencies {
   readonly deleteFile?: (path: string) => Promise<void>;
   readonly outputFileName?: () => string;
   readonly maxDiagnosticBytes?: number;
+  readonly maxStdoutLineBytes?: number;
 }
 
 export type SpawnProcess = (
@@ -133,10 +140,17 @@ export type SpawnProcess = (
 export interface SpawnProcessOptions {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly stdio: ["ignore", "pipe", "pipe"];
+  readonly stdio: ["pipe", "pipe", "pipe"];
+}
+
+export interface ChildProcessStdinLike {
+  write(chunk: string): unknown;
+  end(): unknown;
+  on?(event: string, listener: (...args: unknown[]) => void): unknown;
 }
 
 export interface ChildProcessLike extends EventEmitter {
+  readonly stdin?: ChildProcessStdinLike | null;
   readonly stdout: EventEmitter;
   readonly stderr: EventEmitter;
   kill(signal?: NodeJS.Signals | number): boolean;
@@ -168,6 +182,7 @@ export class CodexCliRunner implements CodexCliRunnerPort {
   private readonly deleteFile: (path: string) => Promise<void>;
   private readonly outputFileName: () => string;
   private readonly maxDiagnosticBytes: number;
+  private readonly maxStdoutLineBytes: number;
 
   constructor(dependencies: CodexCliRunnerDependencies = {}) {
     this.spawnProcess =
@@ -183,16 +198,23 @@ export class CodexCliRunner implements CodexCliRunnerPort {
     this.outputFileName =
       dependencies.outputFileName ??
       (() => `codex-output-${Date.now()}-${randomUUID()}.txt`);
-    this.maxDiagnosticBytes = dependencies.maxDiagnosticBytes ?? 8192;
+    this.maxDiagnosticBytes =
+      dependencies.maxDiagnosticBytes ?? DEFAULT_MAX_DIAGNOSTIC_BYTES;
+    this.maxStdoutLineBytes =
+      dependencies.maxStdoutLineBytes ??
+      Math.max(this.maxDiagnosticBytes, DEFAULT_MAX_STDOUT_LINE_BYTES);
   }
 
   async run(input: CodexCliRunInput): Promise<CodexCliRunResult> {
-    await this.makeDirectory(input.tmpDirectory, { recursive: true });
-    await this.makeDirectory(input.projectRoot, { recursive: true });
+    const projectRoot = resolve(input.projectRoot);
+    const tmpDirectory = resolve(input.tmpDirectory);
 
-    const outputFile = join(input.tmpDirectory, this.outputFileName());
+    await this.makeDirectory(tmpDirectory, { recursive: true });
+    await this.makeDirectory(projectRoot, { recursive: true });
+
+    const outputFile = join(tmpDirectory, this.outputFileName());
     const schemaFile = input.outputSchema
-      ? join(input.tmpDirectory, `${this.outputFileName()}.schema.json`)
+      ? join(tmpDirectory, `${this.outputFileName()}.schema.json`)
       : undefined;
     if (schemaFile && input.outputSchema) {
       await this.writeSchemaFile(schemaFile, JSON.stringify(input.outputSchema));
@@ -207,18 +229,20 @@ export class CodexCliRunner implements CodexCliRunnerPort {
       "--sandbox",
       "read-only",
       "-C",
-      input.projectRoot,
+      projectRoot,
       "-m",
       input.model,
       "-o",
       outputFile,
       ...(schemaFile ? ["--output-schema", schemaFile] : []),
-      input.prompt
+      // Read the prompt from stdin so family data never appears in process argv.
+      "-"
     ];
 
-    return new Promise<CodexCliRunResult>((resolve, reject) => {
+    return new Promise<CodexCliRunResult>((resolveRun, rejectRun) => {
+      const stdoutDecoder = new StringDecoder("utf8");
+      const stderrDecoder = new StringDecoder("utf8");
       let stdoutBuffer = "";
-      let stderrBuffer = "";
       let stderr = "";
       let diagnosticBytes = 0;
       let diagnosticTruncated = false;
@@ -255,13 +279,50 @@ export class CodexCliRunner implements CodexCliRunnerPort {
         diagnosticTruncated = true;
       };
 
+      const processStdoutLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return;
+        }
+
+        try {
+          const event = JSON.parse(trimmed) as JsonEvent;
+          if (event.type === "thread.started" && event.thread_id) {
+            threadId = event.thread_id;
+          }
+          if (
+            event.type === "item.completed" &&
+            event.item?.type === "agent_message" &&
+            event.item.text
+          ) {
+            finalText = event.item.text;
+          }
+          if (event.type === "error") {
+            appendDiagnostic(
+              `\n${event.error?.message ?? "Codex error event"}`
+            );
+          }
+          if (event.type === "turn.failed") {
+            appendDiagnostic("\nCodex turn failed.");
+          }
+        } catch {
+          appendDiagnostic(`\nUnparsed stdout line: ${trimmed}`);
+        }
+      };
+
       const env = codexEnvironment(input.apiKey);
 
       const child = this.spawnProcess("codex", args, {
-        cwd: input.projectRoot,
+        cwd: projectRoot,
         env,
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["pipe", "pipe", "pipe"]
       });
+
+      if (child.stdin) {
+        child.stdin.on?.("error", () => undefined);
+        child.stdin.write(input.prompt);
+        child.stdin.end();
+      }
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -295,7 +356,7 @@ export class CodexCliRunner implements CodexCliRunnerPort {
         await this.deleteTemporaryFiles(outputFile, schemaFile);
 
         if (code !== 0 && !timedOut && !aborted) {
-          reject(
+          rejectRun(
             new Error(
               `codex exited with code ${code}. ${stderr.trim() || "No stderr output."}`
             )
@@ -303,7 +364,7 @@ export class CodexCliRunner implements CodexCliRunnerPort {
           return;
         }
 
-        resolve({
+        resolveRun({
           text: finalText.trim(),
           ...(threadId ? { threadId } : {}),
           outputFile,
@@ -339,68 +400,44 @@ export class CodexCliRunner implements CodexCliRunnerPort {
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.code === "ENOENT") {
           void this.deleteTemporaryFiles(outputFile, schemaFile).finally(() => {
-            reject(new Error("Codex CLI is not installed or not on PATH."));
+            rejectRun(new Error("Codex CLI is not installed or not on PATH."));
           });
           return;
         }
 
         void this.deleteTemporaryFiles(outputFile, schemaFile).finally(() => {
-          reject(error);
+          rejectRun(error);
         });
       });
 
       child.stdout.on("data", (chunk: Buffer) => {
-        stdoutBuffer += chunk.toString("utf8");
-        stdoutBuffer = capPartialBuffer(stdoutBuffer, this.maxDiagnosticBytes);
+        stdoutBuffer += stdoutDecoder.write(chunk);
         const lines = stdoutBuffer.split("\n");
-        stdoutBuffer = lines.pop() ?? "";
+        stdoutBuffer = capPartialBuffer(
+          lines.pop() ?? "",
+          this.maxStdoutLineBytes
+        );
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) {
-            continue;
-          }
-
-          try {
-            const event = JSON.parse(trimmed) as JsonEvent;
-            if (event.type === "thread.started" && event.thread_id) {
-              threadId = event.thread_id;
-            }
-            if (
-              event.type === "item.completed" &&
-              event.item?.type === "agent_message" &&
-              event.item.text
-            ) {
-              finalText = event.item.text;
-            }
-            if (event.type === "error") {
-              appendDiagnostic(
-                `\n${event.error?.message ?? "Codex error event"}`
-              );
-            }
-            if (event.type === "turn.failed") {
-              appendDiagnostic("\nCodex turn failed.");
-            }
-          } catch {
-            appendDiagnostic(`\nUnparsed stdout line: ${trimmed}`);
-          }
+          processStdoutLine(line);
         }
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
-        const text = chunk.toString("utf8");
-        appendDiagnostic(text);
-        stderrBuffer += text;
-        stderrBuffer = capPartialBuffer(stderrBuffer, this.maxDiagnosticBytes);
-        const lines = stderrBuffer.split("\n");
-        stderrBuffer = lines.pop() ?? "";
+        appendDiagnostic(stderrDecoder.write(chunk));
       });
 
       child.on("close", (code: number | null) => {
-        const trailing = stderrBuffer.trim();
-        if (trailing) {
-          appendDiagnostic(trailing);
+        const trailingStdout = stdoutBuffer + stdoutDecoder.end();
+        if (trailingStdout.trim()) {
+          processStdoutLine(trailingStdout);
         }
+
+        const trailingStderr = stderrDecoder.end();
+        if (trailingStderr) {
+          appendDiagnostic(trailingStderr);
+        }
+
         void finish(code);
       });
     });

@@ -519,6 +519,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     },
     handleNormalizedInboundMessage(input) {
       return handleNormalizedInboundMessage.execute(input);
+    },
+    close() {
+      database.close();
     }
   };
 }

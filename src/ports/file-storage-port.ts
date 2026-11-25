@@ -22,6 +22,7 @@ export interface ReadFileInput {
 
 export interface FindFileByNameInput {
   readonly fileName: string;
+  readonly storageId?: string;
 }
 
 export interface StoredFile {

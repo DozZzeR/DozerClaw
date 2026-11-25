@@ -104,7 +104,7 @@ describe("UploadFileInboxDocumentUseCase", () => {
       fileStorage: new MissingFakeFileStorageReader(),
       fileStorageSearch: {
         async findFileByName(input) {
-          expect(input).toEqual({ fileName: "card.pdf" });
+          expect(input).toEqual({ fileName: "card.pdf", storageId: "storage-1" });
 
           return undefined;
         }
@@ -143,7 +143,7 @@ describe("UploadFileInboxDocumentUseCase", () => {
       fileStorage,
       fileStorageSearch: {
         async findFileByName(input) {
-          expect(input).toEqual({ fileName: "card.pdf" });
+          expect(input).toEqual({ fileName: "card.pdf", storageId: "storage-1" });
 
           return { path: "/tmp/new/card.pdf" };
         }

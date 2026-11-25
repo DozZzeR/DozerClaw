@@ -59,88 +59,92 @@ export async function runDevMempalaceSmoke(
     modelProvider
   });
 
-  await app.bootstrapOwnerIdentity({
-    provider,
-    providerUserId,
-    providerChatId,
-    displayName
-  });
-
-  const recordReply = await app.handleNormalizedInboundMessage({
-    messageId: `dev-mempalace-smoke-record-${now.toISOString()}`,
-    provider,
-    providerUserId,
-    providerChatId,
-    chatKind: "owner_private",
-    displayName,
-    text: `remember ${body}`,
-    attachments: [],
-    receivedAt: now,
-    now
-  });
-
-  options.write(`record_reply=${recordReply.text}`);
-
-  const fact = await findSmokeFact(config.sqlite.databasePath, body);
-
-  if (!fact) {
-    options.write("sqlite_fact=missing");
-
-    return 1;
-  }
-
-  options.write(
-    `sqlite_fact=fact:${fact.id} semantic:${fact.semanticMemoryEntryId ?? "missing"}`
-  );
-
-  if (!fact.semanticMemoryEntryId) {
-    return 1;
-  }
-
-  const semanticResults = await semanticMemory.search({
-    text: body,
-    limit: config.memory.mempalace.searchLimit
-  });
-  const mempalaceMatched = semanticResults.some((result) =>
-    result.entry.body.includes(body)
-  );
-
-  options.write(`mempalace_match=${mempalaceMatched}`);
-
-  if (!mempalaceMatched) {
-    return 1;
-  }
-
-  const recallReply = await app.handleNormalizedInboundMessage({
-    messageId: `dev-mempalace-smoke-recall-${now.toISOString()}`,
-    provider,
-    providerUserId,
-    providerChatId,
-    chatKind: "owner_private",
-    displayName,
-    text: query,
-    attachments: [],
-    receivedAt: now,
-    now
-  });
-
-  options.write(`recall_reply=${recallReply.text}`);
-
-  if (options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_TRACE_RECALL === "1") {
-    const recallDiagnostics = await traceRecall({
-      databasePath: config.sqlite.databasePath,
-      semanticMemory,
-      modelProvider,
-      query,
-      semanticLimit: config.memory.mempalace.searchLimit
+  try {
+    await app.bootstrapOwnerIdentity({
+      provider,
+      providerUserId,
+      providerChatId,
+      displayName
     });
 
-    for (const diagnostic of recallDiagnostics) {
-      options.write(`recall_trace=${diagnostic}`);
-    }
-  }
+    const recordReply = await app.handleNormalizedInboundMessage({
+      messageId: `dev-mempalace-smoke-record-${now.toISOString()}`,
+      provider,
+      providerUserId,
+      providerChatId,
+      chatKind: "owner_private",
+      displayName,
+      text: `remember ${body}`,
+      attachments: [],
+      receivedAt: now,
+      now
+    });
 
-  return recallReply.text.includes(body) ? 0 : 1;
+    options.write(`record_reply=${recordReply.text}`);
+
+    const fact = await findSmokeFact(config.sqlite.databasePath, body);
+
+    if (!fact) {
+      options.write("sqlite_fact=missing");
+
+      return 1;
+    }
+
+    options.write(
+      `sqlite_fact=fact:${fact.id} semantic:${fact.semanticMemoryEntryId ?? "missing"}`
+    );
+
+    if (!fact.semanticMemoryEntryId) {
+      return 1;
+    }
+
+    const semanticResults = await semanticMemory.search({
+      text: body,
+      limit: config.memory.mempalace.searchLimit
+    });
+    const mempalaceMatched = semanticResults.some((result) =>
+      result.entry.body.includes(body)
+    );
+
+    options.write(`mempalace_match=${mempalaceMatched}`);
+
+    if (!mempalaceMatched) {
+      return 1;
+    }
+
+    const recallReply = await app.handleNormalizedInboundMessage({
+      messageId: `dev-mempalace-smoke-recall-${now.toISOString()}`,
+      provider,
+      providerUserId,
+      providerChatId,
+      chatKind: "owner_private",
+      displayName,
+      text: query,
+      attachments: [],
+      receivedAt: now,
+      now
+    });
+
+    options.write(`recall_reply=${recallReply.text}`);
+
+    if (options.env.DOZERCLAW_DEV_MEMPALACE_SMOKE_TRACE_RECALL === "1") {
+      const recallDiagnostics = await traceRecall({
+        databasePath: config.sqlite.databasePath,
+        semanticMemory,
+        modelProvider,
+        query,
+        semanticLimit: config.memory.mempalace.searchLimit
+      });
+
+      for (const diagnostic of recallDiagnostics) {
+        options.write(`recall_trace=${diagnostic}`);
+      }
+    }
+
+    return recallReply.text.includes(body) ? 0 : 1;
+  } finally {
+    app.close?.();
+  }
 }
 
 interface TraceRecallInput {

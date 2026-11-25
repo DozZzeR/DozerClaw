@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -40,7 +41,7 @@ describe("CodexCliModelProvider", () => {
     });
   });
 
-  it("bounds concurrent codex model requests", async () => {
+  it("bounds concurrent codex model requests even when a third arrives during hand-off", async () => {
     const runner = new BlockingRunner();
     const provider = new CodexCliModelProvider({
       model: "gpt-test",
@@ -64,22 +65,38 @@ describe("CodexCliModelProvider", () => {
     expect(runner.activeRuns).toBe(1);
     expect(runner.startedPurposes).toEqual(["Purpose: first"]);
 
+    // Resolve first and synchronously enqueue a third call before second resumes.
     runner.resolveNext("first-result");
+    const third = provider.runTextRequest({
+      purpose: "third",
+      input: "three"
+    });
     await expect(first).resolves.toEqual({ text: "first-result" });
     await nextTick();
 
+    expect(runner.maxActiveRuns).toBe(1);
     expect(runner.startedPurposes).toEqual([
       "Purpose: first",
       "Purpose: second"
     ]);
     runner.resolveNext("second-result");
     await expect(second).resolves.toEqual({ text: "second-result" });
+    await nextTick();
+
+    expect(runner.maxActiveRuns).toBe(1);
+    expect(runner.startedPurposes).toEqual([
+      "Purpose: first",
+      "Purpose: second",
+      "Purpose: third"
+    ]);
+    runner.resolveNext("third-result");
+    await expect(third).resolves.toEqual({ text: "third-result" });
     expect(runner.maxActiveRuns).toBe(1);
   });
 });
 
 describe("CodexCliRunner", () => {
-  it("runs codex exec with read-only sandbox and parses final agent message", async () => {
+  it("runs codex exec with read-only sandbox, stdin prompt, and parses final agent message", async () => {
     const child = new FakeChildProcess();
     const spawnCalls: SpawnCall[] = [];
     const runner = new CodexCliRunner({
@@ -93,8 +110,12 @@ describe("CodexCliRunner", () => {
       outputFileName: () => "codex-output.txt"
     });
 
+    const resolvedProjectRoot = resolve("/repo");
+    const resolvedTmpDir = resolve("/tmp/codex");
+    const expectedOutputFile = join(resolvedTmpDir, "codex-output.txt");
+
     const resultPromise = runner.run({
-      prompt: "hello",
+      prompt: "secret family prompt",
       model: "gpt-test",
       timeoutMs: 5000,
       projectRoot: "/repo",
@@ -125,7 +146,7 @@ describe("CodexCliRunner", () => {
     await expect(resultPromise).resolves.toEqual({
       text: "final text",
       threadId: "thread-1",
-      outputFile: "/tmp/codex/codex-output.txt",
+      outputFile: expectedOutputFile,
       stderr: "",
       timedOut: false,
       aborted: false
@@ -140,17 +161,82 @@ describe("CodexCliRunner", () => {
         "--sandbox",
         "read-only",
         "-C",
-        "/repo",
+        resolvedProjectRoot,
         "-m",
         "gpt-test",
         "-o",
-        "/tmp/codex/codex-output.txt",
-        "hello"
+        expectedOutputFile,
+        "-"
       ]
     });
+    expect(spawnCalls[0]?.args).not.toContain("secret family prompt");
+    expect(child.stdin.written).toBe("secret family prompt");
+    expect(child.stdin.ended).toBe(true);
     expect(spawnCalls[0]?.args).not.toContain(
       "--dangerously-bypass-approvals-and-sandbox"
     );
+  });
+
+  it("resolves relative projectRoot and tmpDirectory to absolute paths before spawning", async () => {
+    const child = new FakeChildProcess();
+    const spawnCalls: SpawnCall[] = [];
+    const madeDirectories: string[] = [];
+    const writtenFiles: { path: string; data: string }[] = [];
+    const runner = new CodexCliRunner({
+      spawnProcess(command, args, options) {
+        spawnCalls.push({ command, args, options });
+        return child;
+      },
+      readFile: async () => "",
+      writeFile: async (path, data) => {
+        writtenFiles.push({ path, data });
+      },
+      makeDirectory: async (path) => {
+        madeDirectories.push(path);
+      },
+      outputFileName: (() => {
+        const names = ["codex-output.txt", "intent"];
+        return () => names.shift() ?? "fallback";
+      })()
+    });
+
+    const expectedProjectRoot = resolve("data/tmp/codex/workspace");
+    const expectedTmpDir = resolve("data/tmp/codex");
+    const expectedOutputFile = join(expectedTmpDir, "codex-output.txt");
+    const expectedSchemaFile = join(expectedTmpDir, "intent.schema.json");
+
+    const resultPromise = runner.run({
+      prompt: "hello",
+      model: "gpt-test",
+      timeoutMs: 5000,
+      projectRoot: "data/tmp/codex/workspace",
+      tmpDirectory: "data/tmp/codex",
+      outputSchema: { type: "object" }
+    });
+    await nextTick();
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "{}" }
+        })}\n`
+      )
+    );
+    child.emit("close", 0);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      text: "{}",
+      outputFile: expectedOutputFile
+    });
+    expect(madeDirectories).toEqual([expectedTmpDir, expectedProjectRoot]);
+    expect(writtenFiles[0]?.path).toBe(expectedSchemaFile);
+    expect(spawnCalls[0]?.options).toMatchObject({
+      cwd: expectedProjectRoot
+    });
+    expect(spawnCalls[0]?.args).toContain(expectedProjectRoot);
+    expect(spawnCalls[0]?.args).toContain(expectedOutputFile);
+    expect(spawnCalls[0]?.args).toContain(expectedSchemaFile);
   });
 
   it("runs codex in an isolated cwd with an allowlisted environment", async () => {
@@ -173,6 +259,9 @@ describe("CodexCliRunner", () => {
       },
       outputFileName: () => "codex-output.txt"
     });
+
+    const expectedProjectRoot = resolve("/tmp/dozerclaw-codex-workspace");
+    const expectedTmpDir = resolve("/tmp/codex");
 
     try {
       const resultPromise = runner.run({
@@ -200,12 +289,9 @@ describe("CodexCliRunner", () => {
       }
     }
 
-    expect(madeDirectories).toEqual([
-      "/tmp/codex",
-      "/tmp/dozerclaw-codex-workspace"
-    ]);
+    expect(madeDirectories).toEqual([expectedTmpDir, expectedProjectRoot]);
     expect(spawnCalls[0]?.options).toMatchObject({
-      cwd: "/tmp/dozerclaw-codex-workspace",
+      cwd: expectedProjectRoot,
       env: {
         CODEX_API_KEY: "codex-key",
         PATH: "/usr/bin"
@@ -241,6 +327,10 @@ describe("CodexCliRunner", () => {
       })()
     });
 
+    const expectedTmpDir = resolve("/tmp/codex");
+    const expectedOutputFile = join(expectedTmpDir, "codex-output.txt");
+    const expectedSchemaFile = join(expectedTmpDir, "intent.schema.json");
+
     const resultPromise = runner.run({
       prompt: "hello",
       model: "gpt-test",
@@ -269,16 +359,54 @@ describe("CodexCliRunner", () => {
     await expect(resultPromise).resolves.toMatchObject({ text: "{}" });
     expect(writtenFiles).toEqual([
       {
-        path: "/tmp/codex/intent.schema.json",
+        path: expectedSchemaFile,
         data: JSON.stringify({ type: "object" })
       }
     ]);
     expect(spawnCalls[0]?.args).toContain("--output-schema");
-    expect(spawnCalls[0]?.args).toContain("/tmp/codex/intent.schema.json");
-    expect(deletedFiles).toEqual([
-      "/tmp/codex/codex-output.txt",
-      "/tmp/codex/intent.schema.json"
-    ]);
+    expect(spawnCalls[0]?.args).toContain(expectedSchemaFile);
+    expect(deletedFiles).toEqual([expectedOutputFile, expectedSchemaFile]);
+  });
+
+  it("parses valid JSON stdout events larger than maxDiagnosticBytes without truncating", async () => {
+    const child = new FakeChildProcess();
+    const runner = new CodexCliRunner({
+      spawnProcess: () => child,
+      readFile: async () => "",
+      writeFile: async () => undefined,
+      makeDirectory: async () => undefined,
+      outputFileName: () => "codex-output.txt",
+      maxDiagnosticBytes: 128
+    });
+
+    const largeText = "Привет мир! ".repeat(1000).trim();
+    const payload = Buffer.from(
+      `${JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "agent_message",
+          text: largeText
+        }
+      })}\n`
+    );
+
+    const resultPromise = runner.run({
+      prompt: "hello",
+      model: "gpt-test",
+      timeoutMs: 5000,
+      projectRoot: "/repo",
+      tmpDirectory: "/tmp/codex"
+    });
+    await nextTick();
+    // Split mid-UTF-8 multibyte sequence across two chunks.
+    child.stdout.emit("data", payload.subarray(0, 500));
+    child.stdout.emit("data", payload.subarray(500));
+    child.emit("close", 0);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      text: largeText,
+      stderr: ""
+    });
   });
 
   it("caps diagnostic output from stdout and stderr", async () => {
@@ -306,6 +434,32 @@ describe("CodexCliRunner", () => {
 
     await expect(resultPromise).rejects.toThrow(
       "diagnostic output truncated after 32 bytes"
+    );
+  });
+
+  it("does not duplicate trailing stderr without a newline", async () => {
+    const child = new FakeChildProcess();
+    const runner = new CodexCliRunner({
+      spawnProcess: () => child,
+      readFile: async () => "",
+      writeFile: async () => undefined,
+      makeDirectory: async () => undefined,
+      outputFileName: () => "codex-output.txt"
+    });
+
+    const resultPromise = runner.run({
+      prompt: "hello",
+      model: "gpt-test",
+      timeoutMs: 5000,
+      projectRoot: "/repo",
+      tmpDirectory: "/tmp/codex"
+    });
+    await nextTick();
+    child.stderr.emit("data", Buffer.from("single trailing error"));
+    child.emit("close", 1);
+
+    await expect(resultPromise).rejects.toThrow(
+      /^codex exited with code 1\. single trailing error$/
     );
   });
 
@@ -396,8 +550,8 @@ class BlockingRunner {
     this.maxActiveRuns = Math.max(this.maxActiveRuns, this.activeRuns);
     this.startedPurposes.push(input.prompt.split("\n")[0] ?? "");
 
-    const text = await new Promise<string>((resolve) => {
-      this.pending.push(resolve);
+    const text = await new Promise<string>((resolveRun) => {
+      this.pending.push(resolveRun);
     });
     this.activeRuns -= 1;
 
@@ -411,20 +565,39 @@ class BlockingRunner {
   }
 
   resolveNext(text: string): void {
-    const resolve = this.pending.shift();
-    if (!resolve) {
+    const resolveRun = this.pending.shift();
+    if (!resolveRun) {
       throw new Error("no pending codex run");
     }
 
-    resolve(text);
+    resolveRun(text);
   }
 }
 
 function nextTick(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+  return new Promise((resolveTick) => setImmediate(resolveTick));
+}
+
+class FakeStdin {
+  written = "";
+  ended = false;
+
+  write(chunk: string): boolean {
+    this.written += chunk;
+    return true;
+  }
+
+  end(): void {
+    this.ended = true;
+  }
+
+  on(): this {
+    return this;
+  }
 }
 
 class FakeChildProcess extends EventEmitter {
+  readonly stdin = new FakeStdin();
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
   killedWith: NodeJS.Signals | number | undefined;

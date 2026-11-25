@@ -54,7 +54,11 @@ export async function runTelegramBot(
   process.once("SIGTERM", () => runtime.stop());
 
   stdout.write("DozerClaw Telegram bot polling started.\n");
-  await runtime.start();
+  try {
+    await runtime.start();
+  } finally {
+    app.close?.();
+  }
 }
 
 function formatRuntimeError(error: unknown): string {

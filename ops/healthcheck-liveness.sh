@@ -9,7 +9,7 @@ export PATH="$HOME/.local/bin:$HOME/.local/node-v22.22.2/bin:$PATH"
 OPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 . "$OPS_DIR/lib.sh"
-REPO="$HOME/DozerClawProject/repo"
+REPO="$(cd "$OPS_DIR/.." && pwd)"
 
 # 1) Service running under pm2.
 pid="$(pm2 pid dozerclaw 2>/dev/null | tr -d '[:space:]')"
@@ -22,10 +22,11 @@ else
 fi
 
 # 2) Telegram bot reachable / registered (getMe).
+# Pass URL via curl --config stdin so the bot token never appears in process argv.
 token="$(grep -E '^DOZERCLAW_TELEGRAM_BOT_TOKEN=' "$REPO/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'\''[:space:]')"
 if [ -n "$token" ]; then
-  resp="$(curl -s -m 15 "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)"
-  if printf '%s' "$resp" | grep -q '"ok":true'; then
+  resp="$(printf 'silent\nmax-time = 15\nurl = "https://api.telegram.org/bot%s/getMe"\n' "$(curl_escape "$token")" | curl --config - 2>/dev/null)"
+  if printf '%s' "$resp" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
     report_status "telegram" "ok" "" "" \
       "DozerClaw: Telegram recovered" "getMe returned ok again"
   else

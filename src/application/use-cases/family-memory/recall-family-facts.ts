@@ -204,11 +204,13 @@ export class RecallFamilyFactsUseCase {
     if (!this.dependencies.subjectAliases) {
       return {
         tokens,
+        resolvedSubjectIds: new Set(),
         categoryHints: hintedCategories(tokens)
       };
     }
 
     const expandedTokens = new Set(tokens);
+    const resolvedSubjectIds = new Set<string>();
 
     const aliasCandidates = [...tokens, ...subjectAliasPhraseCandidates(tokens)];
 
@@ -227,13 +229,28 @@ export class RecallFamilyFactsUseCase {
     }
 
     for (const token of aliasCandidates) {
-      expandedTokens.add(aliasMap.get(token) ?? token);
+      const resolved = aliasMap.get(token);
+
+      if (resolved) {
+        const normalizedSubject = normalizeSubjectId(resolved);
+        if (normalizedSubject) {
+          resolvedSubjectIds.add(normalizedSubject);
+        }
+        for (const part of normalizeText(resolved).split(/\s+/)) {
+          if (part) {
+            expandedTokens.add(part);
+          }
+        }
+      } else {
+        expandedTokens.add(token);
+      }
     }
 
     const resolvedTokens = [...expandedTokens].filter(Boolean);
 
     return {
       tokens: resolvedTokens,
+      resolvedSubjectIds,
       categoryHints: hintedCategories(resolvedTokens)
     };
   }
@@ -277,6 +294,7 @@ interface RankedFact {
 
 interface QueryProfile {
   readonly tokens: readonly string[];
+  readonly resolvedSubjectIds: ReadonlySet<string>;
   readonly categoryHints: ReadonlySet<FamilyFact["category"]>;
 }
 
@@ -288,7 +306,12 @@ function rankFacts(
     .map((fact, index) => ({
       fact,
       index,
-      score: scoreFact(fact, queryProfile.tokens, queryProfile.categoryHints)
+      score: scoreFact(
+        fact,
+        queryProfile.tokens,
+        queryProfile.resolvedSubjectIds,
+        queryProfile.categoryHints
+      )
     }))
     .sort((left, right) => right.score - left.score || left.index - right.index);
 }
@@ -310,6 +333,7 @@ function matchingFacts(rankedFacts: readonly RankedFact[]): readonly FamilyFact[
 function scoreFact(
   fact: FamilyFact,
   tokens: readonly string[],
+  resolvedSubjectIds: ReadonlySet<string>,
   categoryHints: ReadonlySet<FamilyFact["category"]>
 ): number {
   const searchableText = normalizeText(
@@ -322,6 +346,13 @@ function scoreFact(
   );
   const searchableTokens = new Set(searchableText.split(/\s+/));
   const subjectText = normalizeText(fact.subjectId ?? "");
+  const normalizedFactSubjectId = fact.subjectId
+    ? normalizeSubjectId(fact.subjectId)
+    : undefined;
+  const directSubjectScore =
+    normalizedFactSubjectId && resolvedSubjectIds.has(normalizedFactSubjectId)
+      ? 4
+      : 0;
   const tokenScore = tokens.reduce((score, token) => {
     if (!searchableTokens.has(token)) {
       return score;
@@ -331,7 +362,7 @@ function scoreFact(
   }, 0);
   const categoryScore = categoryHints.has(fact.category) ? 2 : 0;
 
-  return tokenScore + categoryScore;
+  return directSubjectScore + tokenScore + categoryScore;
 }
 
 function queryTokens(query: string): readonly string[] {

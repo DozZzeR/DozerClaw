@@ -109,7 +109,8 @@ export class UploadFileInboxDocumentUseCase {
     }
 
     const found = await this.dependencies.fileStorageSearch?.findFileByName({
-      fileName: localFile.originalFileName
+      fileName: localFile.originalFileName,
+      storageId: localFile.storageId
     });
 
     if (!found) {

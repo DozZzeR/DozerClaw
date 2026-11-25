@@ -54,12 +54,13 @@ export function purgeExpiredState(database: SqliteDatabase, now: Date): number {
 
 /**
  * Raised when a stored JSON payload cannot be parsed (a corrupt or truncated
- * row). Carries the column context but never the raw payload, which may contain
- * sensitive family data. See DC-LOW-002.
+ * row). Carries the column context but never the raw payload or underlying
+ * SyntaxError cause (which in V8 can include raw JSON snippets containing
+ * sensitive family data). See DC-LOW-002.
  */
 export class StateDataError extends Error {
-  constructor(context: string, cause: unknown) {
-    super(`Corrupt stored JSON for ${context}`, { cause });
+  constructor(context: string) {
+    super(`Corrupt stored JSON for ${context}`);
     this.name = "StateDataError";
   }
 }
@@ -67,8 +68,8 @@ export class StateDataError extends Error {
 export function safeJsonParse(json: string, context: string): unknown {
   try {
     return JSON.parse(json) as unknown;
-  } catch (error) {
-    throw new StateDataError(context, error);
+  } catch {
+    throw new StateDataError(context);
   }
 }
 
@@ -697,14 +698,30 @@ export class SqliteStateRepository implements StateRepositoryPort {
       return undefined;
     }
 
+    let action: PendingDocumentDecision["action"] | undefined;
+    let candidates: readonly DocumentRecord[];
+
+    try {
+      action = parsePendingDocumentAction(row.actionJson);
+      candidates = parseDocumentRecords(row.candidatesJson);
+    } catch (error) {
+      if (!(error instanceof StateDataError)) {
+        throw error;
+      }
+      await this.clearPendingDocumentDecisionByChatId(chatId);
+      return undefined;
+    }
+
+    if (!action) {
+      await this.clearPendingDocumentDecisionByChatId(chatId);
+      return undefined;
+    }
+
     return {
       chatId: row.chatId,
       actorId: row.actorId,
-      action: safeJsonParse(
-        row.actionJson,
-        "pending_document_decisions.action_json"
-      ) as PendingDocumentDecision["action"],
-      candidates: parseDocumentRecords(row.candidatesJson),
+      action,
+      candidates,
       createdAt: new Date(row.createdAt),
       expiresAt: new Date(row.expiresAt)
     };
@@ -1173,4 +1190,38 @@ function parseFamilyFactValue(value: unknown): FamilyFact | undefined {
     createdAt: new Date(value.createdAt),
     updatedAt: new Date(value.updatedAt)
   };
+}
+
+function parsePendingDocumentAction(
+  json: string
+): PendingDocumentDecision["action"] | undefined {
+  const parsed = safeJsonParse(json, "pending_document_decisions.action_json");
+
+  if (!isRecord(parsed) || typeof parsed.kind !== "string") {
+    return undefined;
+  }
+
+  switch (parsed.kind) {
+    case "update_metadata":
+    case "archive":
+    case "describe_for_search":
+      return parsed as PendingDocumentDecision["action"];
+    case "choose_upload_folder":
+      if (
+        typeof parsed.provider !== "string" ||
+        typeof parsed.receivedAt !== "string" ||
+        !isRecord(parsed.attachment) ||
+        typeof parsed.attachment.fileName !== "string" ||
+        typeof parsed.attachment.bytesBase64 !== "string" ||
+        typeof parsed.parentPath !== "string" ||
+        typeof parsed.parentFolderId !== "string" ||
+        !Array.isArray(parsed.options)
+      ) {
+        return undefined;
+      }
+
+      return parsed as PendingDocumentDecision["action"];
+    default:
+      return undefined;
+  }
 }
