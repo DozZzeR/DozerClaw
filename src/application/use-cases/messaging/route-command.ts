@@ -3,6 +3,7 @@ import type { AccessAction } from "../../../core/domain/identity/access-policy.j
 export type CommandKind =
   | "system_health"
   | "morning_digest"
+  | "clear_context"
   | "admin_mode_activate"
   | "admin_write"
   | "start"
@@ -36,6 +37,14 @@ export function routeCommand(text: string): CommandRoute {
     return {
       kind: "morning_digest",
       action: "owner_read",
+      normalizedText
+    };
+  }
+
+  if (comparable === "/clear" || comparable === "/reset") {
+    return {
+      kind: "clear_context",
+      action: "family_read",
       normalizedText
     };
   }

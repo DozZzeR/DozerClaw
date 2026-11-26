@@ -3,7 +3,10 @@ import type { OutboundReply } from "../../../../core/domain/messaging/reply.js";
 import type { PendingEventScheduleDecision } from "../../../../ports/state-repository-port.js";
 import type { ScheduleEventUseCase } from "../../calendar/schedule-event.js";
 import { nextPlanningCalendarDate } from "../../planning/planning-calendar-date.js";
-import type { InboundIntentClassifier } from "../classify-inbound-intent.js";
+import type {
+  ConversationTurnPromptItem,
+  InboundIntentClassifier
+} from "../classify-inbound-intent.js";
 import { pendingActorDeniedReply } from "../dispatch-command-helpers.js";
 import type { PendingEventScheduleDecisionStore } from "../intent-handlers/calendar-intents.js";
 import type { AcceptedMessageContext } from "../process-inbound-message.js";
@@ -13,6 +16,7 @@ const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 export interface PendingEventScheduleDependencies {
   readonly eventScheduler?: Pick<ScheduleEventUseCase, "execute"> | undefined;
   readonly intentClassifier?: InboundIntentClassifier | undefined;
+  readonly recentTurns?: readonly ConversationTurnPromptItem[] | undefined;
   readonly store: PendingEventScheduleDecisionStore;
   readonly timeZone: string;
   readonly now: () => Date;
@@ -72,6 +76,9 @@ export async function handlePendingEventScheduleDecision(
       const intent = await dependencies.intentClassifier.execute({
         text: buildFollowupClassifierText(pending, context.text),
         attachments: [],
+        ...(dependencies.recentTurns && dependencies.recentTurns.length > 0
+          ? { recentTurns: dependencies.recentTurns }
+          : {}),
         currentLocalDateTime: `${localParts.offsetIso} (${localParts.weekday})`,
         timeZone: dependencies.timeZone
       });

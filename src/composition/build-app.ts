@@ -48,7 +48,10 @@ import { GetServiceHealthUseCase } from "../application/use-cases/health/get-ser
 import { HandleSystemHealthCommandUseCase } from "../application/use-cases/health/handle-system-health-command.js";
 import { DispatchAcceptedCommandUseCase } from "../application/use-cases/messaging/dispatch-accepted-command.js";
 import type { DuplicateDecision } from "../application/use-cases/messaging/dispatch-accepted-command.js";
-import { HandleNormalizedInboundMessageUseCase } from "../application/use-cases/messaging/handle-normalized-inbound-message.js";
+import {
+  HandleNormalizedInboundMessageUseCase,
+  sanitizeConversationTurnText
+} from "../application/use-cases/messaging/handle-normalized-inbound-message.js";
 import { ProcessInboundMessageUseCase } from "../application/use-cases/messaging/process-inbound-message.js";
 import { LocalFileStorage } from "../infrastructure/providers/local-file-storage/local-file-storage.js";
 import { LocalServerMonitor } from "../infrastructure/providers/local-monitor/local-server-monitor.js";
@@ -60,6 +63,7 @@ import { GoogleDriveDocumentStorageProvider } from "../infrastructure/providers/
 import { GoogleCalendarProvider } from "../infrastructure/providers/google/google-calendar-provider.js";
 import { SingularityPlanningProvider } from "../infrastructure/providers/singularity/singularity-planning-provider.js";
 import { createSqliteDatabase } from "../infrastructure/providers/sqlite/sqlite-database.js";
+import { SqliteConversationTurnRepository } from "../infrastructure/providers/sqlite/sqlite-conversation-turn-repository.js";
 import { SqliteDigestRunRepository } from "../infrastructure/providers/sqlite/sqlite-digest-run-repository.js";
 import { SqliteEventLog } from "../infrastructure/providers/sqlite/sqlite-event-log.js";
 import { SqliteDocumentRepository } from "../infrastructure/providers/sqlite/sqlite-document-repository.js";
@@ -112,6 +116,9 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
   const subjectAliasRepository = new SqliteSubjectAliasRepository(database);
   const notificationRepository = new SqliteNotificationRepository(database);
   const messageReceiptRepository = new SqliteMessageReceiptRepository(database);
+  const conversationTurnRepository = new SqliteConversationTurnRepository(
+    database
+  );
   const generateId = () => randomUUID();
   const bootstrapOwnerIdentity = new BootstrapOwnerIdentityUseCase({
     repository: identityAccessRepository,
@@ -365,6 +372,38 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       ? { delivery: options.notificationDelivery }
       : {}),
     resolveOwnerChatId,
+    onDigestSent: async ({ ownerChatId, localDate, text, now }) => {
+      const chatRow = database
+        .prepare(
+          `
+            select id
+            from messenger_chats
+            where provider = 'telegram'
+              and provider_chat_id = ?
+              and kind = 'owner_private'
+              and approved = 1
+            limit 1
+          `
+        )
+        .get(ownerChatId) as { readonly id: string } | undefined;
+
+      if (!chatRow) {
+        return;
+      }
+
+      await conversationTurnRepository.appendTurns({
+        chatId: chatRow.id,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 12 * 60 * 60 * 1000),
+        turns: [
+          {
+            role: "assistant",
+            text: sanitizeConversationTurnText(text),
+            sourceMessageKey: `morning_digest:${localDate}`
+          }
+        ]
+      });
+    },
     timeZone: config.timeZone
   });
   const planningQuery = planningProvider
@@ -537,6 +576,7 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
       clearByChatId: (chatId) =>
         stateRepository.clearPendingDocumentDecisionByChatId(chatId)
     },
+    conversationTurns: conversationTurnRepository,
     ...(intentClassifier ? { intentClassifier } : {}),
     ...(pendingChoiceClassifier ? { pendingChoiceClassifier } : {})
   });
@@ -544,7 +584,8 @@ export function buildApp(options: BuildAppOptions = {}): DozerClawApp {
     {
       pipeline: processInboundMessage,
       dispatcher: dispatchAcceptedCommand,
-      receipts: messageReceiptRepository
+      receipts: messageReceiptRepository,
+      conversationTurns: conversationTurnRepository
     }
   );
 

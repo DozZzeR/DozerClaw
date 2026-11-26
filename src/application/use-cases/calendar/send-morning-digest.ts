@@ -21,6 +21,12 @@ export interface SendMorningDigestDependencies {
   readonly digestRuns?: DigestRunRepositoryPort | undefined;
   readonly delivery?: NotificationDeliveryPort | undefined;
   readonly resolveOwnerChatId?: () => Promise<string | undefined>;
+  readonly onDigestSent?: (input: {
+    readonly ownerChatId: string;
+    readonly localDate: string;
+    readonly text: string;
+    readonly now: Date;
+  }) => Promise<void>;
   readonly timeZone: string;
 }
 
@@ -240,6 +246,20 @@ export class SendMorningDigestUseCase {
       } catch {
         // Delivery already succeeded; keep the reservation row so the next tick
         // will not double-send the digest.
+      }
+
+      if (this.dependencies.onDigestSent) {
+        try {
+          await this.dependencies.onDigestSent({
+            ownerChatId,
+            localDate,
+            text: digest.text,
+            now
+          });
+        } catch {
+          // Recording digest into short-term conversation context is best-effort
+          // and must never roll back a delivered digest.
+        }
       }
 
       return {

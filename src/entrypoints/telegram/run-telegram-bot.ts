@@ -1,5 +1,6 @@
 import { buildApp } from "../../composition/build-app.js";
 import { loadConfig } from "../../composition/config.js";
+import { redactSensitive } from "../../core/domain/security/redact-sensitive.js";
 import { TelegramAttachmentDownloader } from "../../infrastructure/providers/telegram/telegram-attachment-downloader.js";
 import { TelegramApiError } from "../../infrastructure/providers/telegram/telegram-api.js";
 import { TelegramBotApiClient } from "../../infrastructure/providers/telegram/telegram-api.js";
@@ -91,16 +92,4 @@ function formatRuntimeError(error: unknown): string {
   return `${redactSensitive(detail ?? "")}\n`;
 }
 
-/**
- * Mask secret-like substrings before writing errors to logs: Telegram bot
- * tokens, bearer tokens, and token/key query parameters. Addresses DC-LOW-004.
- */
-export function redactSensitive(text: string): string {
-  return text
-    .replace(/\d{6,12}:[A-Za-z0-9_-]{30,}/g, "[redacted-telegram-token]")
-    .replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
-    .replace(
-      /([?&](?:access_token|refresh_token|token|api_key|apikey|key|secret)=)[^&\s]+/gi,
-      "$1[redacted]"
-    );
-}
+export { redactSensitive };

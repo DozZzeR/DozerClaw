@@ -27,7 +27,8 @@ const EXPIRING_STATE_TABLES = [
   "pending_shopping_item_decisions",
   "pending_document_decisions",
   "pending_document_placement_decisions",
-  "pending_event_schedule_decisions"
+  "pending_event_schedule_decisions",
+  "chat_conversation_turns"
 ] as const;
 
 /**

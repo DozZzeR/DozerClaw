@@ -112,6 +112,7 @@ function bootstrapSqliteDatabase(database: SqliteDatabase): void {
   ensurePendingDocumentPlacementDecisionsTable(database);
   ensurePendingEventScheduleDecisionsTable(database);
   ensureScheduledDigestRunsTable(database);
+  ensureChatConversationTurnsTable(database);
   ensureNotificationsTables(database);
   ensureProcessedMessageReceiptsTable(database);
   ensureIndexes(database);
@@ -580,6 +581,28 @@ function ensureScheduledDigestRunsTable(database: SqliteDatabase): void {
       sent_at text,
       primary key (digest_key, local_date)
     );
+  `);
+}
+
+function ensureChatConversationTurnsTable(database: SqliteDatabase): void {
+  database.exec(`
+    create table if not exists chat_conversation_turns (
+      id integer primary key autoincrement,
+      chat_id text not null,
+      actor_id text,
+      role text not null check (role in ('user', 'assistant')),
+      text text not null,
+      source_message_key text,
+      created_at text not null,
+      expires_at text not null
+    );
+
+    create index if not exists idx_chat_conversation_turns_chat_id_id
+      on chat_conversation_turns (chat_id, id desc);
+
+    create unique index if not exists idx_chat_conversation_turns_source_key
+      on chat_conversation_turns (chat_id, source_message_key, role)
+      where source_message_key is not null;
   `);
 }
 

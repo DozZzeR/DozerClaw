@@ -98,9 +98,11 @@ import type {
   ResolveFileDuplicateDecisionResult
 } from "../file-inbox/resolve-file-duplicate-decision.js";
 import type {
+  ConversationTurnPromptItem,
   InboundIntent,
   InboundIntentClassifier
 } from "./classify-inbound-intent.js";
+import type { ConversationTurnRepositoryPort } from "../../../ports/conversation-turn-repository-port.js";
 import type {
   PendingChoiceClassifier
 } from "./classify-pending-choice.js";
@@ -472,6 +474,7 @@ export interface DispatchAcceptedCommandDependencies {
   readonly pendingShoppingItemDecisions?: PendingShoppingItemDecisionStore;
   readonly pendingDocumentDecisions?: PendingDocumentDecisionStore;
   readonly pendingDocumentPlacementDecisions?: PendingDocumentPlacementDecisionStore;
+  readonly conversationTurns?: ConversationTurnRepositoryPort;
   readonly now?: () => Date;
   readonly timeZone?: string;
 }
@@ -493,6 +496,13 @@ export class DispatchAcceptedCommandUseCase {
         morningDigest: this.dependencies.morningDigest,
         now: this.dependencies.now ?? (() => new Date())
       });
+    }
+
+    if (input.route.kind === "clear_context") {
+      return this.clearConversationContext(
+        input.context.chat.id,
+        input.context.actor.id
+      );
     }
 
     if (input.route.kind === "start") {
@@ -605,12 +615,18 @@ export class DispatchAcceptedCommandUseCase {
     let intent: InboundIntent;
     const timeZone = this.dependencies.timeZone ?? "UTC";
     const localParts = formatLocalDateTimeParts(now, timeZone);
+    const recentTurns = await this.loadRecentConversationTurns(
+      context.chat.id,
+      now,
+      timeZone
+    );
     try {
       intent = await this.dependencies.intentClassifier!.execute({
         text: classifierInput.text,
         attachments: classifierInput.attachments,
         currentLocalDateTime: `${localParts.offsetIso} (${localParts.weekday})`,
         timeZone,
+        ...(recentTurns.length > 0 ? { recentTurns } : {}),
         ...(lastOperation
           ? { lastOperation: toClassifierLastOperation(lastOperation) }
           : {})
@@ -719,15 +735,25 @@ export class DispatchAcceptedCommandUseCase {
         const store = this.dependencies.pendingEventScheduleDecisions;
         const pending = await store?.findActiveByChatId(chatId, now);
 
-        return pending && store
-          ? handlePendingEventScheduleDecision(context, pending, {
-              eventScheduler: this.dependencies.eventScheduler,
-              intentClassifier: this.dependencies.intentClassifier,
-              store,
-              timeZone: this.dependencies.timeZone ?? "UTC",
-              now: this.dependencies.now ?? (() => new Date())
-            })
-          : undefined;
+        if (!pending || !store) {
+          return undefined;
+        }
+
+        const timeZone = this.dependencies.timeZone ?? "UTC";
+        const recentTurns = await this.loadRecentConversationTurns(
+          chatId,
+          now,
+          timeZone
+        );
+
+        return handlePendingEventScheduleDecision(context, pending, {
+          eventScheduler: this.dependencies.eventScheduler,
+          intentClassifier: this.dependencies.intentClassifier,
+          ...(recentTurns.length > 0 ? { recentTurns } : {}),
+          store,
+          timeZone,
+          now: this.dependencies.now ?? (() => new Date())
+        });
       },
       async () => {
         const pending =
@@ -1435,10 +1461,28 @@ export class DispatchAcceptedCommandUseCase {
     }
 
     let intent: InboundIntent;
+    const now = this.dependencies.now?.() ?? new Date();
+    const configuredTimeZone = this.dependencies.timeZone;
+    const timeZone = configuredTimeZone ?? "UTC";
+    const recentTurns = await this.loadRecentConversationTurns(
+      input.context.chat.id,
+      now,
+      timeZone
+    );
     try {
+      const localParts = configuredTimeZone
+        ? formatLocalDateTimeParts(now, configuredTimeZone)
+        : undefined;
       intent = await this.dependencies.intentClassifier.execute({
         text: input.classifierText,
-        attachments: []
+        attachments: [],
+        ...(localParts && configuredTimeZone
+          ? {
+              currentLocalDateTime: `${localParts.offsetIso} (${localParts.weekday})`,
+              timeZone: configuredTimeZone
+            }
+          : {}),
+        ...(recentTurns.length > 0 ? { recentTurns } : {})
       });
     } catch {
       await this.recordPendingRoutingEvent({
@@ -1638,6 +1682,65 @@ export class DispatchAcceptedCommandUseCase {
       await this.dependencies.eventLog.record(event);
     } catch {
       // Pending routing observability must not change user-visible behavior.
+    }
+  }
+
+  private async clearConversationContext(
+    chatId: string,
+    actorId: string
+  ): Promise<OutboundReply> {
+    try {
+      await this.dependencies.conversationTurns?.clearByChatId(chatId);
+    } catch {
+      return {
+        chatId,
+        text: "Не удалось очистить историю диалога. Попробуй ещё раз чуть позже."
+      };
+    }
+
+    await Promise.allSettled([
+      this.dependencies.lastOperations?.clear(chatId, actorId),
+      this.dependencies.pendingClarifications?.clearByChatId(chatId),
+      this.dependencies.pendingEventScheduleDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingFileDuplicateDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingFileDestinationDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingFamilyFactDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingFamilyFactArchiveDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingShoppingItemDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingDocumentDecisions?.clearByChatId(chatId),
+      this.dependencies.pendingDocumentPlacementDecisions?.clearByChatId(chatId)
+    ]);
+
+    return {
+      chatId,
+      text: "Контекст текущего диалога очищен."
+    };
+  }
+
+  private async loadRecentConversationTurns(
+    chatId: string,
+    now: Date,
+    timeZone: string
+  ): Promise<readonly ConversationTurnPromptItem[]> {
+    if (!this.dependencies.conversationTurns) {
+      return [];
+    }
+
+    try {
+      const turns =
+        await this.dependencies.conversationTurns.listRecentActiveByChatId(
+          chatId,
+          now,
+          8
+        );
+
+      return turns.map((turn) => ({
+        role: turn.role,
+        text: turn.text,
+        at: formatLocalDateTimeParts(turn.createdAt, timeZone).offsetIso
+      }));
+    } catch {
+      return [];
     }
   }
 
